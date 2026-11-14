@@ -3,6 +3,14 @@ import { AppError } from '../shared/errors/app-error.js';
 import { ApiResponse } from '../shared/response/api-response.js';
 import { logger } from '../shared/logger/index.js';
 export function errorHandler(err, req, res, _next) {
+    if (res.headersSent) {
+        return _next(err);
+    }
+    // 0. Body-parser JSON parse error
+    if (err instanceof SyntaxError && 'status' in err && err.status === 400) {
+        logger.warn({ reqId: req.id, url: req.originalUrl, message: err.message }, 'Malformed JSON in request body');
+        return ApiResponse.error(res, 'BAD_REQUEST', 'Malformed JSON in request body', 400);
+    }
     // 1. Zod Validation Errors
     if (err instanceof ZodError || err?.name === 'ZodError') {
         const issues = err.issues || [];

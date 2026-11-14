@@ -7,7 +7,7 @@ import {
   SyncJournalEvent,
   RevocationTombstone,
 } from '../types';
-import { CREATE_TABLES_SQL, DATABASE_NAME } from './schema';
+import { CREATE_TABLES_SQL, DATABASE_NAME, DATABASE_VERSION, MIGRATION_V1_TO_V2_SQL } from './schema';
 
 export interface ICollectionDatabase {
   saveCustomer(customer: CachedCustomer): Promise<void>;
@@ -255,6 +255,18 @@ export class ExpoSqliteCollectionDatabase implements ICollectionDatabase {
             await this.db.execAsync('PRAGMA journal_mode = WAL;');
             await this.db.execAsync('PRAGMA foreign_keys = ON;');
             await this.db.execAsync(CREATE_TABLES_SQL);
+            try {
+              const versionRow: any = await this.db.getFirstAsync('PRAGMA user_version;');
+              const curVer = versionRow ? Number(versionRow['user_version'] || 0) : 0;
+              if (curVer < DATABASE_VERSION) {
+                try {
+                  await this.db.execAsync(MIGRATION_V1_TO_V2_SQL);
+                } catch (_migrationErr) {
+                  // Ignore if columns already added
+                }
+                await this.db.execAsync(`PRAGMA user_version = ${DATABASE_VERSION};`);
+              }
+            } catch (_vErr) {}
           } else {
             this.useFallback = true;
           }
@@ -685,3 +697,5 @@ export class ExpoSqliteCollectionDatabase implements ICollectionDatabase {
     };
   }
 }
+
+export const collectionDb: ICollectionDatabase = new ExpoSqliteCollectionDatabase();

@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+const Icon = Ionicons as unknown as React.ComponentType<any>;
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../theme/colors';
@@ -57,7 +58,7 @@ export const MainScreen: React.FC = () => {
         {/* Card for RFID Card Management */}
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
-            <Ionicons name="card" size={20} color={colors.primary} />
+            <Icon name="card" size={20} color={colors.primary} />
             <Text style={[styles.cardTitle, { marginLeft: 8 }]}>
               RFID Card Assignment & Replacement
             </Text>

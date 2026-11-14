@@ -36,14 +36,42 @@ export class ApiClient {
   private getDefaultBaseUrl(): string {
     const envUrl = process.env['EXPO_PUBLIC_API_URL'];
     if (envUrl) {
-      return envUrl.endsWith('/') ? envUrl : `${envUrl}/`;
+      const clean = envUrl.replace(/\/api\/v1\/?$/, '');
+      return clean.endsWith('/') ? clean : `${clean}/`;
     }
 
-    const platformOS =
-      (globalThis as any).Platform?.OS ||
-      (typeof process !== 'undefined' ? process.env['EXPO_OS'] : 'default');
+    // Dynamic host resolution for Expo running on physical devices or emulator via Metro
+    let hostFromExpo: string | null = null;
+    try {
+      const Constants = require('expo-constants').default || require('expo-constants');
+      const hostUri =
+        Constants?.expoConfig?.hostUri ||
+        Constants?.manifest?.debuggerHost ||
+        Constants?.manifest2?.extra?.expoGo?.debuggerHost;
+      if (hostUri) {
+        const ip = hostUri.split(':')[0];
+        if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+          hostFromExpo = ip;
+        }
+      }
+    } catch {}
 
-    if (platformOS === 'android') {
+    if (hostFromExpo) {
+      return `http://${hostFromExpo}:4000/`;
+    }
+
+    let os: string | undefined;
+    try {
+      os = require('react-native').Platform?.OS;
+    } catch {}
+
+    if (!os) {
+      os =
+        (globalThis as any).Platform?.OS ||
+        (typeof process !== 'undefined' ? process.env['EXPO_OS'] : 'default');
+    }
+
+    if (os === 'android') {
       return 'http://10.0.2.2:4000/';
     }
 
@@ -87,7 +115,13 @@ export class ApiClient {
     const { method = 'GET', body, params, headers = {}, timeoutMs = 15000 } = options;
 
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
-    const url = new URL(cleanEndpoint, this.getBaseUrl());
+    let base = this.getBaseUrl();
+    if (base.endsWith('/api/v1/')) {
+      base = base.replace(/\/api\/v1\/$/, '/');
+    } else if (base.endsWith('/api/v1')) {
+      base = base.replace(/\/api\/v1$/, '/');
+    }
+    const url = new URL(cleanEndpoint, base);
 
     if (params) {
       Object.entries(params).forEach(([key, val]) => {

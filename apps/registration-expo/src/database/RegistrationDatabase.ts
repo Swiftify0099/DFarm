@@ -175,4 +175,5 @@ export class PersistentRegistrationDatabase implements IRegistrationDraftStore {
   }
 }
 
-export const registrationDb = new PersistentRegistrationDatabase();
+export { SQLiteRegistrationDatabase, registrationDb } from './SQLiteRegistrationDatabase';
+

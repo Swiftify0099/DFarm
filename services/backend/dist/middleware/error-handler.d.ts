@@ -7,6 +7,6 @@ interface PostgrestErrorLike {
     details?: string;
     hint?: string;
 }
-export declare function errorHandler(err: Error | AppError | ZodError | PostgrestErrorLike, req: Request, res: Response, _next: NextFunction): Response;
+export declare function errorHandler(err: Error | AppError | ZodError | PostgrestErrorLike, req: Request, res: Response, _next: NextFunction): Response | void;
 export {};
 //# sourceMappingURL=error-handler.d.ts.map

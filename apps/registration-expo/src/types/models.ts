@@ -309,6 +309,10 @@ export interface LocalRegistrationDraft {
   createdAt: number;
   updatedAt: number;
   version: number;
+  centerId?: string | null;
+  category?: string;
+  enrollmentStatus?: string;
+  pendingSync?: boolean;
 }
 
 export interface RegistrationSyncEvent {

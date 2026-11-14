@@ -1,5 +1,5 @@
 export const DATABASE_NAME = 'dfarm_collection.db';
-export const DATABASE_VERSION = 1;
+export const DATABASE_VERSION = 2;
 
 export const CREATE_TABLES_SQL = `
 CREATE TABLE IF NOT EXISTS cached_customers (
@@ -62,15 +62,31 @@ CREATE TABLE IF NOT EXISTS local_milk_collections (
     shift_type TEXT NOT NULL,
     milk_category TEXT NOT NULL,
     net_weight REAL NOT NULL,
+    unit TEXT NOT NULL DEFAULT 'KG',
     fat_percentage REAL NOT NULL,
     snf_percentage REAL NOT NULL,
     applied_rate_per_unit REAL NOT NULL,
+    rate_chart_version_id TEXT,
     total_amount REAL NOT NULL,
+    weight_source TEXT NOT NULL DEFAULT 'MANUAL_ENTRY',
+    quality_source TEXT NOT NULL DEFAULT 'MANUAL_ENTRY',
     idempotency_key TEXT UNIQUE NOT NULL,
     sync_status TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     synced_at INTEGER,
     FOREIGN KEY (session_id) REFERENCES local_collection_sessions (session_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS pending_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    collection_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    customer_id TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    printed_at INTEGER,
+    print_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (collection_id) REFERENCES local_milk_collections (collection_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS sync_journal (
@@ -108,4 +124,26 @@ CREATE TABLE IF NOT EXISTS device_sync_state (
 CREATE INDEX IF NOT EXISTS idx_cached_cust_code ON cached_customers (farmer_code);
 CREATE INDEX IF NOT EXISTS idx_cached_face_cust ON cached_face_templates (customer_id);
 CREATE INDEX IF NOT EXISTS idx_journal_status ON sync_journal (sync_status);
+CREATE INDEX IF NOT EXISTS idx_pending_receipts_col ON pending_receipts (collection_id);
+`;
+
+export const MIGRATION_V1_TO_V2_SQL = `
+ALTER TABLE local_milk_collections ADD COLUMN unit TEXT NOT NULL DEFAULT 'KG';
+ALTER TABLE local_milk_collections ADD COLUMN rate_chart_version_id TEXT;
+ALTER TABLE local_milk_collections ADD COLUMN weight_source TEXT NOT NULL DEFAULT 'MANUAL_ENTRY';
+ALTER TABLE local_milk_collections ADD COLUMN quality_source TEXT NOT NULL DEFAULT 'MANUAL_ENTRY';
+
+CREATE TABLE IF NOT EXISTS pending_receipts (
+    receipt_id TEXT PRIMARY KEY,
+    collection_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    customer_id TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    printed_at INTEGER,
+    print_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (collection_id) REFERENCES local_milk_collections (collection_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_receipts_col ON pending_receipts (collection_id);
 `;

@@ -6,7 +6,7 @@ export function normalizeE164Phone(rawPhone: string, defaultCountryPrefix = '+91
   }
 
   // Strip all whitespace, dashes, dots, and parentheses
-  const cleaned = rawPhone.replace(/[\s\-\(\)\.]/g, '');
+  const cleaned = rawPhone.replace(/[\s\-().]/g, '');
 
   // If already starts with +
   if (cleaned.startsWith('+')) {

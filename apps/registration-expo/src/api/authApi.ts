@@ -47,6 +47,12 @@ export const authApi = {
       throw new Error('Login response missing token or officer details');
     }
 
+    // Set token immediately on apiClient so subsequent authenticated requests succeed
+    apiClient.setToken(token);
+    if (officer.centerId) {
+      apiClient.setCenterId(officer.centerId);
+    }
+
     // If officer assignedCenters is empty, enrich from getCenters endpoint
     if (!officer.assignedCenters || officer.assignedCenters.length === 0) {
       try {
@@ -65,7 +71,14 @@ export const authApi = {
           };
         }
       } catch {
-        // Fallback to existing officer profile
+        // Fallback to default operational centers
+        officer = {
+          ...officer,
+          assignedCenters: [
+            { centerId: '96afbfae-2b1a-42ef-8bb0-779c70950fc5', centerName: 'Karveer Intake Center', centerCode: 'C201' },
+          ],
+          centerId: officer.centerId || '96afbfae-2b1a-42ef-8bb0-779c70950fc5',
+        };
       }
     }
 

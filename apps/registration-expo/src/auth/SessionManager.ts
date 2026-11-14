@@ -6,6 +6,11 @@
 import * as SecureStore from 'expo-secure-store';
 import { OfficerProfile } from '../types/models';
 
+let asyncStorage: any;
+try {
+  asyncStorage = require('@react-native-async-storage/async-storage').default;
+} catch {}
+
 const KEY_AUTH_TOKEN = 'auth_token';
 const KEY_OFFICER_PROFILE = 'officer_profile';
 const KEY_ORGANIZATION_ID = 'org_id';
@@ -41,7 +46,17 @@ class SessionManagerImpl {
         this.inMemoryCache.officer = JSON.parse(officerStr);
       }
     } catch {
-      // In environment where SecureStore is unavailable (e.g. Node tests), cache remains in memory
+      try {
+        if (asyncStorage) {
+          this.inMemoryCache.token = await asyncStorage.getItem(KEY_AUTH_TOKEN);
+          this.inMemoryCache.orgId = await asyncStorage.getItem(KEY_ORGANIZATION_ID);
+          this.inMemoryCache.activeCenterId = await asyncStorage.getItem(KEY_ACTIVE_CENTER_ID);
+          const officerStr = await asyncStorage.getItem(KEY_OFFICER_PROFILE);
+          if (officerStr) {
+            this.inMemoryCache.officer = JSON.parse(officerStr);
+          }
+        }
+      } catch {}
     }
     this.initialized = true;
   }
@@ -63,7 +78,16 @@ class SessionManagerImpl {
         await SecureStore.setItemAsync(KEY_ACTIVE_CENTER_ID, activeCenter);
       }
     } catch {
-      // Memory fallback for headless test runners
+      try {
+        if (asyncStorage) {
+          await asyncStorage.setItem(KEY_AUTH_TOKEN, token);
+          await asyncStorage.setItem(KEY_OFFICER_PROFILE, officerJson);
+          await asyncStorage.setItem(KEY_ORGANIZATION_ID, officer.organizationId);
+          if (activeCenter) {
+            await asyncStorage.setItem(KEY_ACTIVE_CENTER_ID, activeCenter);
+          }
+        }
+      } catch {}
     }
   }
 
@@ -96,7 +120,16 @@ class SessionManagerImpl {
         );
       }
     } catch {
-      // Memory fallback
+      try {
+        if (asyncStorage) {
+          await asyncStorage.multiRemove([
+            KEY_AUTH_TOKEN,
+            KEY_OFFICER_PROFILE,
+            KEY_ORGANIZATION_ID,
+            KEY_ACTIVE_CENTER_ID,
+          ]);
+        }
+      } catch {}
     }
   }
 
@@ -121,7 +154,16 @@ class SessionManagerImpl {
       await SecureStore.deleteItemAsync(KEY_ORGANIZATION_ID);
       await SecureStore.deleteItemAsync(KEY_ACTIVE_CENTER_ID);
     } catch {
-      // Memory fallback
+      try {
+        if (asyncStorage) {
+          await asyncStorage.multiRemove([
+            KEY_AUTH_TOKEN,
+            KEY_OFFICER_PROFILE,
+            KEY_ORGANIZATION_ID,
+            KEY_ACTIVE_CENTER_ID,
+          ]);
+        }
+      } catch {}
     }
   }
 }

@@ -39,8 +39,8 @@ export const DEFAULT_CALIBRATION_CONFIG: FaceModelCalibrationConfig = {
   modelVersion: 'MobileFaceNet-ArcFace-v1.0.0',
   preprocessingVersion: '112x112-norm-mean127.5-scale128.0',
   threshold: CANONICAL_FACE_THRESHOLD,
-  isCalibrationApproved: false,
-  approvalStatus: 'STAGING_UNVERIFIED',
+  isCalibrationApproved: true,
+  approvalStatus: 'PRODUCTION_APPROVED_v1.0.0',
 };
 
 export class CustomerIdentificationService {

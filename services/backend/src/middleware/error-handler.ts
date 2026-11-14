@@ -16,7 +16,17 @@ export function errorHandler(
   req: Request,
   res: Response,
   _next: NextFunction
-): Response {
+): Response | void {
+  if (res.headersSent) {
+    return _next(err);
+  }
+
+  // 0. Body-parser JSON parse error
+  if (err instanceof SyntaxError && 'status' in err && (err as any).status === 400) {
+    logger.warn({ reqId: req.id, url: req.originalUrl, message: err.message }, 'Malformed JSON in request body');
+    return ApiResponse.error(res, 'BAD_REQUEST', 'Malformed JSON in request body', 400);
+  }
+
   // 1. Zod Validation Errors
   if (err instanceof ZodError || (err as any)?.name === 'ZodError') {
     const issues = (err as any).issues || [];

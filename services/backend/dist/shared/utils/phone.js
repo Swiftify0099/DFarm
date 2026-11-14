@@ -4,7 +4,7 @@ export function normalizeE164Phone(rawPhone, defaultCountryPrefix = '+91') {
         throw new ValidationError('Mobile number is required and must be a string');
     }
     // Strip all whitespace, dashes, dots, and parentheses
-    const cleaned = rawPhone.replace(/[\s\-\(\)\.]/g, '');
+    const cleaned = rawPhone.replace(/[\s\-().]/g, '');
     // If already starts with +
     if (cleaned.startsWith('+')) {
         const digitsOnly = cleaned.slice(1);

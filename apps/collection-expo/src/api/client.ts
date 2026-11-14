@@ -1,4 +1,4 @@
-import { ISessionManager } from '../storage/SessionManager';
+import { ISessionManager, SessionManager } from '../storage/SessionManager';
 import {
   ApiResponse,
   CalculateRateRequest,
@@ -97,6 +97,17 @@ export class CollectionApiClient {
     }
 
     return { status: response.status, data: responseData as T };
+  }
+
+  async get<T = any>(endpoint: string): Promise<{ status: number; data: T }> {
+    return this.request<T>(endpoint, { method: 'GET' });
+  }
+
+  async post<T = any>(endpoint: string, body?: any): Promise<{ status: number; data: T }> {
+    return this.request<T>(endpoint, {
+      method: 'POST',
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
   }
 
   async login(email: string, password: string): Promise<LoginResponse> {
@@ -340,3 +351,5 @@ export class CollectionApiClient {
     return res.data;
   }
 }
+
+export const collectionApiClient = new CollectionApiClient(new SessionManager());

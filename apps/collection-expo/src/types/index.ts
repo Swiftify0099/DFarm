@@ -1,3 +1,11 @@
+export interface EncryptedEnvelope {
+  ciphertextBase64: string;
+  ivBase64: string;
+  authTagBase64: string;
+  keyReference: string;
+  algorithm: string;
+}
+
 export type CustomerStatus =
   | 'DRAFT'
   | 'PENDING_FACE_ENROLLMENT'

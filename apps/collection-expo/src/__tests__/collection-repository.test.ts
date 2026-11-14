@@ -60,8 +60,8 @@ test('Collection Repository Online & Offline Lifecycle Test Suite', async (t) =>
     assert.equal(centerName, 'Tasgaon Center');
   });
 
-  await t.test('2. Face recognition fail-safe rejection (STAGING_UNVERIFIED)', () => {
-    const result = repository.identifyByFace();
+  await t.test('2. Face recognition fail-safe rejection (STAGING_UNVERIFIED)', async () => {
+    const result = await repository.identifyByFace();
     assert.equal(result.type, 'FAILURE');
     if (result.type === 'FAILURE') {
       assert.equal(result.errorCode, 'CALIBRATION_NOT_APPROVED');

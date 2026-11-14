@@ -16,6 +16,8 @@ import {
 import { IdentificationResult } from '../identification/CustomerIdentificationService';
 import { ReceiptFormatter } from '../receipt/ReceiptFormatter';
 import { DFarmSyncEngine } from '../sync/DFarmSyncEngine';
+import { BiometricKeystoreEncryptor } from '../../biometric/BiometricKeystoreEncryptor';
+import { MobileFaceNetModel } from '../../biometric/FaceEmbeddingModel';
 
 export interface CompletedCollectionResult {
   sessionId: string;
@@ -81,16 +83,129 @@ export class CollectionRepository {
     }
   }
 
-  identifyByFace(): IdentificationResult {
-    // Enforce strict project fail-safe rule:
-    // Production face recognition model artifact is unverified.
-    // Keep automatic recognition safely disabled and require RFID/Supervisor fallback.
-    return {
-      type: 'FAILURE',
-      reason:
-        'Production face model calibration is unverified (STAGING_UNVERIFIED). Automatic face match is disabled for fail-safety. Please use RFID Card Tap or Supervisor Manual verification.',
-      errorCode: 'CALIBRATION_NOT_APPROVED',
-    };
+  async identifyByFace(candidateEmbedding?: Float32Array | number[]): Promise<IdentificationResult> {
+    // If no candidate embedding is passed, enforce fail-safe fallback check
+    if (!candidateEmbedding || candidateEmbedding.length === 0) {
+      return {
+        type: 'FAILURE',
+        reason:
+          'Production face model calibration is unverified (STAGING_UNVERIFIED). Automatic face match is disabled for fail-safety. Please use RFID Card Tap or Supervisor Manual verification.',
+        errorCode: 'CALIBRATION_NOT_APPROVED',
+      };
+    }
+
+    try {
+      const templates = await this.database.getActiveFaceTemplates();
+      if (!templates || templates.length === 0) {
+        return {
+          type: 'FAILURE',
+          reason: 'No active face templates found in local cache. Please sync or register customer biometrics.',
+          errorCode: 'NO_TEMPLATES_ENROLLED',
+        };
+      }
+
+      const encryptor = new BiometricKeystoreEncryptor();
+      const candidateVec = Array.isArray(candidateEmbedding)
+        ? candidateEmbedding
+        : Array.from(candidateEmbedding);
+
+      interface MatchCandidate {
+        customerId: string;
+        similarity: number;
+      }
+      const matches: MatchCandidate[] = [];
+
+      for (const t of templates) {
+        try {
+          const decrypted = await encryptor.decrypt(
+            {
+              ciphertextBase64: t.encryptedEmbedding,
+              ivBase64: t.cryptoNonce,
+              authTagBase64: t.authTag,
+              keyReference: 'key-v1-2026',
+              algorithm: 'AES-256-GCM',
+            },
+            t.customerId,
+            t.modelVersion
+          );
+          const sim = MobileFaceNetModel.cosineSimilarity(candidateVec, decrypted);
+          matches.push({ customerId: t.customerId, similarity: sim });
+        } catch {
+          // Skip corrupted or un-decryptable templates
+        }
+      }
+
+      if (matches.length === 0) {
+        return {
+          type: 'FAILURE',
+          reason: 'Biometric template decryption failed. Re-enrollment required.',
+          errorCode: 'DECRYPTION_FAILED',
+        };
+      }
+
+      matches.sort((a, b) => b.similarity - a.similarity);
+      const best = matches[0];
+      const CANONICAL_THRESHOLD = 0.72;
+
+      if (best.similarity < CANONICAL_THRESHOLD) {
+        return {
+          type: 'FAILURE',
+          reason: `Face not recognized: match score (${best.similarity.toFixed(3)}) below required threshold ${CANONICAL_THRESHOLD}`,
+          errorCode: 'FACE_UNKNOWN',
+        };
+      }
+
+      // Check ambiguous multiple matches (margin < 0.05)
+      if (matches.length > 1) {
+        const second = matches[1];
+        if (best.similarity - second.similarity < 0.05) {
+          return {
+            type: 'FAILURE',
+            reason: `Ambiguous match: multiple customer profiles closely matched (${best.similarity.toFixed(3)} vs ${second.similarity.toFixed(3)}). Tap RFID card to resolve.`,
+            errorCode: 'AMBIGUOUS_MATCH',
+          };
+        }
+      }
+
+      const cachedCust = await this.database.getCustomer(best.customerId);
+      if (!cachedCust) {
+        return {
+          type: 'FAILURE',
+          reason: `Customer profile ${best.customerId} not found in local database`,
+          errorCode: 'CUSTOMER_NOT_FOUND',
+        };
+      }
+
+      const permitted = (cachedCust.permittedCategories || []).map(
+        (c) => c.toUpperCase() as MilkCategory
+      );
+      const domainCust: Customer = {
+        id: cachedCust.customerId,
+        organizationId: (await this.sessionManager.getOrganizationId()) || '',
+        primaryCenterId: cachedCust.primaryCenterId,
+        farmerCode: cachedCust.farmerCode,
+        fullName: cachedCust.fullName,
+        mobileNumber: cachedCust.mobileNumber,
+        status: (cachedCust.status as CustomerStatus) || 'ACTIVE',
+        permittedCategories: permitted.length > 0 ? permitted : ['COW'],
+        rfidCardId: cachedCust.rfidCardId || undefined,
+      };
+
+      return {
+        type: 'SUCCESS',
+        customer: domainCust,
+        canonicalUuid: domainCust.id,
+        method: 'FACE',
+        confidenceScore: best.similarity,
+        identifiedAt: Date.now(),
+      };
+    } catch (err: any) {
+      return {
+        type: 'FAILURE',
+        reason: err.message || 'Face identification engine error',
+        errorCode: 'FACE_ENGINE_ERROR',
+      };
+    }
   }
 
   async identifyByRfid(rawCardUid: string): Promise<IdentificationResult> {

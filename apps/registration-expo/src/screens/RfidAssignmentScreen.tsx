@@ -16,6 +16,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+const Icon = Ionicons as unknown as React.ComponentType<any>;
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { rfidAdapter } from '../hardware/RfidReaderAdapter';
@@ -227,7 +228,7 @@ export const RfidAssignmentScreen: React.FC = () => {
           style={styles.backButton}
           accessibilityLabel="Back"
         >
-          <Ionicons name="arrow-back" size={24} color={colors.onPrimaryContainer} />
+          <Icon name="arrow-back" size={24} color={colors.onPrimaryContainer} />
         </TouchableOpacity>
         <Text style={styles.topBarTitle}>RFID Assignment & Management</Text>
       </View>
@@ -236,7 +237,7 @@ export const RfidAssignmentScreen: React.FC = () => {
         {/* 1. Hardware Boundary Banner */}
         <View style={styles.boundaryCard}>
           <View style={styles.boundaryRow}>
-            <Ionicons name="information-circle" size={22} color="#F57F17" />
+            <Icon name="information-circle" size={22} color="#F57F17" />
             <View style={styles.boundaryContent}>
               <Text style={styles.boundaryTitle}>
                 HARDWARE BOUNDARY: {rfidAdapter.sourceLabel}
@@ -251,7 +252,7 @@ export const RfidAssignmentScreen: React.FC = () => {
         {/* 2. Feedback Banners */}
         {errorMessage ? (
           <View style={styles.errorBanner}>
-            <Ionicons name="warning" size={20} color={colors.error} />
+            <Icon name="warning" size={20} color={colors.error} />
             <Text style={styles.errorBannerText}>{errorMessage}</Text>
             <TouchableOpacity onPress={() => setErrorMessage(null)}>
               <Text style={styles.errorDismiss}>Dismiss</Text>
@@ -261,7 +262,7 @@ export const RfidAssignmentScreen: React.FC = () => {
 
         {successMessage ? (
           <View style={styles.successBanner}>
-            <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
+            <Icon name="checkmark-circle" size={20} color="#2E7D32" />
             <Text style={styles.successBannerText}>{successMessage}</Text>
             <TouchableOpacity onPress={() => setSuccessMessage(null)}>
               <Text style={styles.successDismiss}>OK</Text>
@@ -281,7 +282,7 @@ export const RfidAssignmentScreen: React.FC = () => {
                 ? `${selectedCustomer.farmerCode} - ${selectedCustomer.fullName}`
                 : 'Select Customer'}
             </Text>
-            <Ionicons name="chevron-down" size={20} color={colors.onSurfaceVariant} />
+            <Icon name="chevron-down" size={20} color={colors.onSurfaceVariant} />
           </TouchableOpacity>
         </View>
 
@@ -334,7 +335,7 @@ export const RfidAssignmentScreen: React.FC = () => {
             {activeAssignment && !isReplacing ? (
               <View style={styles.activeCard}>
                 <View style={styles.activeCardHeaderRow}>
-                  <Ionicons name="card" size={22} color="#1565C0" />
+                  <Icon name="card" size={22} color="#1565C0" />
                   <Text style={styles.activeCardTitle}>Active RFID Card</Text>
                 </View>
                 <View style={styles.detailRow}>
@@ -400,7 +401,7 @@ export const RfidAssignmentScreen: React.FC = () => {
                           style={styles.radioRow}
                           onPress={() => setReplacementReason(reason)}
                         >
-                          <Ionicons
+                          <Icon
                             name={
                               replacementReason === reason
                                 ? 'radio-button-on'
@@ -479,7 +480,7 @@ export const RfidAssignmentScreen: React.FC = () => {
                       <ActivityIndicator color="#FFFFFF" size="small" />
                     ) : (
                       <View style={styles.btnContentRow}>
-                        <Ionicons name="card" size={18} color="#FFFFFF" />
+                        <Icon name="card" size={18} color="#FFFFFF" />
                         <Text style={styles.submitBtnText}>Assign RFID Card</Text>
                       </View>
                     )}
