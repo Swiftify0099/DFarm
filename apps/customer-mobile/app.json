@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "DFarm Farmer",
+    "slug": "dfarm-customer-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "dfarm",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0F766E"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dfarm.customermobile"
+    },
+    "android": {
+      "package": "com.dfarm.customermobile",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#0F766E"
+      },
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "dfarm-customer-mobile"
+      }
+    }
+  }
+}

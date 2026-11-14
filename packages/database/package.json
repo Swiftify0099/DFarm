@@ -1,0 +1,27 @@
+{
+  "name": "@dfarm/database",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src tests --ext .ts,.js",
+    "test": "node --test tests/**/*.test.js",
+    "test:validate": "node --test tests/schema-validation.test.js",
+    "test:static": "node --test tests/schema-validation.test.js",
+    "test:emulation": "node --test tests/database-runtime.test.js",
+    "test:runtime": "node --test tests/database-runtime.test.js",
+    "test:postgres": "node --test tests/real-postgres-verification.test.js"
+  },
+  "dependencies": {
+    "@dfarm/shared-types": "*"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.1",
+    "pg-mem": "^3.0.5",
+    "typescript": "^5.7.2"
+  }
+}
