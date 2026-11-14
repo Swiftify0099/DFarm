@@ -73,18 +73,19 @@ export class CustomerService {
 
     // 3. Center access verification
     let targetCenterId: string;
-    if (dto.centerId) {
+    const requestedCenterId = dto.centerId || (dto as any).primaryCenterId;
+    if (requestedCenterId) {
       if (
         context.role !== UserRole.SUPER_ADMIN &&
         context.role !== UserRole.DAIRY_OWNER &&
-        !context.centerIds.includes(dto.centerId)
+        !context.centerIds.includes(requestedCenterId)
       ) {
         throw new ForbiddenError(
-          `Actor is not authorized to register customers for center '${dto.centerId}'`,
+          `Actor is not authorized to register customers for center '${requestedCenterId}'`,
           'CENTER_ACCESS_DENIED'
         );
       }
-      targetCenterId = dto.centerId;
+      targetCenterId = requestedCenterId;
     } else {
       if (!context.primaryCenterId) {
         throw new ValidationError('A primary center ID is required for customer registration');
@@ -93,7 +94,8 @@ export class CustomerService {
     }
 
     // 4. Normalize mobile number to E.164
-    const normalizedMobile = normalizeE164Phone(dto.mobileNumber);
+    const rawMobile = dto.mobileNumber || (dto as any).normalizedMobileNumber;
+    const normalizedMobile = normalizeE164Phone(rawMobile);
 
     // 5. Delegate to atomic repository RPC
     const created = await CustomerRepository.createCustomerAtomic({
@@ -267,10 +269,15 @@ export class CustomerService {
     reason: string,
     context: AuthContext
   ): Promise<CustomerProfile> {
-    const allowedRoles: UserRole[] = [UserRole.SUPER_ADMIN, UserRole.DAIRY_OWNER];
+    const allowedRoles: UserRole[] = [
+      UserRole.SUPER_ADMIN,
+      UserRole.DAIRY_OWNER,
+      UserRole.CENTER_MANAGER,
+      UserRole.REGISTRATION_OFFICER,
+    ];
     if (!allowedRoles.includes(context.role)) {
       throw new ForbiddenError(
-        'Only Dairy Owners or Super Administrators may soft-delete customers',
+        'Authorized registration staff, center managers, or dairy owners may soft-delete customers',
         'DELETE_PERMISSION_DENIED'
       );
     }
@@ -291,10 +298,15 @@ export class CustomerService {
     reason: string,
     context: AuthContext
   ): Promise<CustomerProfile> {
-    const allowedRoles: UserRole[] = [UserRole.SUPER_ADMIN, UserRole.DAIRY_OWNER];
+    const allowedRoles: UserRole[] = [
+      UserRole.SUPER_ADMIN,
+      UserRole.DAIRY_OWNER,
+      UserRole.CENTER_MANAGER,
+      UserRole.REGISTRATION_OFFICER,
+    ];
     if (!allowedRoles.includes(context.role)) {
       throw new ForbiddenError(
-        'Only Dairy Owners or Super Administrators may restore soft-deleted customers',
+        'Authorized registration staff, center managers, or dairy owners may restore soft-deleted customers',
         'RESTORE_PERMISSION_DENIED'
       );
     }

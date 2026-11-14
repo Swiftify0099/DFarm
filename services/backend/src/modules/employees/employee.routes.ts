@@ -28,6 +28,24 @@ router.get(
   EmployeeController.listEmployees
 );
 
+// Advances (registered before /:id to prevent route shadowing)
+router.get(
+  '/advances',
+  requireRole([
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.CENTER_MANAGER,
+    UserRole.ACCOUNTANT,
+  ]),
+  EmployeeController.listAdvances
+);
+
+router.post(
+  '/advances/:advanceId/approve',
+  requireRole([UserRole.DAIRY_OWNER, UserRole.DAIRY_ADMIN]),
+  EmployeeController.approveAdvance
+);
+
 router.get(
   '/:id',
   requireRole([
@@ -79,7 +97,7 @@ router.get(
   EmployeeController.getSalaryStructure
 );
 
-// Advances
+// Employee Advance Request (per employee)
 router.post(
   '/:id/advances',
   requireRole([
@@ -89,23 +107,6 @@ router.post(
     UserRole.ACCOUNTANT,
   ]),
   EmployeeController.requestAdvance
-);
-
-router.post(
-  '/advances/:advanceId/approve',
-  requireRole([UserRole.DAIRY_OWNER, UserRole.DAIRY_ADMIN]),
-  EmployeeController.approveAdvance
-);
-
-router.get(
-  '/advances',
-  requireRole([
-    UserRole.DAIRY_OWNER,
-    UserRole.DAIRY_ADMIN,
-    UserRole.CENTER_MANAGER,
-    UserRole.ACCOUNTANT,
-  ]),
-  EmployeeController.listAdvances
 );
 
 export const employeeRouter = router;

@@ -12,6 +12,7 @@ export interface AuthContext {
     id: string;
     email?: string;
     phone?: string;
+    user_metadata?: Record<string, any>;
   };
   actorType: 'STAFF' | 'CUSTOMER';
   userId: string; // internal UUID

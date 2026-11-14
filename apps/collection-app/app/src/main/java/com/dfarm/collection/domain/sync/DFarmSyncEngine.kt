@@ -114,13 +114,16 @@ class DFarmSyncEngine(
         if (customersArr != null) {
             for (elem in customersArr) {
                 val c = elem.jsonObject
+                val cats = c["permittedCategories"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }
                 val customer = CachedCustomer(
                     customerId = c["id"]?.jsonPrimitive?.contentOrNull ?: "",
                     farmerCode = c["farmerCode"]?.jsonPrimitive?.contentOrNull ?: "",
                     fullName = c["fullName"]?.jsonPrimitive?.contentOrNull ?: "",
-                    mobileNumber = c["mobilePhone"]?.jsonPrimitive?.contentOrNull ?: "",
+                    mobileNumber = c["mobilePhone"]?.jsonPrimitive?.contentOrNull ?: c["mobileNumber"]?.jsonPrimitive?.contentOrNull ?: "",
                     primaryCenterId = c["primaryCenterId"]?.jsonPrimitive?.contentOrNull ?: centerId,
-                    status = c["status"]?.jsonPrimitive?.contentOrNull ?: "ACTIVE"
+                    status = c["status"]?.jsonPrimitive?.contentOrNull ?: "ACTIVE",
+                    permittedCategories = if (cats.isNullOrEmpty()) listOf("COW", "BUFFALO") else cats,
+                    rfidCardId = c["rfidCardId"]?.jsonPrimitive?.contentOrNull
                 )
                 database.saveCustomer(customer)
                 pulledCustomers++

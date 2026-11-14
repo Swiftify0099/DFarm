@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { feedApi } from '../../api/feedApi.js';
+import { customerApi } from '../../api/customerApi.js';
+import { useAuth } from '../../context/AuthContext.js';
 import { FeedProduct, CenterProductInventory } from '@dfarm/shared-types';
 import { CartItem } from './types.js';
 import { InvoicePreviewModal } from './InvoicePreviewModal.js';
 
 export const CustomerFeedSalePOS: React.FC = () => {
+  const { currentCenterId, selectedCenterId, centers } = useAuth();
   const [customerQuery, setCustomerQuery] = useState<string>('');
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
   const [customerSearchLoading, setCustomerSearchLoading] = useState<boolean>(false);
@@ -39,15 +42,9 @@ export const CustomerFeedSalePOS: React.FC = () => {
     try {
       setCustomerSearchLoading(true);
       setError(null);
-      const token = localStorage.getItem('dfarm_auth_token') || '';
-      const res = await fetch(`/api/v1/customers?search=${encodeURIComponent(customerQuery)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const body: any = await res.json();
-      const items = Array.isArray(body?.data)
-        ? body.data
-        : (body?.data?.items || body?.data?.customers || []);
-      if (body.success && items.length > 0) {
+      const res = await customerApi.list({ search: customerQuery.trim() });
+      const items = res.items || res.customers || [];
+      if (items.length > 0) {
         setSelectedCustomer(items[0]);
       } else {
         setError('No active customer found with given code/phone');
@@ -173,13 +170,19 @@ export const CustomerFeedSalePOS: React.FC = () => {
       return;
     }
 
+    const targetCenterId = selectedCustomer.primaryCenterId || selectedCustomer.primary_center_id || currentCenterId || selectedCenterId || (centers.length > 0 ? centers[0]?.id : '');
+    if (!targetCenterId) {
+      setError('Target center ID could not be identified for this sale');
+      return;
+    }
+
     try {
       setSubmitting(true);
       setError(null);
 
       const idempotencyKey = `sale_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       const payload = {
-        centerId: selectedCustomer.primaryCenterId,
+        centerId: targetCenterId,
         customerId: selectedCustomer.id,
         items: cart.map((i: CartItem) => ({
           productId: i.productId,

@@ -141,7 +141,8 @@ export class FeedController {
     try {
       const saleId = req.params['saleId'] as string;
       const parsed = CreateFeedReturnSchema.parse(req.body);
-      const result = await FeedService.processReturn(saleId, parsed, req.auth!);
+      const approvedBy = (parsed as any).approvedBy || req.auth!.userId;
+      const result = await FeedService.processReturn(saleId, { ...parsed, approvedBy }, req.auth!);
       ApiResponse.success(res, result, 201);
     } catch (err) {
       next(err);

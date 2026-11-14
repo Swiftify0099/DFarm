@@ -34,7 +34,13 @@ data class FaceStatusResult(
 )
 
 class FaceApiClient(
-    private val baseUrl: String = "http://10.0.2.2:4000/api/v1"
+    private val baseUrl: String = if (android.os.Build.FINGERPRINT.startsWith("generic") ||
+        android.os.Build.FINGERPRINT.startsWith("unknown") ||
+        android.os.Build.MODEL.contains("google_sdk") ||
+        android.os.Build.MODEL.contains("Emulator") ||
+        android.os.Build.HARDWARE.contains("goldfish") ||
+        android.os.Build.HARDWARE.contains("ranchu")
+    ) "http://10.0.2.2:4000/api/v1" else "http://127.0.0.1:4000/api/v1"
 ) {
     /**
      * Submit encrypted biometric template envelope to backend.

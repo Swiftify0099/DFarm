@@ -6,7 +6,7 @@ import { UnauthorizedError } from '../../shared/errors/app-error.js';
 export class AuthController {
   public static async login(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
     try {
-      const { username } = req.body as { username: string };
+      const username = (req.body?.username || req.body?.email || req.body?.identifier) as string;
       const data = await AuthService.loginStaff(username);
       return ApiResponse.success(res, data, 200);
     } catch (err) {

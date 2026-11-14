@@ -115,24 +115,28 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     async function loadCenters() {
       if (!token) return;
+      let centerList: CenterOption[] = [];
       try {
         const loadedCenters = await authApi.getCenters();
         if (loadedCenters && loadedCenters.length > 0) {
-          setCenters(loadedCenters);
-          return;
+          centerList = loadedCenters;
         }
       } catch {
         // Fallback centers
       }
-      setCenters([
-        { id: '84997d76-5a80-4935-81d6-433119b5a882', code: 'C101', name: 'Tasgaon Intake Center' },
-        { id: '98a80860-0c1b-47c0-936c-528a262490bd', code: 'C102', name: 'Miraj Intake Center' },
-        { id: '96afbfae-2b1a-42ef-8bb0-779c70950fc5', code: 'C201', name: 'Karveer Intake Center' },
-        { id: '11111111-1111-4111-a111-111111111111', code: 'P11_C1', name: 'P11 Primary Center' },
-      ]);
+      if (centerList.length === 0) {
+        centerList = [
+          { id: '84997d76-5a80-4935-81d6-433119b5a882', code: 'C101', name: 'Tasgaon Intake Center' },
+          { id: '98a80860-0c1b-47c0-936c-528a262490bd', code: 'C102', name: 'Miraj Intake Center' },
+          { id: '96afbfae-2b1a-42ef-8bb0-779c70950fc5', code: 'C201', name: 'Karveer Intake Center' },
+          { id: '11111111-1111-4111-a111-111111111111', code: 'P11_C1', name: 'P11 Primary Center' },
+        ];
+      }
+      setCenters(centerList);
+      setSelectedCenterId((prev) => prev || user?.primaryCenterId || (centerList[0]?.id ?? ''));
     }
     loadCenters();
-  }, [token]);
+  }, [token, user?.primaryCenterId]);
 
   const login = async (username: string) => {
     setIsLoading(true);
@@ -175,7 +179,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         loading: isLoading,
         isAuthenticated: Boolean(user && token),
         selectedCenterId,
-        currentCenterId: selectedCenterId,
+        currentCenterId: selectedCenterId || user?.primaryCenterId || (centers.length > 0 ? centers[0]!.id : ''),
         setSelectedCenterId,
         selectedShift,
         setSelectedShift,

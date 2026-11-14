@@ -64,14 +64,14 @@ export const RfidUidSchema = z
 export const CustomerAddressSchema = z.object({
   village: z.string().min(1).max(100),
   hamletArea: z.string().max(100).nullable().optional(),
-  talukaSubdistrict: z.string().min(1).max(100),
+  talukaSubdistrict: z.string().max(100).nullable().optional(),
   district: z.string().min(1).max(100),
   state: z.string().min(1).max(100),
-  postalCode: z.string().min(3).max(20),
+  postalCode: z.string().max(20).nullable().optional(),
 });
 
 export const CustomerRegistrationSchema = z.object({
-  fullName: z.string().min(3).max(150),
+  fullName: z.string().min(2).max(150),
   mobileNumber: E164PhoneSchema,
   permittedCategories: z.array(z.nativeEnum(MilkCategory)).min(1),
   biometricConsentGranted: z.boolean().refine(val => val === true, 'Consent is required'),
@@ -79,17 +79,28 @@ export const CustomerRegistrationSchema = z.object({
 });
 
 export const CreateCustomerInputSchema = z.object({
-  fullName: z.string().min(3).max(150),
-  mobileNumber: z.string().min(10, 'Mobile number must be at least 10 digits'),
-  permittedCategories: z.array(z.nativeEnum(MilkCategory)).min(1),
+  fullName: z.string().min(2).max(150),
+  mobileNumber: z.string().min(10, 'Mobile number must be at least 10 digits').optional(),
+  normalizedMobileNumber: z.string().min(10, 'Mobile number must be at least 10 digits').optional(),
+  permittedCategories: z.array(z.nativeEnum(MilkCategory)).min(1).optional(),
+  milkCategories: z.array(z.nativeEnum(MilkCategory)).min(1).optional(),
   centerId: z.string().uuid().optional(),
+  primaryCenterId: z.string().uuid().optional(),
   farmerCode: z.string().min(1).max(30).optional(),
-  address: CustomerAddressSchema.optional(),
+  address: CustomerAddressSchema.partial().optional(),
   bankName: z.string().max(100).nullable().optional(),
   bankAccountNumber: z.string().max(50).nullable().optional(),
   bankIfscCode: z.string().max(20).nullable().optional(),
   bankAccountHolderName: z.string().max(150).nullable().optional(),
-});
+}).refine(data => !!(data.mobileNumber || data.normalizedMobileNumber), {
+  message: 'Mobile number is required',
+  path: ['mobileNumber'],
+}).transform(data => ({
+  ...data,
+  mobileNumber: (data.mobileNumber || data.normalizedMobileNumber) as string,
+  permittedCategories: (data.permittedCategories || data.milkCategories || [MilkCategory.COW]) as MilkCategory[],
+  centerId: data.centerId || data.primaryCenterId,
+}));
 
 export const UpdateCustomerInputSchema = z.object({
   fullName: z.string().min(3).max(150).optional(),
@@ -131,10 +142,14 @@ export const RfidAssignInputSchema = z.object({
 export const RfidReplaceInputSchema = z.object({
   newCardUid: RfidUidSchema,
   cardType: z.nativeEnum(RfidTechnology).default(RfidTechnology.MIFARE_CLASSIC_1K),
-  reasonCategory: z.string().min(3),
-  justificationNotes: z.string().min(5, 'Justification notes must be at least 5 characters'),
+  reasonCategory: z.string().min(3).optional(),
+  justificationNotes: z.string().min(5, 'Justification notes must be at least 5 characters').optional(),
+  reason: z.string().optional(),
   centerId: z.string().uuid().optional(),
   deviceId: z.string().min(1).default('REGISTRATION_APP'),
+}).refine(data => !!(data.reasonCategory || data.reason), {
+  message: 'Replacement reason is required',
+  path: ['reasonCategory'],
 });
 
 export const RfidRevokeInputSchema = z.object({
@@ -419,7 +434,7 @@ export const CreateFeedReturnSchema = z.object({
   returnQuantity: z.number().positive(),
   stockCondition: z.enum(['SALEABLE', 'DAMAGED']),
   reason: z.string().min(3).max(500),
-  approvedBy: z.string().uuid(),
+  approvedBy: z.string().uuid().optional().nullable(),
   idempotencyKey: z.string().min(8).max(128),
 });
 

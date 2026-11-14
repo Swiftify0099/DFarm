@@ -34,6 +34,7 @@ fun FaceEnrollmentScreen(
     customerName: String = "Customer",
     farmerCode: String = "DF-2026-PENDING",
     viewModel: FaceEnrollmentViewModel,
+    token: String = "",
     onEnrollmentComplete: (String) -> Unit,
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
@@ -73,7 +74,8 @@ fun FaceEnrollmentScreen(
                             viewModel.startEnrollment(
                                 customerId = customerId,
                                 customerName = customerName,
-                                farmerCode = farmerCode
+                                farmerCode = farmerCode,
+                                token = token
                             )
                         }
                     )

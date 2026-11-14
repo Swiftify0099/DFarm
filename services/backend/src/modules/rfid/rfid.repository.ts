@@ -474,8 +474,10 @@ export class RfidRepository {
 
     for (const row of assignRes.rows) {
       const item = {
+        id: row.id,
         assignmentId: row.id,
         cardId: row.rfid_card_id,
+        rfidCardId: row.rfid_card_id,
         cardUid: row.card_uid,
         isActive: row.is_active,
         assignedAt: row.assigned_at.toISOString(),
@@ -484,16 +486,18 @@ export class RfidRepository {
         revocationReason: row.revocation_reason,
       };
 
-      assignmentHistory.push(item);
+      assignmentHistory.push(item as any);
 
       if (row.is_active && !activeCard) {
         activeCard = {
+          id: row.id,
           assignmentId: row.id,
           cardId: row.rfid_card_id,
+          rfidCardId: row.rfid_card_id,
           cardUid: row.card_uid,
           cardType: row.card_type as RfidTechnology,
           assignedAt: row.assigned_at.toISOString(),
-        };
+        } as any;
       }
     }
 

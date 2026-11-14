@@ -88,11 +88,13 @@ fun MainNavigation() {
 
             entry<FaceEnrollment> { key ->
                 val faceVm = viewModel(key = key.customerId) { FaceEnrollmentViewModel() }
+                val currentToken = sessionManager.getToken() ?: ""
                 FaceEnrollmentScreen(
                     customerId = key.customerId,
                     customerName = key.customerName,
                     farmerCode = key.farmerCode,
                     viewModel = faceVm,
+                    token = currentToken,
                     onEnrollmentComplete = { _ ->
                         backStack.add(RfidAssignment)
                     },

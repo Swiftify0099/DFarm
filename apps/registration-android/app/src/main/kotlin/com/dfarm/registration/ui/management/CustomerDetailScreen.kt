@@ -19,13 +19,17 @@ import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Nfc
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -35,13 +39,18 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -67,6 +76,10 @@ fun CustomerDetailScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val scrollState = rememberScrollState()
+
+    var showDeactivateDialog by remember { mutableStateOf(false) }
+    var showRestoreDialog by remember { mutableStateOf(false) }
+    var actionReason by remember { mutableStateOf("") }
 
     LaunchedEffect(customerId) {
         viewModel.loadCustomer(customerId)
@@ -262,16 +275,149 @@ fun CustomerDetailScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
+                        if (state.actionSuccessMessage != null) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFFE6F4EA),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF137333))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = state.actionSuccessMessage ?: "",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color(0xFF137333),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+
                         PrimaryButton(
                             text = "Edit Farmer Details",
                             onClick = { onNavigateToEdit(customerId) },
                             leadingIcon = Icons.Default.Edit
                         )
 
+                        val isSoftDeleted = customer.status == "SOFT_DELETED" || customer.status == "INACTIVE"
+                        if (isSoftDeleted) {
+                            Button(
+                                onClick = {
+                                    actionReason = ""
+                                    showRestoreDialog = true
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF137333)),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth().height(50.dp)
+                            ) {
+                                Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Restore Customer Profile", fontWeight = FontWeight.SemiBold)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    actionReason = ""
+                                    showDeactivateDialog = true
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth().height(50.dp)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Deactivate Customer (Soft-Delete)", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
                         Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
             }
+        }
+
+        if (showDeactivateDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeactivateDialog = false },
+                title = { Text("Deactivate Customer") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("This customer will be soft-deleted. Historical milk collections, ledger, and payouts are permanently preserved in the PostgreSQL ledger.")
+                        OutlinedTextField(
+                            value = actionReason,
+                            onValueChange = { actionReason = it },
+                            label = { Text("Reason (min 5 characters)") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (actionReason.trim().length >= 5) {
+                                viewModel.deactivateCustomer(actionReason.trim()) { success ->
+                                    if (success) {
+                                        showDeactivateDialog = false
+                                        actionReason = ""
+                                    }
+                                }
+                            }
+                        },
+                        enabled = actionReason.trim().length >= 5
+                    ) {
+                        Text("Deactivate")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeactivateDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showRestoreDialog) {
+            AlertDialog(
+                onDismissRequest = { showRestoreDialog = false },
+                title = { Text("Restore Customer") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("This customer will be restored back to ACTIVE status.")
+                        OutlinedTextField(
+                            value = actionReason,
+                            onValueChange = { actionReason = it },
+                            label = { Text("Reason (min 5 characters)") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (actionReason.trim().length >= 5) {
+                                viewModel.restoreCustomer(actionReason.trim()) { success ->
+                                    if (success) {
+                                        showRestoreDialog = false
+                                        actionReason = ""
+                                    }
+                                }
+                            }
+                        },
+                        enabled = actionReason.trim().length >= 5
+                    ) {
+                        Text("Restore")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRestoreDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
     }
 }

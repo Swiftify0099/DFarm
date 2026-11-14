@@ -1,5 +1,6 @@
 import { pool, query } from '../../config/db.js';
 import { ValidationError, ForbiddenError } from '../../shared/errors/app-error.js';
+import { normalizeE164Phone } from '../../shared/utils/phone.js';
 import crypto from 'node:crypto';
 
 export class SyncService {
@@ -84,8 +85,15 @@ export class SyncService {
             }
 
             // Mobile uniqueness conflict check
-            const mobilePhone = payload.mobileNumber || payload.mobilePhone;
-            const normMobile = mobilePhone ? mobilePhone.replace(/\D/g, '').slice(-10) : null;
+            const mobilePhone = payload.mobileNumber || payload.mobilePhone || payload.normalizedMobileNumber;
+            let normMobile: string | null = null;
+            if (mobilePhone) {
+              try {
+                normMobile = normalizeE164Phone(mobilePhone);
+              } catch {
+                normMobile = mobilePhone.startsWith('+') ? mobilePhone : `+91${mobilePhone.replace(/\D/g, '').slice(-10)}`;
+              }
+            }
 
             if (normMobile) {
               const dupCheck = await client.query(

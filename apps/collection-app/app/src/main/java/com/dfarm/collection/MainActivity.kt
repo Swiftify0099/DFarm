@@ -4,18 +4,22 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import com.dfarm.collection.domain.measurement.*
+import androidx.compose.ui.platform.LocalContext
+import com.dfarm.collection.data.api.ApiClient
+import com.dfarm.collection.data.repository.CollectionRepository
+import com.dfarm.collection.data.storage.SessionManager
 import com.dfarm.collection.domain.model.*
-import com.dfarm.collection.domain.pricing.*
-import com.dfarm.collection.domain.receipt.ReceiptFormatter
-import com.dfarm.collection.domain.statemachine.*
-import com.dfarm.collection.domain.sync.OfflineSyncQueue
+import com.dfarm.collection.domain.storage.CollectionDatabaseHelper
+import com.dfarm.collection.domain.sync.DFarmSyncEngine
+import com.dfarm.collection.domain.sync.OfflineRevocationGuard
 import com.dfarm.collection.ui.screens.*
 import com.dfarm.collection.ui.theme.BackgroundDark
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
 
 enum class CurrentScreen {
     LOGIN,
@@ -42,59 +46,49 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun CollectionAppRoot() {
-    var currentScreen by remember { mutableStateOf(CurrentScreen.LOGIN) }
-    var operatorName by remember { mutableStateOf("operator_tasgaon") }
-    var centerId by remember { mutableStateOf("center_tasgaon_01") }
-    val centerName = "Tasgaon Center 01"
-    val shift = Shift.MORNING
-    val syncQueue = remember { OfflineSyncQueue() }
-    val stateMachine = remember { CollectionStateMachine() }
-    val pricingEngine = remember { RateCalculationEngine() }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
-    // Seed approved rate version for local calculation
-    val cowApprovedVersion = remember {
-        RateChartVersion(
-            id = "rate_ver_cow_01",
-            rateChartId = "rc_cow_01",
-            versionNumber = 1,
-            milkCategory = MilkCategory.COW,
-            isApproved = true,
-            effectiveFrom = System.currentTimeMillis() - 86400000,
-            cells = listOf(
-                RateCell(fatPercentage = 3.5, snfPercentage = 8.5, ratePerUnit = 34.00),
-                RateCell(fatPercentage = 4.0, snfPercentage = 8.5, ratePerUnit = 36.50),
-                RateCell(fatPercentage = 4.2, snfPercentage = 8.5, ratePerUnit = 37.80),
-                RateCell(fatPercentage = 4.5, snfPercentage = 8.5, ratePerUnit = 39.00)
-            )
-        )
+    val sessionManager = remember { SessionManager(context) }
+    val apiService = remember { ApiClient.createService(sessionManager) }
+    val database = remember { CollectionDatabaseHelper(context) }
+    val revocationGuard = remember { OfflineRevocationGuard(database) }
+    val syncEngine = remember { DFarmSyncEngine(database, revocationGuard) }
+    val repository = remember { CollectionRepository(apiService, sessionManager, database, syncEngine) }
+
+    var currentScreen by remember {
+        mutableStateOf(if (sessionManager.isLoggedIn()) CurrentScreen.DASHBOARD else CurrentScreen.LOGIN)
     }
 
-    val buffaloApprovedVersion = remember {
-        RateChartVersion(
-            id = "rate_ver_buf_01",
-            rateChartId = "rc_buf_01",
-            versionNumber = 1,
-            milkCategory = MilkCategory.BUFFALO,
-            isApproved = true,
-            effectiveFrom = System.currentTimeMillis() - 86400000,
-            cells = listOf(
-                RateCell(fatPercentage = 6.0, snfPercentage = 9.0, ratePerUnit = 55.00),
-                RateCell(fatPercentage = 6.5, snfPercentage = 9.0, ratePerUnit = 58.50),
-                RateCell(fatPercentage = 7.0, snfPercentage = 9.0, ratePerUnit = 62.00)
-            )
-        )
+    val currentShift = remember {
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        if (hour < 15) Shift.MORNING else Shift.EVENING
     }
 
+    val businessDate = remember {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    }
+
+    var pendingSyncCount by remember { mutableStateOf(repository.getPendingSyncCount()) }
     var identifiedCustomer by remember { mutableStateOf<Customer?>(null) }
-    var identificationMethod by remember { mutableStateOf(IdentificationMethod.FACE) }
+    var identificationMethod by remember { mutableStateOf(IdentificationMethod.RFID) }
+    var selectedCategory by remember { mutableStateOf(MilkCategory.COW) }
+
+    var netWeight by remember { mutableDoubleStateOf(0.0) }
+    var fatPercentage by remember { mutableDoubleStateOf(0.0) }
+    var snfPercentage by remember { mutableDoubleStateOf(0.0) }
+    var rateResult by remember { mutableStateOf<RateCalculationResult?>(null) }
+
+    var isCommitting by remember { mutableStateOf(false) }
+    var commitErrorMessage by remember { mutableStateOf<String?>(null) }
     var generatedReceiptText by remember { mutableStateOf("") }
 
     when (currentScreen) {
         CurrentScreen.LOGIN -> {
             LoginScreen(
-                onLoginSuccess = { op, cId ->
-                    operatorName = op
-                    centerId = cId
+                repository = repository,
+                onLoginSuccess = {
+                    pendingSyncCount = repository.getPendingSyncCount()
                     currentScreen = CurrentScreen.DASHBOARD
                 }
             )
@@ -102,30 +96,50 @@ fun CollectionAppRoot() {
 
         CurrentScreen.DASHBOARD -> {
             DashboardScreen(
-                operatorName = operatorName,
-                centerName = centerName,
-                shift = shift,
-                pendingSyncCount = syncQueue.getPendingCount(),
+                operatorName = repository.getOfficerName(),
+                centerName = repository.getActiveCenterName(),
+                shift = currentShift,
+                pendingSyncCount = pendingSyncCount,
                 onStartCollection = {
-                    stateMachine.transition(StateMachineEvent.Reset)
+                    identifiedCustomer = null
+                    commitErrorMessage = null
                     currentScreen = CurrentScreen.IDENTIFICATION
                 },
                 onViewHistory = {
                     currentScreen = CurrentScreen.HISTORY
+                },
+                onSyncNow = {
+                    coroutineScope.launch {
+                        try {
+                            syncEngine.pushPendingJournal(
+                                deviceId = repository.getDeviceId(),
+                                centerId = repository.getActiveCenterId()
+                            ) { url, body ->
+                                val res = apiService.pushSyncEvents(
+                                    kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString(body)
+                                )
+                                Pair(res.code(), res.raw().body?.string())
+                            }
+                        } catch (_: Exception) {}
+                        pendingSyncCount = repository.getPendingSyncCount()
+                    }
+                },
+                onLogout = {
+                    repository.logout()
+                    currentScreen = CurrentScreen.LOGIN
                 }
             )
         }
 
         CurrentScreen.IDENTIFICATION -> {
             IdentificationScreen(
+                repository = repository,
                 onIdentified = { cust, method ->
                     identifiedCustomer = cust
                     identificationMethod = method
-                    stateMachine.transition(StateMachineEvent.CustomerIdentified(cust))
                     currentScreen = CurrentScreen.CUSTOMER_INFO
                 },
                 onCancel = {
-                    stateMachine.transition(StateMachineEvent.Reset)
                     currentScreen = CurrentScreen.DASHBOARD
                 }
             )
@@ -137,28 +151,14 @@ fun CollectionAppRoot() {
                 customer = customer,
                 method = identificationMethod,
                 onProceed = {
-                    stateMachine.transition(StateMachineEvent.CustomerVerified(customer))
-                    // Check category auto-selection:
                     if (customer.permittedCategories.size == 1) {
-                        val singleCat = customer.permittedCategories.first()
-                        val session = CollectionSession(
-                            customerUuid = customer.id,
-                            organizationId = customer.organizationId,
-                            centerId = centerId,
-                            deviceId = "dev_tablet_01",
-                            identificationMethod = identificationMethod,
-                            milkCategory = singleCat,
-                            shift = shift,
-                            businessDate = "2026-11-13"
-                        )
-                        stateMachine.transition(StateMachineEvent.SessionCreated(session))
+                        selectedCategory = customer.permittedCategories.first()
                         currentScreen = CurrentScreen.MEASUREMENTS
                     } else {
                         currentScreen = CurrentScreen.CATEGORY_SELECTION
                     }
                 },
                 onReject = {
-                    stateMachine.transition(StateMachineEvent.Reset)
                     currentScreen = CurrentScreen.IDENTIFICATION
                 }
             )
@@ -169,22 +169,10 @@ fun CollectionAppRoot() {
             CategorySelectionScreen(
                 customer = customer,
                 onCategoryChosen = { category ->
-                    stateMachine.transition(StateMachineEvent.CategorySelected(category))
-                    val session = CollectionSession(
-                        customerUuid = customer.id,
-                        organizationId = customer.organizationId,
-                        centerId = centerId,
-                        deviceId = "dev_tablet_01",
-                        identificationMethod = identificationMethod,
-                        milkCategory = category,
-                        shift = shift,
-                        businessDate = "2026-11-13"
-                    )
-                    stateMachine.transition(StateMachineEvent.SessionCreated(session))
+                    selectedCategory = category
                     currentScreen = CurrentScreen.MEASUREMENTS
                 },
                 onCancel = {
-                    stateMachine.transition(StateMachineEvent.Reset)
                     currentScreen = CurrentScreen.DASHBOARD
                 }
             )
@@ -192,78 +180,67 @@ fun CollectionAppRoot() {
 
         CurrentScreen.MEASUREMENTS -> {
             val customer = identifiedCustomer ?: return
-            val session = stateMachine.activeSession ?: return
             MeasurementScreen(
                 customer = customer,
-                category = session.milkCategory,
-                onMeasurementsSubmitted = { weightKg, fat, snf ->
-                    val limits = CenterValidationLimits()
-                    val qm = MilkQualityMeasurement(
-                        fatPercentage = fat,
-                        snfPercentage = snf,
-                        sessionUuid = session.sessionUuid
-                    )
-                    val wm = MilkWeightMeasurement(
-                        netWeight = weightKg,
-                        sessionUuid = session.sessionUuid
-                    )
-                    val qVal = MeasurementValidationEngine.validateQuality(qm, session.milkCategory, limits)
-                    val wVal = MeasurementValidationEngine.validateWeight(wm, limits)
-
-                    if (qVal.isValid && wVal.isValid) {
-                        stateMachine.transition(StateMachineEvent.QualityMeasurementReceived(qm))
-                        stateMachine.transition(StateMachineEvent.WeightMeasurementReceived(wm))
-                        stateMachine.transition(StateMachineEvent.MeasurementsValidated)
-
-                        val version = if (session.milkCategory == MilkCategory.COW) cowApprovedVersion else buffaloApprovedVersion
-                        val rateResult = pricingEngine.calculateRate(version, fat, snf, weightKg)
-                        stateMachine.transition(StateMachineEvent.RateCalculated(rateResult))
-
-                        currentScreen = CurrentScreen.REVIEW
-                    }
+                category = selectedCategory,
+                repository = repository,
+                onRateCalculated = { w, f, s, rr ->
+                    netWeight = w
+                    fatPercentage = f
+                    snfPercentage = s
+                    rateResult = rr
+                    commitErrorMessage = null
+                    currentScreen = CurrentScreen.REVIEW
                 },
                 onCancel = {
-                    stateMachine.transition(StateMachineEvent.CancelSession("Operator cancelled during measurement"))
                     currentScreen = CurrentScreen.DASHBOARD
                 }
             )
         }
 
         CurrentScreen.REVIEW -> {
-            val session = stateMachine.activeSession ?: return
             val customer = identifiedCustomer ?: return
+            val rr = rateResult ?: return
+
             TransactionReviewScreen(
-                session = session,
+                customer = customer,
+                category = selectedCategory,
+                netWeight = netWeight,
+                fat = fatPercentage,
+                snf = snfPercentage,
+                rateCalculation = rr,
+                isLoading = isCommitting,
+                errorMessage = commitErrorMessage,
                 onConfirmCommit = {
-                    stateMachine.transition(StateMachineEvent.CommitStarted)
-                    stateMachine.transition(StateMachineEvent.CommitSuccess)
-
-                    // Format thermal slip receipt
-                    val receipt = CollectionReceipt(
-                        receiptNumber = "RCP-${System.currentTimeMillis().toString().takeLast(6)}",
-                        sessionUuid = session.sessionUuid,
-                        businessDate = session.businessDate,
-                        shift = session.shift,
-                        centerName = centerName,
-                        operatorName = operatorName,
-                        customerCode = customer.farmerCode,
-                        customerName = customer.fullName,
-                        identificationMethod = session.identificationMethod,
-                        milkCategory = session.milkCategory,
-                        weightKg = session.weightMeasurement?.netWeight ?: 0.0,
-                        fatPercentage = session.qualityMeasurement?.fatPercentage ?: 0.0,
-                        snfPercentage = session.qualityMeasurement?.snfPercentage ?: 0.0,
-                        ratePerUnit = session.rateCalculation?.appliedRate ?: 0.0,
-                        totalAmount = session.rateCalculation?.totalAmount ?: 0.0,
-                        verificationHash = "a3f5b7c8901234567890abcdef123456"
-                    )
-                    generatedReceiptText = ReceiptFormatter.generateReceiptText(receipt)
-                    syncQueue.enqueue(session, "{}")
-
-                    currentScreen = CurrentScreen.RECEIPT
+                    isCommitting = true
+                    commitErrorMessage = null
+                    coroutineScope.launch {
+                        val idempotencyKey = "IDEMP-COL-${UUID.randomUUID()}"
+                        val res = repository.commitMilkCollection(
+                            customer = customer,
+                            category = selectedCategory,
+                            method = identificationMethod,
+                            shift = currentShift,
+                            businessDate = businessDate,
+                            netWeight = netWeight,
+                            fat = fatPercentage,
+                            snf = snfPercentage,
+                            appliedRate = rr.appliedRate,
+                            totalAmount = rr.totalAmount,
+                            idempotencyKey = idempotencyKey
+                        )
+                        isCommitting = false
+                        if (res.isSuccess) {
+                            val result = res.getOrThrow()
+                            generatedReceiptText = result.receiptText
+                            pendingSyncCount = repository.getPendingSyncCount()
+                            currentScreen = CurrentScreen.RECEIPT
+                        } else {
+                            commitErrorMessage = res.exceptionOrNull()?.message ?: "Transaction commit failed"
+                        }
+                    }
                 },
                 onCancelSession = {
-                    stateMachine.transition(StateMachineEvent.CancelSession("Operator cancelled from review screen"))
                     currentScreen = CurrentScreen.DASHBOARD
                 }
             )
@@ -273,20 +250,18 @@ fun CollectionAppRoot() {
             ReceiptScreen(
                 receiptText = generatedReceiptText,
                 onDone = {
-                    stateMachine.transition(StateMachineEvent.Reset)
                     currentScreen = CurrentScreen.DASHBOARD
                 }
             )
         }
 
         CurrentScreen.HISTORY -> {
-            DashboardScreen(
-                operatorName = operatorName,
-                centerName = centerName,
-                shift = shift,
-                pendingSyncCount = syncQueue.getPendingCount(),
-                onStartCollection = { currentScreen = CurrentScreen.IDENTIFICATION },
-                onViewHistory = { currentScreen = CurrentScreen.DASHBOARD }
+            HistoryScreen(
+                repository = repository,
+                currentShift = currentShift,
+                onDone = {
+                    currentScreen = CurrentScreen.DASHBOARD
+                }
             )
         }
     }

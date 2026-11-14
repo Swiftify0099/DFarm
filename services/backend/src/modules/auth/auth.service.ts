@@ -17,11 +17,33 @@ export interface MeResponse {
     customerId: string;
     farmerCode: string;
   };
+  officer?: {
+    id: string;
+    fullName: string;
+    role: string;
+    organizationId: string;
+    centerId?: string | null;
+    assignedCenters: Array<{ id: string; code: string; name: string; isPrimary: boolean }>;
+  };
   accountStatus: string;
 }
 
 export class AuthService {
   public static async getMe(context: AuthContext): Promise<MeResponse> {
+    const officer = context.actorType === 'STAFF' ? {
+      id: context.userId,
+      fullName: context.authUser?.user_metadata?.full_name || context.role,
+      role: context.role,
+      organizationId: context.organizationId,
+      centerId: context.primaryCenterId || null,
+      assignedCenters: context.centerIds.map(cId => ({
+        id: cId,
+        code: '',
+        name: '',
+        isPrimary: cId === context.primaryCenterId,
+      })),
+    } : undefined;
+
     return {
       authUserId: context.authUser.id,
       internalId: context.userId,
@@ -31,6 +53,7 @@ export class AuthService {
       authorizedCenterIds: context.centerIds,
       primaryCenterId: context.primaryCenterId,
       customerProfile: context.customerProfile,
+      officer,
       accountStatus: 'ACTIVE',
     };
   }
@@ -116,6 +139,13 @@ export class AuthService {
       phone: user.phone_number,
     });
 
+    const assignedCenters = assignRes.rows.map(a => ({
+      id: a.center_id as string,
+      code: (a.center_code || '') as string,
+      name: (a.center_name || '') as string,
+      isPrimary: Boolean(a.is_primary),
+    }));
+
     return {
       token,
       user: {
@@ -127,6 +157,7 @@ export class AuthService {
         username: user.username,
         email: user.email,
         phoneNumber: user.phone_number,
+        assignedCenters,
       },
     };
   }

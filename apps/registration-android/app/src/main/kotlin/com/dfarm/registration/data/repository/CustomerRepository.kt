@@ -113,6 +113,58 @@ class CustomerRepository(
         }
     }
 
+    suspend fun deleteCustomer(
+        customerId: String,
+        reason: String
+    ): Result<CustomerDto> {
+        return try {
+            val response = apiService.deleteCustomer(
+                customerId = customerId,
+                request = com.dfarm.registration.data.models.CustomerDeleteRequest(reason = reason)
+            )
+            if (response.isSuccessful && response.body()?.success == true) {
+                val data = response.body()?.data
+                if (data != null) {
+                    Result.success(data)
+                } else {
+                    Result.failure(Exception("Customer deactivated but no response data returned"))
+                }
+            } else {
+                val errorBody = response.errorBody()?.string()
+                val (code, message) = parseErrorBody(errorBody, response.code())
+                Result.failure(CustomerApiException(code, message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun restoreCustomer(
+        customerId: String,
+        reason: String
+    ): Result<CustomerDto> {
+        return try {
+            val response = apiService.restoreCustomer(
+                customerId = customerId,
+                request = com.dfarm.registration.data.models.CustomerRestoreRequest(reason = reason)
+            )
+            if (response.isSuccessful && response.body()?.success == true) {
+                val data = response.body()?.data
+                if (data != null) {
+                    Result.success(data)
+                } else {
+                    Result.failure(Exception("Customer restored but no response data returned"))
+                }
+            } else {
+                val errorBody = response.errorBody()?.string()
+                val (code, message) = parseErrorBody(errorBody, response.code())
+                Result.failure(CustomerApiException(code, message))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun parseErrorBody(errorJson: String?, httpStatus: Int): Pair<String, String> {
         if (errorJson.isNullOrBlank()) {
             return Pair("HTTP_$httpStatus", "Server returned HTTP status $httpStatus")

@@ -77,13 +77,13 @@ class RemoteRfidRepository(
                 statusDto?.assignmentHistory?.forEach { item ->
                     list.add(
                         RfidCardAssignment(
-                            id = item.id,
-                            rfidCardId = item.cardId,
+                            id = item.effectiveId,
+                            rfidCardId = item.effectiveCardId,
                             customerId = customerId,
                             cardUid = item.cardUid,
                             isActive = item.isActive,
-                            assignedAt = item.assignedAt,
-                            assignedBy = item.assignedBy,
+                            assignedAt = item.assignedAt ?: "",
+                            assignedBy = item.assignedBy ?: "",
                             revokedAt = item.revokedAt,
                             revocationReason = item.revocationReason
                         )
@@ -118,13 +118,13 @@ class RemoteRfidRepository(
                 val dto = response.body()?.data
                     ?: return Result.failure(Exception("Assignment succeeded but no data returned"))
                 val assignment = RfidCardAssignment(
-                    id = dto.id,
-                    rfidCardId = dto.rfidCardId,
-                    customerId = dto.customerId,
+                    id = dto.effectiveId,
+                    rfidCardId = dto.rfidCardId ?: dto.effectiveId,
+                    customerId = dto.customerId ?: customerId,
                     cardUid = dto.cardUid ?: normalizedUid,
                     isActive = dto.isActive,
-                    assignedAt = dto.assignedAt,
-                    assignedBy = dto.assignedBy
+                    assignedAt = dto.assignedAt ?: "",
+                    assignedBy = dto.assignedBy ?: assignedBy
                 )
 
                 // Update cache
@@ -174,13 +174,13 @@ class RemoteRfidRepository(
                 val dto = response.body()?.data
                     ?: return Result.failure(Exception("Card replacement succeeded but no data returned"))
                 val assignment = RfidCardAssignment(
-                    id = dto.id,
-                    rfidCardId = dto.rfidCardId,
-                    customerId = dto.customerId,
+                    id = dto.effectiveId,
+                    rfidCardId = dto.rfidCardId ?: dto.effectiveId,
+                    customerId = dto.customerId ?: customerId,
                     cardUid = dto.cardUid ?: normalizedUid,
                     isActive = dto.isActive,
-                    assignedAt = dto.assignedAt,
-                    assignedBy = dto.assignedBy
+                    assignedAt = dto.assignedAt ?: "",
+                    assignedBy = dto.assignedBy ?: assignedBy
                 )
 
                 // Refresh full status from backend to preserve historical record

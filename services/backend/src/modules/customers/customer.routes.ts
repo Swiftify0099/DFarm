@@ -104,18 +104,18 @@ router.patch(
   CustomerController.update
 );
 
-// 5. Soft Delete Customer (Owner/SuperAdmin only, mandatory reason)
+// 5. Soft Delete Customer (Owner/SuperAdmin/CenterManager/RegistrationOfficer, mandatory reason)
 router.delete(
   '/:customerId',
-  requireRole([UserRole.SUPER_ADMIN, UserRole.DAIRY_OWNER]),
+  requireRole([UserRole.SUPER_ADMIN, UserRole.DAIRY_OWNER, UserRole.CENTER_MANAGER, UserRole.REGISTRATION_OFFICER]),
   validateRequest({ params: CustomerIdParamSchema, body: CustomerDeleteSchema }),
   CustomerController.softDelete
 );
 
-// 6. Restore Customer (Owner/SuperAdmin only, mandatory reason)
+// 6. Restore Customer (Owner/SuperAdmin/CenterManager/RegistrationOfficer, mandatory reason)
 router.post(
   '/:customerId/restore',
-  requireRole([UserRole.SUPER_ADMIN, UserRole.DAIRY_OWNER]),
+  requireRole([UserRole.SUPER_ADMIN, UserRole.DAIRY_OWNER, UserRole.CENTER_MANAGER, UserRole.REGISTRATION_OFFICER]),
   validateRequest({ params: CustomerIdParamSchema, body: CustomerRestoreSchema }),
   CustomerController.restore
 );

@@ -52,11 +52,27 @@ class FakeSessionManager(
 
 class FakeApiService : DFarmApiService {
     override suspend fun login(request: LoginRequest): Response<LoginResponse> {
-        return Response.success(LoginResponse(success = true, token = "dummy-token"))
+        val officer = OfficerProfile(
+            id = "user-test-01",
+            email = request.email,
+            fullName = "Field Officer",
+            role = "REGISTRATION_OFFICER",
+            organizationId = "org-dfarm-01",
+            assignedCenters = emptyList()
+        )
+        return Response.success(LoginResponse(success = true, token = "dummy-token", officer = officer))
     }
 
     override suspend fun getMe(): Response<UserMeResponse> {
-        return Response.success(UserMeResponse(success = true))
+        val officer = OfficerProfile(
+            id = "user-test-01",
+            email = "officer@dfarm.internal",
+            fullName = "Field Officer",
+            role = "REGISTRATION_OFFICER",
+            organizationId = "org-dfarm-01",
+            assignedCenters = emptyList()
+        )
+        return Response.success(UserMeResponse(success = true, officer = officer))
     }
 
     override suspend fun listCustomers(
@@ -127,6 +143,48 @@ class FakeApiService : DFarmApiService {
         customerId: String
     ): Response<ApiResponse<com.dfarm.registration.data.models.CustomerRfidStatusDto>> {
         return Response.success(ApiResponse(success = true, data = com.dfarm.registration.data.models.CustomerRfidStatusDto(customerId = customerId)))
+    }
+
+    override suspend fun getCenters(): Response<ApiResponse<List<com.dfarm.registration.data.models.CenterDto>>> {
+        val centers = listOf(
+            com.dfarm.registration.data.models.CenterDto(
+                id = "center-kolhapur-01",
+                code = "C101",
+                name = "Kolhapur Main Intake Center",
+                isPrimary = true
+            )
+        )
+        return Response.success(ApiResponse(success = true, data = centers))
+    }
+
+    override suspend fun deleteCustomer(
+        customerId: String,
+        request: com.dfarm.registration.data.models.CustomerDeleteRequest
+    ): Response<ApiResponse<CustomerDto>> {
+        val deleted = CustomerDto(
+            id = customerId,
+            organizationId = "org-dfarm-01",
+            primaryCenterId = "center-kolhapur-01",
+            fullName = "Pandurang Patil",
+            normalizedMobileNumber = "+919876543210",
+            status = "SOFT_DELETED"
+        )
+        return Response.success(ApiResponse(success = true, data = deleted))
+    }
+
+    override suspend fun restoreCustomer(
+        customerId: String,
+        request: com.dfarm.registration.data.models.CustomerRestoreRequest
+    ): Response<ApiResponse<CustomerDto>> {
+        val restored = CustomerDto(
+            id = customerId,
+            organizationId = "org-dfarm-01",
+            primaryCenterId = "center-kolhapur-01",
+            fullName = "Pandurang Patil",
+            normalizedMobileNumber = "+919876543210",
+            status = "ACTIVE"
+        )
+        return Response.success(ApiResponse(success = true, data = restored))
     }
 
     override suspend fun revokeRfid(
@@ -211,5 +269,32 @@ class CustomerRegistrationWizardTest {
 
         viewModel.goToPreviousStep()
         assertEquals(WizardStep.PERSONAL_DETAILS, viewModel.uiState.value.currentStep)
+    }
+
+    @Test
+    fun testCustomerSoftDeleteAndRestoreRepositoryFlow() = kotlinx.coroutines.test.runTest {
+        val fakeApi = FakeApiService()
+        val customerRepo = CustomerRepository(fakeApi)
+
+        val deleteResult = customerRepo.deleteCustomer("mock-uuid-12345", "Customer ceased delivery operations")
+        assertTrue(deleteResult.isSuccess)
+        assertEquals("SOFT_DELETED", deleteResult.getOrNull()?.status)
+
+        val restoreResult = customerRepo.restoreCustomer("mock-uuid-12345", "Customer resumed operations")
+        assertTrue(restoreResult.isSuccess)
+        assertEquals("ACTIVE", restoreResult.getOrNull()?.status)
+    }
+
+    @Test
+    fun testOfficerProfileCenterEnrichmentOnLogin() = kotlinx.coroutines.test.runTest {
+        val fakeSession = FakeSessionManager()
+        val fakeApi = FakeApiService()
+        val authRepo = AuthRepository(fakeApi, fakeSession)
+
+        val loginResult = authRepo.login("officer@dfarm.internal", "Password123")
+        assertTrue(loginResult.isSuccess)
+        val officer = loginResult.getOrNull()
+        assertNotNull(officer)
+        assertEquals("center-kolhapur-01", authRepo.getActiveCenterId())
     }
 }

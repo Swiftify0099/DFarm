@@ -72,8 +72,8 @@ class ApiRfidRepository(
                 data.activeCard?.let { active ->
                     assignments.add(
                         RfidCardAssignment(
-                            id = active.cardId,
-                            rfidCardId = active.cardId,
+                            id = active.effectiveCardId,
+                            rfidCardId = active.effectiveCardId,
                             customerId = customerId,
                             cardUid = active.cardUid,
                             isActive = true,
@@ -85,15 +85,15 @@ class ApiRfidRepository(
 
                 // Add past assignment history items
                 data.assignmentHistory.forEach { hist ->
-                    if (hist.cardId != data.activeCard?.cardId) {
+                    if (hist.effectiveCardId != data.activeCard?.effectiveCardId) {
                         assignments.add(
                             RfidCardAssignment(
-                                id = hist.id,
-                                rfidCardId = hist.cardId,
+                                id = hist.effectiveId,
+                                rfidCardId = hist.effectiveCardId,
                                 customerId = customerId,
                                 cardUid = hist.cardUid,
                                 isActive = hist.isActive,
-                                assignedAt = hist.assignedAt,
+                                assignedAt = hist.assignedAt ?: "",
                                 assignedBy = hist.assignedBy ?: "",
                                 revokedAt = hist.revokedAt,
                                 revocationReason = hist.revocationReason
@@ -122,13 +122,13 @@ class ApiRfidRepository(
                 val dto = response.body()!!.data!!
                 Result.success(
                     RfidCardAssignment(
-                        id = dto.id,
-                        rfidCardId = dto.rfidCardId,
-                        customerId = dto.customerId,
+                        id = dto.effectiveId,
+                        rfidCardId = dto.rfidCardId ?: dto.effectiveId,
+                        customerId = dto.customerId ?: customerId,
                         cardUid = dto.cardUid ?: normalizedUid,
                         isActive = dto.isActive,
-                        assignedAt = dto.assignedAt,
-                        assignedBy = dto.assignedBy
+                        assignedAt = dto.assignedAt ?: "",
+                        assignedBy = dto.assignedBy ?: assignedBy
                     )
                 )
             } else {
@@ -156,13 +156,13 @@ class ApiRfidRepository(
                 val dto = response.body()!!.data!!
                 Result.success(
                     RfidCardAssignment(
-                        id = dto.id,
-                        rfidCardId = dto.rfidCardId,
-                        customerId = dto.customerId,
+                        id = dto.effectiveId,
+                        rfidCardId = dto.rfidCardId ?: dto.effectiveId,
+                        customerId = dto.customerId ?: customerId,
                         cardUid = dto.cardUid ?: normalizedUid,
                         isActive = dto.isActive,
-                        assignedAt = dto.assignedAt,
-                        assignedBy = dto.assignedBy
+                        assignedAt = dto.assignedAt ?: "",
+                        assignedBy = dto.assignedBy ?: assignedBy
                     )
                 )
             } else {

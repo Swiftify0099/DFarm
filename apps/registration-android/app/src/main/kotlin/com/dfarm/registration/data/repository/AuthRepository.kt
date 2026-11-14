@@ -36,10 +36,33 @@ class AuthRepository(
             val response = apiService.login(LoginRequest(email = email.trim(), password = password))
             if (response.isSuccessful && response.body()?.success == true) {
                 val body = response.body()!!
-                val token = body.token
-                val officer = body.officer
+                val token = body.effectiveToken
+                var officer = body.effectiveOfficer
                 if (!token.isNullOrBlank() && officer != null) {
+                    if (officer.assignedCenters.isEmpty()) {
+                        try {
+                            sessionManager.saveSession(token, officer)
+                            val centersRes = apiService.getCenters()
+                            if (centersRes.isSuccessful && centersRes.body()?.success == true) {
+                                val centerDtos = centersRes.body()?.data ?: emptyList()
+                                val assigned = centerDtos.map { it.toAssignedCenter() }
+                                if (assigned.isNotEmpty()) {
+                                    val primaryId = officer.centerId ?: assigned.first().centerId
+                                    officer = officer.copy(
+                                        assignedCenters = assigned,
+                                        centerId = primaryId
+                                    )
+                                }
+                            }
+                        } catch (_: Exception) {
+                            // Fallback to existing officer profile
+                        }
+                    }
                     sessionManager.saveSession(token, officer)
+                    val activeCenterId = officer.centerId ?: officer.assignedCenters.firstOrNull()?.centerId
+                    if (activeCenterId != null) {
+                        sessionManager.setActiveCenterId(activeCenterId)
+                    }
                     _authState.value = AuthState.Authenticated(officer)
                     Result.success(officer)
                 } else {
@@ -68,10 +91,32 @@ class AuthRepository(
         return try {
             val response = apiService.getMe()
             if (response.isSuccessful && response.body()?.success == true) {
-                val officer = response.body()?.officer
+                var officer = response.body()?.effectiveOfficer
                 if (officer != null) {
                     val currentToken = sessionManager.getToken() ?: ""
+                    if (officer.assignedCenters.isEmpty()) {
+                        try {
+                            val centersRes = apiService.getCenters()
+                            if (centersRes.isSuccessful && centersRes.body()?.success == true) {
+                                val centerDtos = centersRes.body()?.data ?: emptyList()
+                                val assigned = centerDtos.map { it.toAssignedCenter() }
+                                if (assigned.isNotEmpty()) {
+                                    val primaryId = officer.centerId ?: assigned.first().centerId
+                                    officer = officer.copy(
+                                        assignedCenters = assigned,
+                                        centerId = primaryId
+                                    )
+                                }
+                            }
+                        } catch (_: Exception) {
+                            // Fallback to existing officer profile
+                        }
+                    }
                     sessionManager.saveSession(currentToken, officer)
+                    val activeCenterId = sessionManager.getActiveCenterId() ?: officer.centerId ?: officer.assignedCenters.firstOrNull()?.centerId
+                    if (activeCenterId != null) {
+                        sessionManager.setActiveCenterId(activeCenterId)
+                    }
                     _authState.value = AuthState.Authenticated(officer)
                     true
                 } else {

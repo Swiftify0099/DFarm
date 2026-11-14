@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { feedApi } from '../../api/feedApi.js';
+import { useAuth } from '../../context/AuthContext.js';
 import { FeedSupplier, FeedProduct } from '@dfarm/shared-types';
 
 export const PurchaseReceiving: React.FC = () => {
+  const { currentCenterId, selectedCenterId, centers } = useAuth();
   const [suppliers, setSuppliers] = useState<FeedSupplier[]>([]);
   const [products, setProducts] = useState<FeedProduct[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -13,7 +15,7 @@ export const PurchaseReceiving: React.FC = () => {
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>('');
   const [invoiceNumber, setInvoiceNumber] = useState<string>('');
   const [purchaseDate, setPurchaseDate] = useState<string>(new Date().toISOString().split('T')[0] ?? '');
-  const [centerId, setCenterId] = useState<string>('');
+  const [centerId, setCenterId] = useState<string>(selectedCenterId || currentCenterId || (centers.length > 0 ? centers[0]!.id : ''));
   const [items, setItems] = useState<Array<{
     productId: string;
     quantity: number;
@@ -37,11 +39,9 @@ export const PurchaseReceiving: React.FC = () => {
         setProducts(prods);
         if (sups.length > 0 && sups[0]) setSelectedSupplierId(sups[0].id);
 
-        const token = localStorage.getItem('dfarm_auth_token') || '';
-        const meRes = await fetch('/api/v1/auth/me', { headers: { Authorization: `Bearer ${token}` } });
-        const meBody = await meRes.json();
-        if (meBody?.data?.assignedCenters?.length > 0 && meBody.data.assignedCenters[0]) {
-          setCenterId(meBody.data.assignedCenters[0].id);
+        const initialCenter = selectedCenterId || currentCenterId || (centers.length > 0 ? centers[0]!.id : '');
+        if (initialCenter && !centerId) {
+          setCenterId(initialCenter);
         }
       } catch (err: any) {
         setError(err.message || 'Initialization failed');
@@ -50,7 +50,7 @@ export const PurchaseReceiving: React.FC = () => {
       }
     }
     init();
-  }, []);
+  }, [centers, currentCenterId, selectedCenterId]);
 
   const handleAddItem = () => {
     if (products.length === 0 || !products[0]) return;
@@ -100,8 +100,9 @@ export const PurchaseReceiving: React.FC = () => {
       setError('Please add at least one line item to the purchase invoice');
       return;
     }
-    if (!centerId) {
-      setError('No target center ID identified');
+    const targetCenterId = centerId || selectedCenterId || currentCenterId || (centers.length > 0 ? centers[0]!.id : '');
+    if (!targetCenterId) {
+      setError('Please select a target center');
       return;
     }
 
@@ -114,7 +115,7 @@ export const PurchaseReceiving: React.FC = () => {
 
       // 1. Create Purchase
       const purchase = await feedApi.createPurchase({
-        centerId,
+        centerId: targetCenterId,
         supplierId: selectedSupplierId,
         supplierInvoiceNumber: invoiceNumber.trim(),
         purchaseDate,
@@ -170,7 +171,22 @@ export const PurchaseReceiving: React.FC = () => {
       )}
 
       <form onSubmit={handleSaveAndReceive} className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">Target Center *</label>
+            <select
+              required
+              value={centerId || selectedCenterId || currentCenterId || ''}
+              onChange={(e) => setCenterId(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm bg-white"
+            >
+              {centers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.code})
+                </option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="block text-xs font-semibold text-gray-700 mb-1">Select Supplier *</label>
             <select

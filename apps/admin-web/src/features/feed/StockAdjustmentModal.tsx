@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { feedApi } from '../../api/feedApi.js';
+import { useAuth } from '../../context/AuthContext.js';
 import { FeedProduct } from '@dfarm/shared-types';
 
 interface StockAdjustmentModalProps {
@@ -13,9 +14,10 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
   onClose,
   onSuccess,
 }) => {
+  const { currentCenterId, selectedCenterId, centers } = useAuth();
   const [products, setProducts] = useState<FeedProduct[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>(initialProductId || '');
-  const [centerId, setCenterId] = useState<string>('');
+  const [centerId, setCenterId] = useState<string>(selectedCenterId || currentCenterId || (centers.length > 0 ? centers[0]!.id : ''));
   const [adjustmentType, setAdjustmentType] = useState<string>('DAMAGED_WRITE_OFF');
   const [direction, setDirection] = useState<'IN' | 'OUT'>('OUT');
   const [quantity, setQuantity] = useState<number>(1);
@@ -32,22 +34,21 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
           setSelectedProductId(prods[0].id);
         }
 
-        const token = localStorage.getItem('dfarm_auth_token') || '';
-        const meRes = await fetch('/api/v1/auth/me', { headers: { Authorization: `Bearer ${token}` } });
-        const meBody = await meRes.json();
-        if (meBody?.data?.assignedCenters?.length > 0 && meBody.data.assignedCenters[0]) {
-          setCenterId(meBody.data.assignedCenters[0].id);
+        const initialCenter = selectedCenterId || currentCenterId || (centers.length > 0 ? centers[0]!.id : '');
+        if (initialCenter && !centerId) {
+          setCenterId(initialCenter);
         }
       } catch (err: any) {
         setError(err.message || 'Failed to load products');
       }
     }
     load();
-  }, [initialProductId]);
+  }, [initialProductId, centers, currentCenterId, selectedCenterId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProductId || !centerId) {
+    const targetCenterId = centerId || selectedCenterId || currentCenterId || (centers.length > 0 ? centers[0]!.id : '');
+    if (!selectedProductId || !targetCenterId) {
       setError('Product and center are required');
       return;
     }
@@ -58,7 +59,7 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
       const idempotencyKey = `adj_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
       await feedApi.adjustStock({
-        centerId,
+        centerId: targetCenterId,
         productId: selectedProductId,
         adjustmentType,
         quantity: Number(quantity),
@@ -89,6 +90,21 @@ export const StockAdjustmentModal: React.FC<StockAdjustmentModalProps> = ({
               {error}
             </div>
           )}
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">Target Intake Center *</label>
+            <select
+              value={centerId || selectedCenterId || currentCenterId || ''}
+              onChange={(e) => setCenterId(e.target.value)}
+              className="w-full border rounded px-3 py-2 text-sm bg-white"
+            >
+              {centers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.code})
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div>
             <label className="block text-xs font-semibold text-gray-700 mb-1">Select Feed Product *</label>

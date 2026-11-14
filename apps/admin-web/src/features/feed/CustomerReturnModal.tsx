@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { feedApi } from '../../api/feedApi.js';
+import { useAuth } from '../../context/AuthContext.js';
 
 interface CustomerReturnModalProps {
   onClose: () => void;
@@ -7,6 +8,7 @@ interface CustomerReturnModalProps {
 }
 
 export const CustomerReturnModal: React.FC<CustomerReturnModalProps> = ({ onClose, onSuccess }) => {
+  const { user } = useAuth();
   const [saleId, setSaleId] = useState<string>('');
   const [saleItem, setSaleItem] = useState<any | null>(null);
   const [searching, setSearching] = useState<boolean>(false);
@@ -51,6 +53,7 @@ export const CustomerReturnModal: React.FC<CustomerReturnModalProps> = ({ onClos
         returnQuantity: Number(returnQuantity),
         stockCondition,
         reason: reason.trim(),
+        approvedBy: user?.id,
         idempotencyKey,
       });
 

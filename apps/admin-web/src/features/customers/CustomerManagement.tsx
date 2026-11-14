@@ -188,17 +188,26 @@ export const CustomerManagement: React.FC = () => {
       showToast('Name and mobile number are required', 'warning');
       return;
     }
+    const targetCenterId = createForm.centerId || selectedCenterId || (centers.length > 0 ? centers[0]?.id : '');
+    if (!targetCenterId) {
+      showToast('Please select an intake center', 'warning');
+      return;
+    }
     try {
       await customerApi.create({
         fullName: createForm.fullName.trim(),
         mobileNumber: createForm.mobileNumber.trim(),
-        primaryCenterId: createForm.centerId || centers[0]?.id,
-        preferredLanguage: createForm.preferredLanguage,
+        centerId: targetCenterId,
+        primaryCenterId: targetCenterId,
+        permittedCategories: createForm.milkCategories,
         milkCategories: createForm.milkCategories,
+        preferredLanguage: createForm.preferredLanguage,
         address: {
-          village: createForm.village,
-          taluka: createForm.taluka,
-          district: createForm.district,
+          village: createForm.village?.trim() || 'Village Center',
+          talukaSubdistrict: createForm.taluka?.trim() || 'Taluka',
+          district: createForm.district?.trim() || 'District',
+          state: 'Maharashtra',
+          postalCode: '416001',
         },
       });
       showToast('Customer created successfully', 'success');

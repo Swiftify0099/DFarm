@@ -1,5 +1,6 @@
 package com.dfarm.registration.data.api
 
+import android.os.Build
 import com.dfarm.registration.data.storage.ISessionManager
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -14,8 +15,19 @@ object ApiClient {
     @Volatile
     private var customBaseUrl: String? = null
 
-    // Default: Android Emulator loopback pointing to host machine port 3000
-    private const val DEFAULT_EMULATOR_BASE_URL = "http://10.0.2.2:3000/"
+    private fun isEmulator(): Boolean {
+        return Build.FINGERPRINT.startsWith("generic") ||
+                Build.FINGERPRINT.startsWith("unknown") ||
+                Build.MODEL.contains("google_sdk") ||
+                Build.MODEL.contains("Emulator") ||
+                Build.HARDWARE.contains("goldfish") ||
+                Build.HARDWARE.contains("ranchu") ||
+                Build.PRODUCT.contains("sdk")
+    }
+
+    // Default: Android Emulator loopback (10.0.2.2) or USB-reverse loopback (127.0.0.1) pointing to host machine port 4000
+    val DEFAULT_BASE_URL: String
+        get() = if (isEmulator()) "http://10.0.2.2:4000/" else "http://127.0.0.1:4000/"
 
     fun setBaseUrl(url: String) {
         val formatted = if (url.endsWith("/")) url else "$url/"
@@ -23,7 +35,7 @@ object ApiClient {
     }
 
     fun getBaseUrl(): String {
-        return customBaseUrl ?: DEFAULT_EMULATOR_BASE_URL
+        return customBaseUrl ?: DEFAULT_BASE_URL
     }
 
     private val json = Json {

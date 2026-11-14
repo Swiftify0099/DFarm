@@ -30,7 +30,7 @@ export class RfidService {
   public static async assignRfidCard(
     dto: RfidAssignDTO,
     context: AuthContext
-  ): Promise<{ assignmentId: string; cardUid: string; customerId: string; status: string }> {
+  ): Promise<{ assignmentId: string; cardUid: string; customerId: string; status: string; [key: string]: any }> {
     // 1. Role verification: Only authorized Admin, Center Manager, or Registration Officer
     const allowedRoles: UserRole[] = [
       UserRole.SUPER_ADMIN,
@@ -131,10 +131,16 @@ export class RfidService {
     });
 
     return {
+      id: assignment.id,
       assignmentId: assignment.id,
-      cardUid: normalizedUid,
+      rfidCardId: targetCardId,
       customerId: dto.customerId,
+      centerId,
+      cardUid: normalizedUid,
+      isActive: true,
       status: 'ACTIVE',
+      assignedAt: (assignment as any).assignedAt || new Date().toISOString(),
+      assignedBy: context.userId,
     };
   }
 
@@ -226,7 +232,9 @@ export class RfidService {
 
     // 6. Execute atomic replacement
     const centerId = dto.centerId || customer.primary_center_id;
-    const oldCardStatus = dto.reasonCategory === 'CARD_LOST' ? 'LOST' : 'REVOKED';
+    const reasonCategory = dto.reasonCategory || 'CARD_DAMAGED';
+    const justificationNotes = dto.justificationNotes || (dto as any).reason || 'Card replacement requested';
+    const oldCardStatus = reasonCategory === 'CARD_LOST' ? 'LOST' : 'REVOKED';
 
     const newAssignment = await RfidRepository.replaceAssignment({
       previousAssignmentId: currentAssignment.id,
@@ -235,17 +243,26 @@ export class RfidService {
       customerId: dto.customerId,
       centerId,
       replacedBy: context.userId,
-      revocationReason: `${dto.reasonCategory}: ${dto.justificationNotes}`,
+      revocationReason: `${reasonCategory}: ${justificationNotes}`,
       organizationId: customer.organization_id,
       newOldCardStatus: oldCardStatus,
     });
 
     return {
+      id: newAssignment.id,
+      assignmentId: newAssignment.id,
       newAssignmentId: newAssignment.id,
       previousCardUid: currentAssignment.cardUid,
       newCardUid: newUidNormalized,
+      cardUid: newUidNormalized,
+      rfidCardId: targetNewCardId,
       customerId: dto.customerId,
-    };
+      centerId,
+      isActive: true,
+      status: 'ACTIVE',
+      assignedAt: (newAssignment as any).assignedAt || new Date().toISOString(),
+      assignedBy: context.userId,
+    } as any;
   }
 
   /**

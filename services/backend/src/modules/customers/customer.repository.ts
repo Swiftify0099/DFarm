@@ -226,16 +226,21 @@ export class CustomerRepository {
     _overrideClient?: SupabaseClient
   ): Promise<PaginatedCustomersResult> {
     const params: unknown[] = [filter.organizationId];
-    let where = 'WHERE c.organization_id = $1 AND c.is_deleted = FALSE';
+    let where = 'WHERE c.organization_id = $1';
+
+    if (filter.status === CustomerStatus.SOFT_DELETED || (filter.status as string) === 'SOFT_DELETED') {
+      where += ' AND c.is_deleted = TRUE';
+    } else {
+      where += ' AND c.is_deleted = FALSE';
+      if (filter.status) {
+        params.push(filter.status);
+        where += ` AND c.status = $${params.length}`;
+      }
+    }
 
     if (filter.centerId) {
       params.push(filter.centerId);
       where += ` AND c.primary_center_id = $${params.length}`;
-    }
-
-    if (filter.status) {
-      params.push(filter.status);
-      where += ` AND c.status = $${params.length}`;
     }
 
     if (filter.search) {

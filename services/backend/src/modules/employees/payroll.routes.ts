@@ -50,6 +50,12 @@ router.get(
   PayrollController.listPayrollRuns
 );
 
+// Specific sub-resource routes must precede generic /:id parameter route
+router.get(
+  '/payslips/:id',
+  PayrollController.getPayslip
+);
+
 router.get(
   '/:id',
   requireRole([
@@ -59,11 +65,6 @@ router.get(
     UserRole.CENTER_MANAGER,
   ]),
   PayrollController.getPayrollRun
-);
-
-router.get(
-  '/payslips/:id',
-  PayrollController.getPayslip
 );
 
 export const payrollRouter = router;
