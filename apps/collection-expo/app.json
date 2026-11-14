@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "DFarm Collection Counter",
+    "slug": "dfarm-collection-expo",
+    "version": "1.0.0",
+    "orientation": "default",
+    "userInterfaceStyle": "dark",
+    "scheme": "dfarmcollection",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#121212"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dfarm.collection"
+    },
+    "android": {
+      "package": "com.dfarm.collection",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#121212"
+      },
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "CAMERA"
+      ]
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-sqlite"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "dfarm-collection-expo"
+      }
+    }
+  }
+}

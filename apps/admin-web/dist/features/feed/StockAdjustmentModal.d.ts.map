@@ -1,0 +1,1 @@
+{"version":3,"file":"StockAdjustmentModal.d.ts","sourceRoot":"","sources":["../../../src/features/feed/StockAdjustmentModal.tsx"],"names":[],"mappings":"AAAA,OAAO,KAA8B,MAAM,OAAO,CAAC;AAKnD,UAAU,yBAAyB;IACjC,gBAAgB,CAAC,EAAE,MAAM,CAAC;IAC1B,OAAO,EAAE,MAAM,IAAI,CAAC;IACpB,SAAS,EAAE,MAAM,IAAI,CAAC;CACvB;AAED,eAAO,MAAM,oBAAoB,EAAE,KAAK,CAAC,EAAE,CAAC,yBAAyB,CAgMpE,CAAC"}

@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "DFarm Registration",
+    "slug": "dfarm-registration-expo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "dfarm-registration",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#00506E"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dfarm.registration"
+    },
+    "android": {
+      "package": "com.dfarm.registration",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#00506E"
+      },
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "CAMERA"
+      ]
+    },
+    "plugins": [
+      "expo-secure-store"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "dfarm-registration-expo"
+      }
+    }
+  }
+}

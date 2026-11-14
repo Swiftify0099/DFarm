@@ -1,0 +1,144 @@
+import { PaymentDirection, PaymentMethod, PaymentStatus, PaymentBatchStatus, ReconciliationStatus } from './enums.js';
+export interface CustomerPayout {
+    id: string;
+    organizationId: string;
+    centerId: string;
+    customerId: string;
+    batchId?: string | null;
+    direction: PaymentDirection;
+    amount: number;
+    currency: string;
+    paymentMethod: PaymentMethod;
+    status: PaymentStatus;
+    referenceNumber?: string | null;
+    sourceTransactionType?: string | null;
+    sourceTransactionId?: string | null;
+    idempotencyKey: string;
+    bankAccountMask?: string | null;
+    bankIfsc?: string | null;
+    recipientName?: string | null;
+    notes?: string | null;
+    createdBy: string;
+    approvedBy?: string | null;
+    approvedAt?: string | null;
+    submittedAt?: string | null;
+    settledAt?: string | null;
+    failedAt?: string | null;
+    failureReason?: string | null;
+    ledgerTransactionId?: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface CustomerReceipt {
+    id: string;
+    organizationId: string;
+    centerId: string;
+    customerId: string;
+    direction: PaymentDirection;
+    amount: number;
+    currency: string;
+    paymentMethod: PaymentMethod;
+    status: PaymentStatus;
+    referenceNumber?: string | null;
+    receiptNumber: string;
+    sourceTransactionType?: string | null;
+    sourceTransactionId?: string | null;
+    idempotencyKey: string;
+    notes?: string | null;
+    createdBy: string;
+    approvedBy?: string | null;
+    approvedAt?: string | null;
+    settledAt?: string | null;
+    ledgerTransactionId?: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface PaymentBatch {
+    id: string;
+    organizationId: string;
+    centerId?: string | null;
+    batchNumber: string;
+    billingCycleId?: string | null;
+    billingPeriodStart?: string | null;
+    billingPeriodEnd?: string | null;
+    paymentMethod: PaymentMethod;
+    status: PaymentBatchStatus;
+    totalBeneficiaries: number;
+    totalAmount: number;
+    successfulCount: number;
+    successfulAmount: number;
+    failedCount: number;
+    failedAmount: number;
+    pendingCount: number;
+    pendingAmount: number;
+    reconciliationStatus: string;
+    idempotencyKey: string;
+    createdBy: string;
+    approvedBy?: string | null;
+    approvedAt?: string | null;
+    submittedAt?: string | null;
+    completedAt?: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface PaymentBatchItem {
+    id: string;
+    batchId: string;
+    payoutId: string;
+    customerId: string;
+    amount: number;
+    currency: string;
+    bankAccountMask?: string | null;
+    bankIfsc?: string | null;
+    status: string;
+    beneficiaryReference?: string | null;
+    failureReason?: string | null;
+    retryCount: number;
+    settledAt?: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface PaymentReconciliationRecord {
+    id: string;
+    organizationId: string;
+    statementImportId?: string | null;
+    source: 'MANUAL_VERIFICATION' | 'BANK_STATEMENT_CSV' | 'PAYMENT_GATEWAY_WEBHOOK';
+    externalReference: string;
+    externalEventId?: string | null;
+    transactionDate: string;
+    amount: number;
+    currency: string;
+    direction: 'CREDIT' | 'DEBIT';
+    rawDetails?: Record<string, unknown> | null;
+    matchedPayoutId?: string | null;
+    matchedReceiptId?: string | null;
+    matchedBatchId?: string | null;
+    reconciliationStatus: ReconciliationStatus;
+    resolutionAction?: string | null;
+    resolutionNotes?: string | null;
+    resolvedBy?: string | null;
+    resolvedAt?: string | null;
+    createdBy?: string | null;
+    createdAt: string;
+}
+export interface FormattedPaymentReceipt {
+    receiptTitle: string;
+    receiptNumber: string;
+    organizationName: string;
+    centerName: string;
+    customerName: string;
+    farmerCode: string;
+    paymentId: string;
+    direction: PaymentDirection;
+    directionLabel: string;
+    amount: number;
+    currency: string;
+    paymentMethod: PaymentMethod;
+    referenceNumber: string;
+    status: PaymentStatus;
+    timestamp: string;
+    authorizedActor: string;
+    bankAccountMask?: string | null;
+    slip40ColumnText: string;
+}
+//# sourceMappingURL=payment.d.ts.map

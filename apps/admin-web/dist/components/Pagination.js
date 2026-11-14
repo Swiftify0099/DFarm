@@ -1,0 +1,8 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+export const Pagination = ({ currentPage, totalItems, pageSize, onPageChange, }) => {
+    const totalPages = Math.ceil(totalItems / pageSize) || 1;
+    const startItem = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+    const endItem = Math.min(currentPage * pageSize, totalItems);
+    return (_jsxs("div", { className: "flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-white border-t border-gray-200 text-xs text-gray-600", children: [_jsxs("div", { children: ["Showing ", _jsx("span", { className: "font-semibold text-gray-900", children: startItem }), " to", ' ', _jsx("span", { className: "font-semibold text-gray-900", children: endItem }), " of", ' ', _jsx("span", { className: "font-semibold text-gray-900", children: totalItems }), " results"] }), _jsxs("div", { className: "flex items-center gap-1.5", children: [_jsx("button", { onClick: () => onPageChange(currentPage - 1), disabled: currentPage <= 1, className: "px-3 py-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium", children: "Previous" }), _jsxs("span", { className: "px-2 py-1 font-semibold text-gray-800", children: ["Page ", currentPage, " of ", totalPages] }), _jsx("button", { onClick: () => onPageChange(currentPage + 1), disabled: currentPage >= totalPages, className: "px-3 py-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium", children: "Next" })] })] }));
+};
+//# sourceMappingURL=Pagination.js.map
