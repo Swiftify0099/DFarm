@@ -104,4 +104,22 @@ export const faceApi = {
       };
     }
   },
+
+  async revokeFace(customerId: string, reason: string): Promise<{ success: boolean; message?: string }> {
+    try {
+      const res = await apiClient.post<any>(
+        `api/v1/customers/${customerId}/face-revoke`,
+        { reason, officerNotes: reason }
+      );
+      return {
+        success: res.success !== false,
+        message: res.message || 'Face enrollment revoked successfully',
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        message: err.message || 'Network error revoking face enrollment',
+      };
+    }
+  },
 };

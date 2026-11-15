@@ -257,6 +257,32 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
           </View>
         ) : null}
 
+        {/* Biometric & Hardware Quick Actions */}
+        <View style={styles.hardwareActionsCard}>
+          <Text style={styles.hardwareActionsTitle}>Biometric & Smartcard Operations</Text>
+          <View style={styles.hardwareButtonsCol}>
+            <PrimaryButton
+              text="Enroll Biometric Face"
+              onClick={() =>
+                navigation.navigate('FaceEnrollment', {
+                  customerId: customer.id,
+                  customerName: customer.fullName,
+                  farmerCode: customer.farmerCode || '',
+                })
+              }
+              leadingIcon="👤"
+              variant="secondary"
+            />
+            <View style={{ height: 10 }} />
+            <PrimaryButton
+              text="Assign / Manage RFID Smartcard"
+              onClick={() => navigation.navigate('RfidAssignment')}
+              leadingIcon="💳"
+              variant="outlined"
+            />
+          </View>
+        </View>
+
         {/* Edit Button */}
         <PrimaryButton
           text="Edit Farmer Profile"
@@ -774,5 +800,27 @@ const styles = StyleSheet.create({
     borderLeftColor: '#CBDDE8',
     borderRightColor: '#FFFFFF',
     borderBottomColor: '#FFFFFF',
+  },
+  hardwareActionsCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.card,
+    padding: 16,
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CFDCE5',
+  },
+  hardwareActionsTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: clayColors.primary,
+    marginBottom: 12,
+  },
+  hardwareButtonsCol: {
+    gap: 8,
   },
 });

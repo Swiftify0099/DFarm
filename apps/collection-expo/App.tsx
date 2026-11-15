@@ -11,7 +11,7 @@ import {
   Shift,
 } from './src/types';
 import { SessionManager } from './src/storage/SessionManager';
-import { CollectionApiClient } from './src/api/client';
+import { CollectionApiClient, loadPersistedBaseUrl } from './src/api/client';
 import { ExpoSqliteCollectionDatabase } from './src/database/CollectionDatabase';
 import { OfflineRevocationGuard } from './src/domain/sync/OfflineRevocationGuard';
 import { DFarmSyncEngine } from './src/domain/sync/DFarmSyncEngine';
@@ -90,6 +90,7 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
+        await loadPersistedBaseUrl();
         const loggedIn = await repository.isLoggedIn();
         if (loggedIn) {
           const op = await repository.getOfficerName();

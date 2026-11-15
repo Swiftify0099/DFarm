@@ -9,6 +9,7 @@
  * Includes graceful memory store fallback for headless Node.js test runners.
  */
 
+import { Platform } from 'react-native';
 import {
   LocalRegistrationDraft,
   RegistrationSyncEvent,
@@ -22,21 +23,39 @@ const DB_VERSION = 1;
 
 const CREATE_REGISTRATION_DRAFTS = `
 CREATE TABLE IF NOT EXISTS registration_drafts (
-  local_id              TEXT PRIMARY KEY,
-  canonical_server_id   TEXT,
-  farmer_code           TEXT,
-  full_name             TEXT NOT NULL,
-  mobile_number         TEXT NOT NULL,
-  category              TEXT NOT NULL,
-  center_id             TEXT,
-  enrollment_status     TEXT NOT NULL DEFAULT 'NOT_ENROLLED',
-  sync_status           TEXT NOT NULL,
-  pending_sync          INTEGER NOT NULL DEFAULT 1,
-  created_at            INTEGER NOT NULL,
-  updated_at            INTEGER NOT NULL,
-  retry_count           INTEGER NOT NULL DEFAULT 0,
-  conflict_reason       TEXT,
-  version               INTEGER NOT NULL DEFAULT 1
+  local_id                  TEXT PRIMARY KEY,
+  canonical_server_id       TEXT,
+  farmer_code               TEXT,
+  full_name                 TEXT NOT NULL,
+  mobile_number             TEXT NOT NULL,
+  permitted_categories      TEXT NOT NULL,
+  preferred_milk_category   TEXT NOT NULL,
+  village                   TEXT NOT NULL,
+  hamlet_area               TEXT,
+  taluka_subdistrict        TEXT NOT NULL,
+  district                  TEXT NOT NULL,
+  state                     TEXT NOT NULL,
+  postal_code               TEXT NOT NULL,
+  bank_name                 TEXT,
+  bank_account_number       TEXT,
+  bank_ifsc_code            TEXT,
+  bank_account_holder_name  TEXT,
+  consent_obtained          INTEGER NOT NULL DEFAULT 1,
+  consent_timestamp         INTEGER NOT NULL,
+  face_enrolled             INTEGER NOT NULL DEFAULT 0,
+  face_template_ciphertext  TEXT,
+  rfid_card_number          TEXT,
+  category                  TEXT NOT NULL,
+  center_id                 TEXT,
+  enrollment_status         TEXT NOT NULL DEFAULT 'NOT_ENROLLED',
+  sync_status               TEXT NOT NULL,
+  pending_sync              INTEGER NOT NULL DEFAULT 1,
+  created_at                INTEGER NOT NULL,
+  updated_at                INTEGER NOT NULL,
+  retry_count               INTEGER NOT NULL DEFAULT 0,
+  conflict_reason           TEXT,
+  last_sync_error           TEXT,
+  version                   INTEGER NOT NULL DEFAULT 1
 );
 `;
 
@@ -138,7 +157,12 @@ export class SQLiteRegistrationDatabase implements IRegistrationDraftStore {
     if (!this.initPromise) {
       this.initPromise = (async () => {
         try {
-          const SQLite = require('expo-sqlite');
+          if (Platform.OS === 'web') {
+            this.useFallback = true;
+            return;
+          }
+          const modName = 'expo-sqlite';
+          const SQLite = require(modName);
           if (SQLite && typeof SQLite.openDatabaseAsync === 'function') {
             const database = await SQLite.openDatabaseAsync(DB_NAME);
             await database.execAsync('PRAGMA journal_mode=WAL;');
@@ -181,16 +205,38 @@ export class SQLiteRegistrationDatabase implements IRegistrationDraftStore {
         await db.runAsync(
           `INSERT OR REPLACE INTO registration_drafts (
             local_id, canonical_server_id, farmer_code, full_name, mobile_number,
-            category, center_id, enrollment_status, sync_status, pending_sync,
-            created_at, updated_at, retry_count, conflict_reason, version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+            permitted_categories, preferred_milk_category, village, hamlet_area,
+            taluka_subdistrict, district, state, postal_code, bank_name,
+            bank_account_number, bank_ifsc_code, bank_account_holder_name,
+            consent_obtained, consent_timestamp, face_enrolled, face_template_ciphertext,
+            rfid_card_number, category, center_id, enrollment_status, sync_status,
+            pending_sync, created_at, updated_at, retry_count, conflict_reason,
+            last_sync_error, version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
           [
             draft.localId,
             draft.canonicalServerId ?? null,
             draft.farmerCode ?? null,
             draft.fullName,
             draft.mobileNumber,
-            draft.category,
+            JSON.stringify(draft.permittedCategories || ['COW']),
+            draft.preferredMilkCategory || 'COW',
+            draft.village || '',
+            draft.hamletArea ?? null,
+            draft.talukaSubdistrict || '',
+            draft.district || '',
+            draft.state || 'Maharashtra',
+            draft.postalCode || '',
+            draft.bankName ?? null,
+            draft.bankAccountNumber ?? null,
+            draft.bankIfscCode ?? null,
+            draft.bankAccountHolderName ?? null,
+            draft.consentObtained !== false ? 1 : 0,
+            draft.consentTimestamp || now,
+            draft.faceEnrolled ? 1 : 0,
+            draft.faceTemplateCiphertext ?? null,
+            draft.rfidCardNumber ?? null,
+            draft.category || 'COW',
             draft.centerId ?? null,
             draft.enrollmentStatus ?? 'NOT_ENROLLED',
             LocalSyncStatus.PENDING_SYNC,
@@ -199,6 +245,7 @@ export class SQLiteRegistrationDatabase implements IRegistrationDraftStore {
             now,
             draft.retryCount ?? 0,
             draft.conflictReason ?? null,
+            draft.lastSyncError ?? null,
             draft.version ?? 1,
           ]
         );

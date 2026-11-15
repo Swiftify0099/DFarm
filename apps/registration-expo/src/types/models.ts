@@ -271,6 +271,7 @@ export interface FaceStatusResult {
 
 export enum LocalSyncStatus {
   LOCAL_ONLY = 'LOCAL_ONLY',
+  DRAFT = 'LOCAL_ONLY',
   PENDING_SYNC = 'PENDING_SYNC',
   SYNCING = 'SYNCING',
   SYNCED = 'SYNCED',

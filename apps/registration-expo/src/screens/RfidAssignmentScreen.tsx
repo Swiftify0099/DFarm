@@ -23,6 +23,7 @@ import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
 import { clayColors, clayRadius } from '../theme/claymorphism';
 import { rfidAdapter } from '../hardware/RfidReaderAdapter';
+import { NfcRfidReaderService } from '../hardware/NfcRfidReaderService';
 import { customerApi } from '../api/customerApi';
 import { rfidApi } from '../api/rfidApi';
 import { CustomerDto, RfidAssignmentDto } from '../types/models';
@@ -51,6 +52,37 @@ export const RfidAssignmentScreen: React.FC = () => {
   const [showBlockDialog, setShowBlockDialog] = useState(false);
   const [dialogReason, setDialogReason] = useState('');
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
+
+  // Physical NFC Reader
+  const [nfcService] = useState(() => new NfcRfidReaderService());
+  const [nfcAvailable, setNfcAvailable] = useState<{ supported: boolean; enabled: boolean }>({
+    supported: false,
+    enabled: false,
+  });
+  const [isScanningNfc, setIsScanningNfc] = useState(false);
+
+  useEffect(() => {
+    nfcService.checkNfcAvailability().then(setNfcAvailable);
+  }, [nfcService]);
+
+  const handleStartNfcScan = async () => {
+    setIsScanningNfc(true);
+    setErrorMessage(null);
+    try {
+      await nfcService.startScan((result) => {
+        setIsScanningNfc(false);
+        if (result.success && result.normalizedUid) {
+          onUidInputChanged(result.normalizedUid);
+          setSuccessMessage(`Card scanned via NFC: ${result.normalizedUid}`);
+        } else if (result.error) {
+          setErrorMessage(result.error);
+        }
+      });
+    } catch (err: any) {
+      setIsScanningNfc(false);
+      setErrorMessage(err.message || 'NFC scan failed');
+    }
+  };
 
   const isCustomerFaceEnrolled = (c: CustomerDto) =>
     c.status !== 'PENDING_FACE_ENROLLMENT' && c.status !== 'DRAFT';
@@ -478,6 +510,20 @@ export const RfidAssignmentScreen: React.FC = () => {
                       ))}
                     </View>
                   </View>
+                )}
+
+                {nfcAvailable.supported && (
+                  <TouchableOpacity
+                    style={[styles.nfcScanButton, isScanningNfc && styles.nfcScanningActive]}
+                    onPress={handleStartNfcScan}
+                    disabled={isScanningNfc}
+                  >
+                    <Text style={styles.nfcScanButtonText}>
+                      {isScanningNfc
+                        ? '📡 Hold NFC Smartcard Near Device...'
+                        : '📲 Tap NFC Smartcard to Scan'}
+                    </Text>
+                  </TouchableOpacity>
                 )}
 
                 <View style={styles.inputContainer}>
@@ -1414,5 +1460,25 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: clayColors.textMuted,
     marginTop: 2,
+  },
+  nfcScanButton: {
+    backgroundColor: '#025A75',
+    paddingVertical: 14,
+    borderRadius: clayRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+    borderTopWidth: 2,
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderBottomWidth: 3,
+    borderBottomColor: '#013D50',
+  },
+  nfcScanningActive: {
+    backgroundColor: '#013D50',
+  },
+  nfcScanButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 14,
   },
 });

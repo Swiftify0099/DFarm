@@ -6,6 +6,11 @@ const monorepoRoot = path.resolve(projectRoot, '../..');
 
 const config = getDefaultConfig(projectRoot);
 
+// Support .wasm assets for expo-sqlite web bundle
+if (!config.resolver.assetExts.includes('wasm')) {
+  config.resolver.assetExts.push('wasm');
+}
+
 // 1. Watch all files within the monorepo
 config.watchFolders = [monorepoRoot];
 

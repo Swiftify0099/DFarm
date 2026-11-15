@@ -214,4 +214,58 @@ describe('OfflineRegistrationSyncTest', () => {
     assert.strictEqual(conflictedDraft?.syncStatus, LocalSyncStatus.CONFLICT);
     assert.strictEqual(conflictedDraft?.conflictReason, 'DUPLICATE_MOBILE_NUMBER');
   });
+
+  it('testFullDraftFieldPersistenceAndRecovery', async () => {
+    const fullDraft: LocalRegistrationDraft = {
+      localId: 'local-test-full-001',
+      farmerCode: 'DF-2026-FARMER',
+      fullName: 'Suresh Tukaram Patil',
+      mobileNumber: '+919876543210',
+      permittedCategories: ['COW', 'BUFFALO'],
+      preferredMilkCategory: 'COW',
+      village: 'Wadgaon',
+      hamletArea: 'Mali Galli',
+      talukaSubdistrict: 'Karveer',
+      district: 'Kolhapur',
+      state: 'Maharashtra',
+      postalCode: '416001',
+      bankName: 'State Bank of India',
+      bankAccountNumber: '123456789012',
+      bankIfscCode: 'SBIN0001234',
+      bankAccountHolderName: 'Suresh T Patil',
+      consentObtained: true,
+      consentTimestamp: 1731650000000,
+      faceEnrolled: false,
+      faceTemplateCiphertext: null,
+      rfidCardNumber: '04A1B2C3D4',
+      syncStatus: LocalSyncStatus.PENDING_SYNC,
+      retryCount: 0,
+      createdAt: 1731650000000,
+      updatedAt: 1731650000000,
+      version: 1,
+      centerId: 'c-kolhapur-01',
+      category: 'BOTH',
+      enrollmentStatus: 'NOT_ENROLLED',
+      pendingSync: true,
+    };
+
+    const idempotencyKey = `IDEMP-FULL-${fullDraft.localId}`;
+    const payload = JSON.stringify(fullDraft);
+
+    const saved = await store.saveDraftAndEnqueueEvent(fullDraft, idempotencyKey, payload);
+    assert.strictEqual(saved, true);
+
+    const retrieved = await store.getDraftByLocalId(fullDraft.localId);
+    assert.ok(retrieved);
+    assert.strictEqual(retrieved?.fullName, 'Suresh Tukaram Patil');
+    assert.strictEqual(retrieved?.village, 'Wadgaon');
+    assert.strictEqual(retrieved?.district, 'Kolhapur');
+    assert.strictEqual(retrieved?.talukaSubdistrict, 'Karveer');
+    assert.strictEqual(retrieved?.postalCode, '416001');
+    assert.strictEqual(retrieved?.bankName, 'State Bank of India');
+    assert.strictEqual(retrieved?.bankAccountNumber, '123456789012');
+    assert.strictEqual(retrieved?.bankIfscCode, 'SBIN0001234');
+    assert.strictEqual(retrieved?.rfidCardNumber, '04A1B2C3D4');
+    assert.deepStrictEqual(retrieved?.permittedCategories, ['COW', 'BUFFALO']);
+  });
 });

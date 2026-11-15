@@ -13,7 +13,8 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { useAuth } from '../auth/AuthContext';
 import { customerApi } from '../api/customerApi';
-import { CustomerDto } from '../types/models';
+import { CustomerDto, LocalRegistrationDraft, LocalSyncStatus } from '../types/models';
+import { registrationDb } from '../database/RegistrationDatabase';
 import { colors } from '../theme/colors';
 import { clayColors, clayRadius, clayStyles } from '../theme/claymorphism';
 import { clayAssets } from '../theme/assets';
@@ -148,6 +149,77 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
+  const handleSaveOfflineDraft = async () => {
+    setIsSubmitting(true);
+    setGeneralError(null);
+
+    const categories =
+      MILK_CATEGORY_OPTIONS.find((opt) => opt.key === selectedCategoryOption)
+        ?.categories || ['COW', 'BUFFALO'];
+
+    try {
+      const now = Date.now();
+      const localId = 'draft_' + Math.random().toString(36).substring(2, 9) + '_' + now;
+      const idempotencyKey = `reg_${normalizedMobile}_${now}`;
+      const payload = {
+        fullName: fullName.trim(),
+        normalizedMobileNumber: normalizedMobile,
+        permittedCategories: categories,
+        primaryCenterId: activeCenterId,
+        address: {
+          village: village.trim(),
+          district: district.trim(),
+          talukaSubdistrict: taluka.trim() || null,
+          postalCode: postalCode.trim() || null,
+          state: 'Maharashtra',
+        },
+      };
+      const draft: LocalRegistrationDraft = {
+        localId,
+        fullName: fullName.trim(),
+        mobileNumber: normalizedMobile,
+        permittedCategories: categories,
+        preferredMilkCategory: categories[0] || 'COW',
+        village: village.trim(),
+        talukaSubdistrict: taluka.trim() || '',
+        district: district.trim(),
+        state: 'Maharashtra',
+        postalCode: postalCode.trim() || '',
+        consentObtained: true,
+        consentTimestamp: now,
+        faceEnrolled: false,
+        syncStatus: LocalSyncStatus.PENDING_SYNC,
+        retryCount: 0,
+        createdAt: now,
+        updatedAt: now,
+        version: 1,
+        centerId: activeCenterId,
+        category: categories.length > 1 ? 'BOTH' : categories[0],
+        enrollmentStatus: 'NOT_ENROLLED',
+        pendingSync: true,
+      };
+      await registrationDb.saveDraftAndEnqueueEvent(draft, idempotencyKey, JSON.stringify(payload));
+
+      setCreatedCustomer({
+        id: localId,
+        organizationId: 'OFFLINE_LOCAL',
+        primaryCenterId: activeCenterId || 'DEFAULT',
+        farmerCode: 'OFFLINE-DRAFT',
+        fullName: fullName.trim(),
+        normalizedMobileNumber: normalizedMobile,
+        status: 'OFFLINE_PENDING_SYNC',
+        registrationStatus: 'PENDING_SYNC',
+        permittedCategories: categories,
+        address: payload.address,
+      });
+      setCurrentStep(WizardStep.REGISTRATION_STATUS);
+    } catch (saveErr: any) {
+      setGeneralError(saveErr.message || 'Failed to save offline draft to local database');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSubmitRegistration = async () => {
     setIsSubmitting(true);
     setGeneralError(null);
@@ -179,7 +251,66 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
           `Mobile number ${normalizedMobile} is already registered in this organization. Duplicate registration is rejected.`
         );
       } else {
-        setGeneralError(err.message || 'Failed to create customer record on server');
+        // Automatically save as offline draft into SQLite database for background synchronization
+        try {
+          const now = Date.now();
+          const localId = 'draft_' + Math.random().toString(36).substring(2, 9) + '_' + now;
+          const idempotencyKey = `reg_${normalizedMobile}_${now}`;
+          const payload = {
+            fullName: fullName.trim(),
+            normalizedMobileNumber: normalizedMobile,
+            permittedCategories: categories,
+            primaryCenterId: activeCenterId,
+            address: {
+              village: village.trim(),
+              district: district.trim(),
+              talukaSubdistrict: taluka.trim() || null,
+              postalCode: postalCode.trim() || null,
+              state: 'Maharashtra',
+            },
+          };
+          const draft: LocalRegistrationDraft = {
+            localId,
+            fullName: fullName.trim(),
+            mobileNumber: normalizedMobile,
+            permittedCategories: categories,
+            preferredMilkCategory: categories[0] || 'COW',
+            village: village.trim(),
+            talukaSubdistrict: taluka.trim() || '',
+            district: district.trim(),
+            state: 'Maharashtra',
+            postalCode: postalCode.trim() || '',
+            consentObtained: true,
+            consentTimestamp: now,
+            faceEnrolled: false,
+            syncStatus: LocalSyncStatus.PENDING_SYNC,
+            retryCount: 0,
+            createdAt: now,
+            updatedAt: now,
+            version: 1,
+            centerId: activeCenterId,
+            category: categories.length > 1 ? 'BOTH' : categories[0],
+            enrollmentStatus: 'NOT_ENROLLED',
+            pendingSync: true,
+          };
+          await registrationDb.saveDraftAndEnqueueEvent(draft, idempotencyKey, JSON.stringify(payload));
+
+          setCreatedCustomer({
+            id: localId,
+            organizationId: 'OFFLINE_LOCAL',
+            primaryCenterId: activeCenterId || 'DEFAULT',
+            farmerCode: 'OFFLINE-DRAFT',
+            fullName: fullName.trim(),
+            normalizedMobileNumber: normalizedMobile,
+            status: 'OFFLINE_PENDING_SYNC',
+            registrationStatus: 'PENDING_SYNC',
+            permittedCategories: categories,
+            address: payload.address,
+          });
+          setCurrentStep(WizardStep.REGISTRATION_STATUS);
+        } catch {
+          setGeneralError(err.message || 'Failed to create customer record on server');
+        }
       }
     } finally {
       setIsSubmitting(false);
@@ -439,6 +570,14 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
                 have been verified in compliance with DFarm Dairy Policy.
               </Text>
             </View>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              style={[styles.outlineNavButton, { marginTop: 14 }]}
+              onPress={handleSaveOfflineDraft}
+            >
+              <Text style={styles.outlineNavButtonText}>💾 Save as Offline Draft (Local SQLite)</Text>
+            </TouchableOpacity>
           </View>
         ) : null}
 
@@ -452,9 +591,15 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
               resizeMode="contain"
             />
 
-            <Text style={styles.successTitle}>Registration Created!</Text>
+            <Text style={styles.successTitle}>
+              {createdCustomer.status === 'OFFLINE_PENDING_SYNC'
+                ? 'Offline Registration Saved!'
+                : 'Registration Created!'}
+            </Text>
             <Text style={styles.successSubtitle}>
-              Customer record created in authoritative PostgreSQL database.
+              {createdCustomer.status === 'OFFLINE_PENDING_SYNC'
+                ? 'Saved to local SQLite database. It will automatically synchronize to central PostgreSQL once online.'
+                : 'Customer record created in authoritative PostgreSQL database.'}
             </Text>
 
             <View style={styles.summaryCard}>
@@ -471,7 +616,11 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
               <View style={styles.divider} />
 
               <View style={styles.uuidSection}>
-                <Text style={styles.uuidLabel}>Server Canonical Customer UUID</Text>
+                <Text style={styles.uuidLabel}>
+                  {createdCustomer.status === 'OFFLINE_PENDING_SYNC'
+                    ? 'Local Draft Identifier (Pending Sync)'
+                    : 'Server Canonical Customer UUID'}
+                </Text>
                 <Text style={styles.uuidValue}>{createdCustomer.id}</Text>
               </View>
 

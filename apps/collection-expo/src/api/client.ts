@@ -22,6 +22,25 @@ import {
 } from '../types';
 
 let customBaseUrl: string | null = null;
+export const API_BASE_URL_STORAGE_KEY = '@dfarm_collection_api_base_url';
+
+export function getAutoDetectedHost(): string | null {
+  try {
+    const Constants =
+      require('expo-constants').default || require('expo-constants');
+    const hostUri =
+      Constants?.expoConfig?.hostUri ||
+      Constants?.manifest?.debuggerHost ||
+      Constants?.manifest2?.extra?.expoGo?.debuggerHost;
+    if (hostUri) {
+      const ip = hostUri.split(':')[0];
+      if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+        return ip;
+      }
+    }
+  } catch {}
+  return null;
+}
 
 export function getDefaultBaseUrl(): string {
   if (customBaseUrl) return customBaseUrl;
@@ -30,12 +49,27 @@ export function getDefaultBaseUrl(): string {
     const clean = envUrl.replace(/\/api\/v1\/?$/, '');
     return clean.endsWith('/') ? clean.slice(0, -1) : clean;
   }
-  // Android emulator loopback vs web/localhost
-  const proc = (globalThis as any).process;
-  const isAndroid =
-    (typeof proc !== 'undefined' && proc.env?.EXPO_PLATFORM === 'android') ||
-    (typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent));
-  if (isAndroid) {
+
+  // 1. Dynamic host resolution from Expo Metro connection (physical phone or emulator)
+  const hostFromExpo = getAutoDetectedHost();
+  if (hostFromExpo) {
+    return `http://${hostFromExpo}:4000`;
+  }
+
+  // 2. Platform-specific fallback
+  let os: string | undefined;
+  try {
+    os = require('react-native').Platform?.OS;
+  } catch {}
+
+  if (!os) {
+    const proc = (globalThis as any).process;
+    os =
+      proc?.env?.EXPO_PLATFORM ||
+      (typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent) ? 'android' : 'default');
+  }
+
+  if (os === 'android') {
     return 'http://10.0.2.2:4000';
   }
   return 'http://127.0.0.1:4000';
@@ -43,6 +77,62 @@ export function getDefaultBaseUrl(): string {
 
 export function setApiBaseUrl(url: string) {
   customBaseUrl = url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
+export async function loadPersistedBaseUrl(): Promise<string> {
+  try {
+    const AsyncStorage =
+      require('@react-native-async-storage/async-storage').default ||
+      require('@react-native-async-storage/async-storage');
+    const saved = await AsyncStorage.getItem(API_BASE_URL_STORAGE_KEY);
+    if (saved && saved.trim()) {
+      const clean = saved.trim().replace(/\/+$/, '').replace(/\/api\/v1\/?$/, '');
+      customBaseUrl = clean;
+      return clean;
+    }
+  } catch {}
+  return getDefaultBaseUrl();
+}
+
+export async function savePersistedBaseUrl(url: string): Promise<string> {
+  const clean = url.trim().replace(/\/+$/, '').replace(/\/api\/v1\/?$/, '');
+  customBaseUrl = clean;
+  try {
+    const AsyncStorage =
+      require('@react-native-async-storage/async-storage').default ||
+      require('@react-native-async-storage/async-storage');
+    await AsyncStorage.setItem(API_BASE_URL_STORAGE_KEY, clean);
+  } catch {}
+  return clean;
+}
+
+export async function testConnection(
+  url?: string
+): Promise<{ success: boolean; message: string }> {
+  const target = (url || getDefaultBaseUrl()).trim().replace(/\/+$/, '');
+  const endpoint = `${target}/health/live`;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(endpoint, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      return { success: true, message: `Connected successfully to backend (${res.status} OK)` };
+    }
+    return { success: false, message: `Server reachable but returned HTTP ${res.status}` };
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      return { success: false, message: 'Connection timed out (4s). Is backend running on this IP?' };
+    }
+    return {
+      success: false,
+      message: err.message || 'Failed to connect. Check IP/port and firewall.',
+    };
+  }
 }
 
 export class CollectionApiClient {
