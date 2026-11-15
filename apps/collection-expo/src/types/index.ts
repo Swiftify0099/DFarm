@@ -232,6 +232,14 @@ export interface IdentificationCustomerDto {
   permittedCategories: string[];
 }
 
+export interface FaceIdentificationRequest {
+  centerId: string;
+  deviceId?: string;
+  sessionId?: string | null;
+  probeEmbedding?: number[] | null;
+  qualityScore?: number | null;
+}
+
 export interface IdentificationResponseDto {
   success: boolean;
   sessionId?: string | null;

@@ -106,23 +106,23 @@ export const PayrollDashboard: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+      <div className="clay-card rounded-3xl p-6 bg-white shadow-clay-card border border-white/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-gray-800">💼 Payroll Engine & Settlement</h2>
-          <p className="text-sm text-gray-500">
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight">💼 Payroll Engine & Settlement</h2>
+          <p className="text-sm text-slate-500 font-medium">
             Lifecycle: DRAFT → CALCULATING → UNDER_REVIEW → APPROVED → FINALIZED → PAID
           </p>
         </div>
         <button
           onClick={() => setIsInitiateModalOpen(true)}
-          className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-semibold text-sm shadow flex items-center gap-2"
+          className="clay-btn-brand bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-bold px-5 py-2.5 rounded-xl shadow-clay-button flex items-center gap-2 text-xs tracking-wide active:scale-95 transition-all"
         >
           <span>➕</span> Initiate Monthly Run
         </button>
       </div>
 
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-sm font-semibold shadow-sm">
           {error}
         </div>
       )}
@@ -130,61 +130,67 @@ export const PayrollDashboard: React.FC = () => {
       {/* Main Grid: Runs list on left, details on right */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Runs List */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-3">
-          <h3 className="font-bold text-gray-800 text-sm uppercase">Monthly Payroll Runs</h3>
+        <div className="clay-card rounded-3xl p-5 bg-white shadow-clay-card border border-white/80 space-y-3">
+          <h3 className="font-extrabold text-slate-700 text-xs uppercase tracking-wider">Monthly Payroll Runs</h3>
           {loading ? (
-            <div className="p-4 text-center text-gray-400 text-sm">Loading runs...</div>
+            <div className="p-8 text-center text-slate-400 text-sm font-semibold space-y-2">
+              <div className="w-6 h-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+              <div>Loading runs...</div>
+            </div>
           ) : runs.length === 0 ? (
-            <div className="p-4 text-center text-gray-400 text-sm">No payroll runs found.</div>
+            <div className="p-8 text-center text-slate-400 text-sm font-semibold">No payroll runs found.</div>
           ) : (
-            <div className="space-y-2">
-              {runs.map((r) => (
-                <div
-                  key={r.id}
-                  onClick={() => loadRunDetails(r.id)}
-                  className={`p-3 border rounded-lg cursor-pointer transition text-xs space-y-1 ${
-                    selectedRun?.id === r.id
-                      ? 'border-emerald-600 bg-emerald-50'
-                      : 'hover:bg-gray-50'
-                  }`}
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold text-gray-900 text-sm">
-                      {new Date(r.year, r.month - 1).toLocaleString('default', { month: 'long', year: 'numeric' })}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-full font-bold ${
-                      r.status === PayrollRunStatus.FINALIZED || r.status === PayrollRunStatus.PAID
-                        ? 'bg-green-100 text-green-800'
-                        : r.status === PayrollRunStatus.APPROVED
-                        ? 'bg-blue-100 text-blue-800'
-                        : r.status === PayrollRunStatus.UNDER_REVIEW
-                        ? 'bg-purple-100 text-purple-800'
-                        : 'bg-yellow-100 text-yellow-800'
-                    }`}>
-                      {r.status}
-                    </span>
+            <div className="space-y-2.5">
+              {runs.map((r) => {
+                const isSelected = selectedRun?.id === r.id;
+                return (
+                  <div
+                    key={r.id}
+                    onClick={() => loadRunDetails(r.id)}
+                    className={`p-4 rounded-2xl cursor-pointer transition-all duration-200 text-xs space-y-1.5 ${
+                      isSelected
+                        ? 'bg-gradient-to-r from-emerald-50 to-teal-50/60 border border-emerald-300 shadow-sm scale-[1.01]'
+                        : 'clay-card bg-[#F8FAFC] hover:bg-white border border-slate-200/80'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <span className="font-extrabold text-slate-900 text-sm">
+                        {new Date(r.year, r.month - 1).toLocaleString('default', { month: 'long', year: 'numeric' })}
+                      </span>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                        r.status === PayrollRunStatus.FINALIZED || r.status === PayrollRunStatus.PAID
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                          : r.status === PayrollRunStatus.APPROVED
+                          ? 'bg-sky-100 text-sky-800 border border-sky-200'
+                          : r.status === PayrollRunStatus.UNDER_REVIEW
+                          ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                          : 'bg-amber-100 text-amber-800 border border-amber-200'
+                      }`}>
+                        {r.status}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-600 font-medium">
+                      <span>{r.totalEmployees} Employees</span>
+                      <span className="font-black text-emerald-700 text-sm">₹{r.totalNetSalary.toFixed(2)}</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between text-gray-600">
-                    <span>{r.totalEmployees} Employees</span>
-                    <span className="font-bold text-emerald-700">₹{r.totalNetSalary.toFixed(2)}</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
 
         {/* Right Column: Active Run Controls & Payslips */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-200 space-y-6">
+        <div className="lg:col-span-2 clay-card rounded-3xl p-6 sm:p-8 bg-white shadow-clay-card border border-white/80 space-y-6">
           {selectedRun ? (
             <>
               {/* Active Run Header & Lifecycle Actions */}
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b pb-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-4">
                 <div>
-                  <h3 className="font-bold text-gray-900 text-lg">
+                  <h3 className="font-black text-slate-900 text-xl tracking-tight">
                     Payroll Run: {new Date(selectedRun.year, selectedRun.month - 1).toLocaleString('default', { month: 'long', year: 'numeric' })}
                   </h3>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-slate-500 font-medium">
                     Period: {selectedRun.periodStart} to {selectedRun.periodEnd}
                   </p>
                 </div>
@@ -194,7 +200,7 @@ export const PayrollDashboard: React.FC = () => {
                   {(selectedRun.status === PayrollRunStatus.DRAFT || selectedRun.status === PayrollRunStatus.UNDER_REVIEW) && (
                     <button
                       onClick={() => handleCalculate(selectedRun.id)}
-                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-bold text-xs shadow"
+                      className="clay-btn-brand px-4 py-2 bg-gradient-to-r from-sky-600 to-blue-700 hover:from-sky-500 hover:to-blue-600 text-white rounded-xl font-bold text-xs shadow-clay-button active:scale-95 transition-all"
                     >
                       ⚙️ Calculate / Recalculate
                     </button>
@@ -203,7 +209,7 @@ export const PayrollDashboard: React.FC = () => {
                   {selectedRun.status === PayrollRunStatus.UNDER_REVIEW && (
                     <button
                       onClick={() => handleApprove(selectedRun.id)}
-                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded font-bold text-xs shadow"
+                      className="clay-btn-brand px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-700 hover:from-purple-500 hover:to-indigo-600 text-white rounded-xl font-bold text-xs shadow-clay-button active:scale-95 transition-all"
                     >
                       ✓ Approve Run (Checker)
                     </button>
@@ -212,7 +218,7 @@ export const PayrollDashboard: React.FC = () => {
                   {selectedRun.status === PayrollRunStatus.APPROVED && (
                     <button
                       onClick={() => handleFinalize(selectedRun.id)}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-xs shadow"
+                      className="clay-btn-brand px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl font-bold text-xs shadow-clay-button active:scale-95 transition-all"
                     >
                       🔒 Finalize Payroll (Lock)
                     </button>
@@ -222,73 +228,76 @@ export const PayrollDashboard: React.FC = () => {
 
               {/* Financial KPI Summary Cards */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                <div className="p-3 border rounded-lg bg-gray-50">
-                  <span className="text-gray-500 block">Gross Salary</span>
-                  <span className="font-bold text-gray-900 text-sm">₹{selectedRun.totalGrossSalary.toFixed(2)}</span>
+                <div className="clay-card p-4 rounded-2xl bg-[#F8FAFC] border border-slate-200/80 shadow-sm">
+                  <span className="text-slate-500 block uppercase font-bold text-[10px]">Gross Salary</span>
+                  <span className="font-black text-slate-900 text-base mt-1 block">₹{selectedRun.totalGrossSalary.toFixed(2)}</span>
                 </div>
-                <div className="p-3 border rounded-lg bg-gray-50">
-                  <span className="text-gray-500 block">Allowances</span>
-                  <span className="font-bold text-gray-900 text-sm">₹{selectedRun.totalAllowances.toFixed(2)}</span>
+                <div className="clay-card p-4 rounded-2xl bg-[#F8FAFC] border border-slate-200/80 shadow-sm">
+                  <span className="text-slate-500 block uppercase font-bold text-[10px]">Allowances</span>
+                  <span className="font-black text-slate-900 text-base mt-1 block">₹{selectedRun.totalAllowances.toFixed(2)}</span>
                 </div>
-                <div className="p-3 border rounded-lg bg-gray-50">
-                  <span className="text-gray-500 block">Deductions</span>
-                  <span className="font-bold text-red-600 text-sm">-₹{selectedRun.totalDeductions.toFixed(2)}</span>
+                <div className="clay-card p-4 rounded-2xl bg-[#F8FAFC] border border-slate-200/80 shadow-sm">
+                  <span className="text-slate-500 block uppercase font-bold text-[10px]">Deductions</span>
+                  <span className="font-black text-rose-600 text-base mt-1 block">-₹{selectedRun.totalDeductions.toFixed(2)}</span>
                 </div>
-                <div className="p-3 border rounded-lg bg-emerald-50 border-emerald-200">
-                  <span className="text-emerald-800 block font-semibold">Total Net Pay</span>
-                  <span className="font-extrabold text-emerald-700 text-base">₹{selectedRun.totalNetSalary.toFixed(2)}</span>
+                <div className="clay-card p-4 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 shadow-sm">
+                  <span className="text-emerald-800 block font-extrabold text-[10px] uppercase">Total Net Pay</span>
+                  <span className="font-black text-emerald-700 text-lg mt-1 block">₹{selectedRun.totalNetSalary.toFixed(2)}</span>
                 </div>
               </div>
 
               {/* Payslips Table */}
               <div className="space-y-3">
-                <h4 className="font-bold text-gray-800 text-sm uppercase">Itemized Payslips</h4>
+                <h4 className="font-extrabold text-slate-800 text-xs uppercase tracking-wider">Itemized Payslips</h4>
                 {payslipsLoading ? (
-                  <div className="p-6 text-center text-gray-400 text-sm">Loading payslips...</div>
+                  <div className="p-8 text-center text-slate-400 text-sm font-semibold space-y-2">
+                    <div className="w-6 h-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                    <div>Loading payslips...</div>
+                  </div>
                 ) : payslips.length === 0 ? (
-                  <div className="p-6 text-center text-gray-400 text-sm">
+                  <div className="p-8 text-center clay-inset rounded-2xl bg-slate-50 text-slate-500 text-xs font-semibold">
                     No payslips generated yet. Click "Calculate" to compute salaries.
                   </div>
                 ) : (
-                  <div className="overflow-x-auto border rounded-lg">
+                  <div className="overflow-x-auto rounded-2xl border border-slate-200/80 shadow-sm">
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-gray-50 border-b text-gray-600 font-semibold uppercase">
+                      <thead className="bg-[#F8FAFC] border-b border-slate-200 text-slate-600 font-extrabold uppercase tracking-wider">
                         <tr>
-                          <th className="p-2.5">Employee</th>
-                          <th className="p-2.5">Days (P/A/L)</th>
-                          <th className="p-2.5">Gross Pay</th>
-                          <th className="p-2.5">Deductions</th>
-                          <th className="p-2.5">Net Salary</th>
-                          <th className="p-2.5">Status</th>
-                          <th className="p-2.5 text-right">Action</th>
+                          <th className="px-3.5 py-3">Employee</th>
+                          <th className="px-3.5 py-3">Days (P/A/L)</th>
+                          <th className="px-3.5 py-3">Gross Pay</th>
+                          <th className="px-3.5 py-3">Deductions</th>
+                          <th className="px-3.5 py-3">Net Salary</th>
+                          <th className="px-3.5 py-3">Status</th>
+                          <th className="px-3.5 py-3 text-right">Action</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-100">
+                      <tbody className="divide-y divide-slate-100 bg-white">
                         {payslips.map((ps) => (
-                          <tr key={ps.id} className="hover:bg-gray-50">
-                            <td className="p-2.5 font-semibold text-gray-900">
+                          <tr key={ps.id} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="px-3.5 py-3 font-bold text-slate-900">
                               <div>{ps.employeeName}</div>
-                              <div className="text-[10px] text-gray-400 font-mono">{ps.employeeCode}</div>
+                              <div className="text-[10px] text-slate-400 font-mono font-bold">{ps.employeeCode}</div>
                             </td>
-                            <td className="p-2.5">
+                            <td className="px-3.5 py-3 text-slate-700 font-medium">
                               {ps.presentDays}P / {ps.absentDays}A / {ps.paidLeaveDays}L
                             </td>
-                            <td className="p-2.5 font-medium">₹{ps.grossEarnings.toFixed(2)}</td>
-                            <td className="p-2.5 text-red-600 font-medium">-₹{ps.totalDeductions.toFixed(2)}</td>
-                            <td className="p-2.5 font-bold text-emerald-700">₹{ps.netSalary.toFixed(2)}</td>
-                            <td className="p-2.5">
-                              <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                            <td className="px-3.5 py-3 font-bold text-slate-900">₹{ps.grossEarnings.toFixed(2)}</td>
+                            <td className="px-3.5 py-3 text-rose-600 font-bold">-₹{ps.totalDeductions.toFixed(2)}</td>
+                            <td className="px-3.5 py-3 font-black text-emerald-700">₹{ps.netSalary.toFixed(2)}</td>
+                            <td className="px-3.5 py-3">
+                              <span className={`px-2.5 py-0.5 rounded-full font-extrabold text-[10px] ${
                                 ps.paymentStatus === 'PAID'
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-yellow-100 text-yellow-800'
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  : 'bg-amber-100 text-amber-800 border border-amber-200'
                               }`}>
                                 {ps.paymentStatus}
                               </span>
                             </td>
-                            <td className="p-2.5 text-right">
+                            <td className="px-3.5 py-3 text-right">
                               <button
                                 onClick={() => setActivePayslip(ps)}
-                                className="px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded font-medium shadow-sm"
+                                className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold shadow-sm active:scale-95 transition-all text-xs"
                               >
                                 View Payslip
                               </button>
@@ -302,20 +311,28 @@ export const PayrollDashboard: React.FC = () => {
               </div>
             </>
           ) : (
-            <div className="p-12 text-center text-gray-400 text-sm">Select a payroll run to view details</div>
+            <div className="p-16 text-center text-slate-400 text-sm font-semibold">Select a payroll run to view details</div>
           )}
         </div>
       </div>
 
       {/* Initiate Modal */}
       {isInitiateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
-            <h3 className="font-bold text-gray-800 text-lg">📅 Initiate Monthly Payroll Run</h3>
-            <form onSubmit={handleInitiateSubmit} className="space-y-3 text-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="clay-card bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 space-y-4 border border-white">
+            <div className="flex justify-between items-center border-b pb-2">
+              <h3 className="font-black text-slate-800 text-lg">📅 Initiate Monthly Payroll Run</h3>
+              <button
+                onClick={() => setIsInitiateModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold text-xl"
+              >
+                &times;
+              </button>
+            </div>
+            <form onSubmit={handleInitiateSubmit} className="space-y-3.5 text-sm">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 uppercase">Year *</label>
+                  <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Year *</label>
                   <input
                     type="number"
                     min="2020"
@@ -323,11 +340,11 @@ export const PayrollDashboard: React.FC = () => {
                     required
                     value={initiateForm.year}
                     onChange={(e) => setInitiateForm({ ...initiateForm, year: parseInt(e.target.value, 10) || 2026 })}
-                    className="w-full mt-1 px-3 py-2 border rounded-md"
+                    className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 uppercase">Month (1-12) *</label>
+                  <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Month (1-12) *</label>
                   <input
                     type="number"
                     min="1"
@@ -335,33 +352,33 @@ export const PayrollDashboard: React.FC = () => {
                     required
                     value={initiateForm.month}
                     onChange={(e) => setInitiateForm({ ...initiateForm, month: parseInt(e.target.value, 10) || 1 })}
-                    className="w-full mt-1 px-3 py-2 border rounded-md"
+                    className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase">Notes</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Notes</label>
                 <textarea
                   rows={2}
                   placeholder="Optional run notes..."
                   value={initiateForm.notes}
                   onChange={(e) => setInitiateForm({ ...initiateForm, notes: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 border rounded-md"
+                  className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                 />
               </div>
 
-              <div className="flex justify-end space-x-2 pt-2 border-t">
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setIsInitiateModalOpen(false)}
-                  className="px-3 py-1.5 border rounded text-gray-600 text-xs"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-700 active:scale-95 transition-all"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-emerald-600 text-white rounded font-bold text-xs hover:bg-emerald-700"
+                  className="clay-btn-brand px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl font-extrabold text-xs shadow-clay-button active:scale-95 transition-all"
                 >
                   Initiate Run (DRAFT)
                 </button>

@@ -1,1 +1,1 @@
-{"version":3,"file":"DeviceSyncModule.d.ts","sourceRoot":"","sources":["../../../src/features/devices/DeviceSyncModule.tsx"],"names":[],"mappings":"AAAA,OAAO,KAA2C,MAAM,OAAO,CAAC;AAYhE,eAAO,MAAM,gBAAgB,EAAE,KAAK,CAAC,EA2gBpC,CAAC"}
+{"version":3,"file":"DeviceSyncModule.d.ts","sourceRoot":"","sources":["../../../src/features/devices/DeviceSyncModule.tsx"],"names":[],"mappings":"AAAA,OAAO,KAA2C,MAAM,OAAO,CAAC;AAahE,eAAO,MAAM,gBAAgB,EAAE,KAAK,CAAC,EA0iBpC,CAAC"}

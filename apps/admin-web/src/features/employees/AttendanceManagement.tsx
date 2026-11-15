@@ -76,31 +76,31 @@ export const AttendanceManagement: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+      <div className="clay-card rounded-3xl p-6 bg-white shadow-clay-card border border-white/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-gray-800">⏱️ Staff Attendance & Shifts</h2>
-          <p className="text-sm text-gray-500">Software-based daily clocking, shifts, and audited corrections</p>
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight">⏱️ Staff Attendance & Shifts</h2>
+          <p className="text-sm text-slate-500 font-medium">Software-based daily clocking, shifts, and audited corrections</p>
         </div>
       </div>
 
       {/* Date & Filter Control */}
-      <div className="flex flex-wrap gap-4 items-center bg-gray-50 p-3 rounded-lg border border-gray-200 text-sm">
+      <div className="clay-inset p-4 rounded-2xl bg-[#EEF2F6] border border-[#CBD5E1]/50 flex flex-wrap gap-4 items-center text-xs font-bold text-slate-700">
         <div className="flex items-center gap-2">
-          <label className="font-semibold text-gray-700">Date:</label>
+          <label className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600">Date:</label>
           <input
             type="date"
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
-            className="px-3 py-1.5 border rounded-md bg-white focus:ring-1 focus:ring-emerald-500"
+            className="clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
           />
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="font-semibold text-gray-700">Status:</label>
+          <label className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600">Status:</label>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as AttendanceStatus)}
-            className="px-3 py-1.5 border rounded-md bg-white"
+            className="clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
           >
             <option value="">All Statuses</option>
             <option value={AttendanceStatus.PRESENT}>Present</option>
@@ -114,11 +114,11 @@ export const AttendanceManagement: React.FC = () => {
 
         {shifts.length > 0 && (
           <div className="flex items-center gap-2">
-            <label className="font-semibold text-gray-700">Shift:</label>
+            <label className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600">Shift:</label>
             <select
               value={shiftFilter}
               onChange={(e) => setShiftFilter(e.target.value)}
-              className="px-3 py-1.5 border rounded-md bg-white"
+              className="clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
             >
               <option value="">All Shifts</option>
               {shifts.map((s) => (
@@ -130,96 +130,99 @@ export const AttendanceManagement: React.FC = () => {
 
         <button
           onClick={fetchAttendance}
-          className="ml-auto px-3 py-1.5 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded font-semibold text-xs"
+          className="ml-auto px-4 py-1.5 bg-white hover:bg-slate-50 text-slate-700 rounded-xl font-bold text-xs border border-slate-300 shadow-sm active:scale-95 transition-all"
         >
           🔄 Refresh
         </button>
       </div>
 
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-sm font-semibold shadow-sm">
           {error}
         </div>
       )}
 
       {/* Attendance Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      <div className="clay-card rounded-2xl bg-white shadow-clay-card border border-white/80 overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-gray-500">Loading attendance data...</div>
+          <div className="text-center py-16 text-slate-400 text-sm font-semibold space-y-2">
+            <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+            <div>Loading attendance data...</div>
+          </div>
         ) : displayedRecords.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">No attendance records found for this date.</div>
+          <div className="text-center py-16 text-slate-500 text-sm font-semibold">No attendance records found for this date.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-sm">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-200 text-gray-600 font-semibold uppercase text-xs">
-                  <th className="p-3">Employee</th>
-                  <th className="p-3">Shift</th>
-                  <th className="p-3">Check In</th>
-                  <th className="p-3">Check Out</th>
-                  <th className="p-3">Total Hours</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3">Audit Flags</th>
-                  <th className="p-3 text-right">Correction</th>
+                <tr className="bg-[#F8FAFC] border-b border-slate-200 text-slate-600 font-extrabold uppercase text-xs tracking-wider">
+                  <th className="px-4 py-3.5">Employee</th>
+                  <th className="px-4 py-3.5">Shift</th>
+                  <th className="px-4 py-3.5">Check In</th>
+                  <th className="px-4 py-3.5">Check Out</th>
+                  <th className="px-4 py-3.5">Total Hours</th>
+                  <th className="px-4 py-3.5">Status</th>
+                  <th className="px-4 py-3.5">Audit Flags</th>
+                  <th className="px-4 py-3.5 text-right">Correction</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-slate-100">
                 {displayedRecords.map((rec) => (
-                  <tr key={rec.id} className="hover:bg-gray-50 transition">
-                    <td className="p-3 font-semibold text-gray-900">
+                  <tr key={rec.id} className="hover:bg-slate-50/80 transition-colors">
+                    <td className="px-4 py-3.5 font-bold text-slate-900">
                       <div>{rec.employeeName || 'Employee'}</div>
-                      <div className="text-xs text-gray-400 font-mono">{rec.employeeCode}</div>
+                      <div className="text-xs text-slate-400 font-mono font-bold">{rec.employeeCode}</div>
                     </td>
-                    <td className="p-3">
-                      <span className="px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded-md font-medium">
+                    <td className="px-4 py-3.5">
+                      <span className="px-2.5 py-0.5 text-xs bg-sky-50 text-sky-700 rounded-md font-bold border border-sky-200">
                         {rec.shiftType}
                       </span>
                     </td>
-                    <td className="p-3 text-xs text-gray-700">
+                    <td className="px-4 py-3.5 text-xs text-slate-700 font-medium">
                       {rec.checkInTime ? new Date(rec.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
                     </td>
-                    <td className="p-3 text-xs text-gray-700">
+                    <td className="px-4 py-3.5 text-xs text-slate-700 font-medium">
                       {rec.checkOutTime ? new Date(rec.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
                     </td>
-                    <td className="p-3 font-mono font-semibold text-gray-800">
+                    <td className="px-4 py-3.5 font-mono font-black text-slate-900">
                       {rec.totalHours.toFixed(2)}h
                     </td>
-                    <td className="p-3">
-                      <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
+                    <td className="px-4 py-3.5">
+                      <span className={`inline-block px-2.5 py-0.5 text-xs font-extrabold rounded-full ${
                         rec.status === AttendanceStatus.PRESENT
-                          ? 'bg-green-100 text-green-800'
+                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                           : rec.status === AttendanceStatus.HALF_DAY
-                          ? 'bg-amber-100 text-amber-800'
+                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
                           : rec.status === AttendanceStatus.ON_LEAVE
-                          ? 'bg-blue-100 text-blue-800'
-                          : 'bg-red-100 text-red-800'
+                          ? 'bg-sky-100 text-sky-800 border border-sky-200'
+                          : 'bg-rose-100 text-rose-800 border border-rose-200'
                       }`}>
                         {rec.status}
                       </span>
                     </td>
-                    <td className="p-3 text-xs space-y-0.5">
+                    <td className="px-4 py-3.5 text-xs space-y-0.5">
                       {rec.isManualCorrection && (
-                        <span className="inline-block px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded font-bold mr-1">
+                        <span className="inline-block px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md font-extrabold mr-1 border border-amber-200">
                           ✏️ Corrected
                         </span>
                       )}
                       {rec.isLateArrival && (
-                        <span className="inline-block px-1.5 py-0.5 bg-red-50 text-red-600 rounded">Late</span>
+                        <span className="inline-block px-2 py-0.5 bg-rose-50 text-rose-600 rounded-md font-bold border border-rose-200">Late</span>
                       )}
                       {rec.overtimeHours > 0 && (
-                        <span className="inline-block px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded">
+                        <span className="inline-block px-2 py-0.5 bg-purple-50 text-purple-700 rounded-md font-bold border border-purple-200">
                           +{rec.overtimeHours}h OT
                         </span>
                       )}
                     </td>
-                    <td className="p-3 text-right">
+                    <td className="px-4 py-3.5 text-right">
                       <button
                         onClick={() => {
                           setSelectedAttendance(rec);
                           setCorrectionStatus(rec.status);
                           setCorrectionOvertime(rec.overtimeHours);
                         }}
-                        className="px-2.5 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded font-medium shadow-sm"
+                        className="px-3 py-1.5 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold shadow-sm active:scale-95 transition-all"
                       >
                         Correct
                       </button>
@@ -234,20 +237,28 @@ export const AttendanceManagement: React.FC = () => {
 
       {/* Manual Correction Modal */}
       {selectedAttendance && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
-            <h3 className="font-bold text-gray-800 text-lg">📝 Authorize Attendance Correction</h3>
-            <p className="text-xs text-gray-500">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="clay-card bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 space-y-4 border border-white">
+            <div className="flex justify-between items-center border-b pb-2">
+              <h3 className="font-black text-slate-800 text-lg">📝 Authorize Attendance Correction</h3>
+              <button
+                onClick={() => setSelectedAttendance(null)}
+                className="text-slate-400 hover:text-slate-600 font-bold text-xl"
+              >
+                &times;
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 font-medium">
               Manual adjustments require an audit trail reason as per DFarm P16 policy.
             </p>
 
             <form onSubmit={handleCorrectionSubmit} className="space-y-4 text-sm">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase">Corrected Status</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Corrected Status</label>
                 <select
                   value={correctionStatus}
                   onChange={(e) => setCorrectionStatus(e.target.value as AttendanceStatus)}
-                  className="w-full mt-1 px-3 py-2 border rounded-md bg-white"
+                  className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                 >
                   <option value={AttendanceStatus.PRESENT}>PRESENT (Full Day)</option>
                   <option value={AttendanceStatus.HALF_DAY}>HALF DAY</option>
@@ -258,7 +269,7 @@ export const AttendanceManagement: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase">Overtime Hours</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Overtime Hours</label>
                 <input
                   type="number"
                   min="0"
@@ -266,12 +277,12 @@ export const AttendanceManagement: React.FC = () => {
                   step="0.5"
                   value={correctionOvertime}
                   onChange={(e) => setCorrectionOvertime(parseFloat(e.target.value) || 0)}
-                  className="w-full mt-1 px-3 py-1.5 border rounded-md"
+                  className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase">Mandatory Reason (min 5 chars) *</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Mandatory Reason (min 5 chars) *</label>
                 <textarea
                   required
                   minLength={5}
@@ -279,22 +290,22 @@ export const AttendanceManagement: React.FC = () => {
                   placeholder="e.g. Center electricity outage prevented software check-in"
                   value={correctionReason}
                   onChange={(e) => setCorrectionReason(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 border rounded-md focus:ring-1 focus:ring-emerald-500"
+                  className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                 />
               </div>
 
-              <div className="flex justify-end space-x-2 pt-2 border-t">
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setSelectedAttendance(null)}
-                  className="px-3 py-1.5 border rounded text-gray-600"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-700 active:scale-95 transition-all"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={correctionLoading}
-                  className="px-4 py-1.5 bg-emerald-600 text-white rounded font-semibold hover:bg-emerald-700 disabled:opacity-50"
+                  className="clay-btn-brand px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl text-xs font-extrabold shadow-clay-button disabled:opacity-50 active:scale-95 transition-all"
                 >
                   {correctionLoading ? 'Saving...' : 'Apply Correction'}
                 </button>

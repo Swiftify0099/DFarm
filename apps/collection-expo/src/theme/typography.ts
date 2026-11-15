@@ -8,6 +8,7 @@ const monoFont = Platform.select({
 });
 
 export const typography = {
+  // Existing Typography Tokens (Strictly Preserved)
   headlineLarge: {
     fontSize: 32,
     fontWeight: 'bold',
@@ -60,6 +61,51 @@ export const typography = {
   monospaceReceipt: {
     fontFamily: monoFont,
     fontSize: 12,
+    color: colors.textPrimary,
+    lineHeight: 16,
+  } as TextStyle,
+
+  // Enhanced Measurement & High-Visibility Terminal Metrics
+  displayMetric: {
+    fontSize: 40,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    lineHeight: 46,
+    letterSpacing: -0.5,
+  } as TextStyle,
+
+  displayMetricLarge: {
+    fontSize: 48,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    lineHeight: 54,
+    letterSpacing: -1,
+  } as TextStyle,
+
+  metricUnit: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    letterSpacing: 0.5,
+  } as TextStyle,
+
+  labelBold: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textSecondary,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  } as TextStyle,
+
+  badgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  } as TextStyle,
+
+  captionBold: {
+    fontSize: 12,
+    fontWeight: '700',
     color: colors.textPrimary,
     lineHeight: 16,
   } as TextStyle,

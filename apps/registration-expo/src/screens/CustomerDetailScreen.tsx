@@ -5,14 +5,16 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   TextInput,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { customerApi } from '../api/customerApi';
 import { CustomerDto } from '../types/models';
 import { colors } from '../theme/colors';
+import { clayColors, clayRadius } from '../theme/claymorphism';
 import { StatusBadge } from '../components/StatusBadge';
 import { MilkCategoryBadge } from '../components/MilkCategoryBadge';
 import { LoadingIndicator } from '../components/LoadingIndicator';
@@ -85,7 +87,7 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
   };
 
   if (isLoading && !customer) {
-    return <LoadingIndicator message="Loading customer profile..." />;
+    return <LoadingIndicator message="Loading farmer profile..." />;
   }
 
   if (errorMessage && !customer) {
@@ -105,10 +107,11 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Top Bar */}
+      {/* 3D Clay Top Bar */}
       <View style={styles.topBar}>
         <TouchableOpacity
           style={styles.backButton}
+          activeOpacity={0.8}
           onPress={() => navigation.goBack()}
         >
           <Text style={styles.backIcon}>←</Text>
@@ -118,22 +121,32 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
 
         <TouchableOpacity
           style={styles.editButton}
+          activeOpacity={0.8}
           onPress={() => navigation.navigate('CustomerEdit', { customerId })}
         >
           <Text style={styles.editIcon}>✏️</Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Header Card */}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header Hero Card */}
         <View style={styles.headerCard}>
           <View style={styles.headerRow}>
+            <View style={styles.avatarPill}>
+              <Text style={styles.avatarText}>🧑‍🌾</Text>
+            </View>
+
             <View style={styles.headerTitleWrap}>
               <Text style={styles.fullName}>{customer.fullName}</Text>
               {customer.farmerCode ? (
-                <Text style={styles.farmerCode}>
-                  Farmer Code: {customer.farmerCode}
-                </Text>
+                <View style={styles.codePill}>
+                  <Text style={styles.farmerCode}>
+                    Code: {customer.farmerCode}
+                  </Text>
+                </View>
               ) : null}
             </View>
             <StatusBadge status={customer.status} />
@@ -148,17 +161,17 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
         </View>
 
         {/* Contact & Identity Card */}
-        <DetailSectionCard title="Contact & Identity" icon="📞">
+        <DetailSectionCard title="Contact & Primary Identity" icon="📞">
           <DetailRow label="Mobile (E.164)" value={customer.normalizedMobileNumber} />
           <DetailRow label="Primary Center ID" value={customer.primaryCenterId} />
           <DetailRow label="Registration Status" value={customer.registrationStatus} />
         </DetailSectionCard>
 
         {/* Geographic Address Card */}
-        <DetailSectionCard title="Address & Location" icon="📍">
+        <DetailSectionCard title="Geographic Address & Location" icon="📍">
           <DetailRow label="Village" value={customer.address?.village || '—'} />
           <DetailRow
-            label="Taluka"
+            label="Taluka / Subdistrict"
             value={customer.address?.talukaSubdistrict || '—'}
           />
           <DetailRow label="District" value={customer.address?.district || '—'} />
@@ -167,7 +180,7 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
             value={customer.address?.state || 'Maharashtra'}
           />
           <DetailRow
-            label="PIN Code"
+            label="Postal PIN Code"
             value={customer.address?.postalCode || '—'}
           />
         </DetailSectionCard>
@@ -175,7 +188,7 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
         {/* Milk Category Permissions Card */}
         <DetailSectionCard title="Milk Delivery Permissions" icon="🥛">
           <View style={styles.categoryPermissionsRow}>
-            <Text style={styles.detailLabel}>Permitted Categories</Text>
+            <Text style={styles.detailLabel}>Authorized Categories</Text>
             <View style={styles.badgesWrap}>
               {(customer.permittedCategories || []).map((cat) => (
                 <MilkCategoryBadge key={cat} category={cat} />
@@ -199,7 +212,13 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
 
         {/* KYC Progress Tracker Card */}
         <View style={styles.kycCard}>
-          <Text style={styles.kycTitle}>KYC & Hardware Readiness Checklist</Text>
+          <View style={styles.kycHeaderRow}>
+            <View style={styles.kycIconPill}>
+              <Text style={styles.kycIconEmoji}>🛡️</Text>
+            </View>
+            <Text style={styles.kycTitle}>KYC & Hardware Readiness Checklist</Text>
+          </View>
+
           <KycStepItem
             stepName="Personal Details & Canonical UUID"
             isCompleted={true}
@@ -213,12 +232,20 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
           <KycStepItem
             stepName="Facial Biometric Enrollment"
             isCompleted={customer.status !== 'DRAFT' && customer.status !== 'PENDING_FACE_ENROLLMENT'}
-            note="Scheduled for Phase 07"
+            note={
+              customer.status !== 'DRAFT' && customer.status !== 'PENDING_FACE_ENROLLMENT'
+                ? 'MobileFaceNet Encrypted Template Active'
+                : 'Pending Biometric Face Enrollment'
+            }
           />
           <KycStepItem
             stepName="Physical RFID Card Assignment"
             isCompleted={customer.status === 'ACTIVE'}
-            note="Scheduled for Phase 08"
+            note={
+              customer.status === 'ACTIVE'
+                ? 'Active RFID Smart Card Bound'
+                : 'Pending Hardware Assignment'
+            }
           />
         </View>
 
@@ -232,7 +259,7 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
 
         {/* Edit Button */}
         <PrimaryButton
-          text="Edit Farmer Details"
+          text="Edit Farmer Profile"
           onClick={() => navigation.navigate('CustomerEdit', { customerId })}
           leadingIcon="✏️"
         />
@@ -241,6 +268,7 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
         {isSoftDeleted ? (
           <TouchableOpacity
             style={styles.restoreButton}
+            activeOpacity={0.85}
             onPress={() => {
               setActionReason('');
               setShowRestoreDialog(true);
@@ -252,6 +280,7 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
         ) : (
           <TouchableOpacity
             style={styles.deactivateButton}
+            activeOpacity={0.85}
             onPress={() => {
               setActionReason('');
               setShowDeactivateDialog(true);
@@ -268,10 +297,10 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
       {/* Deactivate Dialog */}
       <ConfirmationDialog
         visible={showDeactivateDialog}
-        title="Deactivate Customer"
-        message="This customer will be soft-deleted. Historical milk collections, ledger, and payouts are permanently preserved in the PostgreSQL ledger."
-        confirmText="Deactivate"
-        confirmColor={colors.error}
+        title="Deactivate Customer Record"
+        message="This customer will be soft-deleted. Historical milk collections, ledger balance, and payouts are permanently preserved in the PostgreSQL ledger."
+        confirmText="Confirm Deactivation"
+        confirmColor={clayColors.error}
         onConfirm={handleDeactivate}
         onDismiss={() => setShowDeactivateDialog(false)}
       >
@@ -279,18 +308,18 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
           style={styles.dialogInput}
           value={actionReason}
           onChangeText={setActionReason}
-          placeholder="Reason (min 5 characters)"
-          placeholderTextColor={colors.outline}
+          placeholder="Enter audit reason (min 5 characters)"
+          placeholderTextColor={clayColors.textMuted}
         />
       </ConfirmationDialog>
 
       {/* Restore Dialog */}
       <ConfirmationDialog
         visible={showRestoreDialog}
-        title="Restore Customer"
-        message="This customer will be restored back to ACTIVE status."
-        confirmText="Restore"
-        confirmColor="#137333"
+        title="Restore Customer Record"
+        message="This customer record will be restored back to ACTIVE status in the organization."
+        confirmText="Confirm Restore"
+        confirmColor={clayColors.success}
         onConfirm={handleRestore}
         onDismiss={() => setShowRestoreDialog(false)}
       >
@@ -298,8 +327,8 @@ export const CustomerDetailScreen: React.FC<Props> = ({ route, navigation }) => 
           style={styles.dialogInput}
           value={actionReason}
           onChangeText={setActionReason}
-          placeholder="Reason (min 5 characters)"
-          placeholderTextColor={colors.outline}
+          placeholder="Enter restoration reason (min 5 characters)"
+          placeholderTextColor={clayColors.textMuted}
         />
       </ConfirmationDialog>
     </SafeAreaView>
@@ -313,7 +342,9 @@ const DetailSectionCard: React.FC<{
 }> = ({ title, icon, children }) => (
   <View style={styles.sectionCard}>
     <View style={styles.sectionHeaderRow}>
-      <Text style={styles.sectionIcon}>{icon}</Text>
+      <View style={styles.sectionIconBadge}>
+        <Text style={styles.sectionIcon}>{icon}</Text>
+      </View>
       <Text style={styles.sectionTitle}>{title}</Text>
     </View>
     <View style={styles.divider} />
@@ -354,115 +385,197 @@ const KycStepItem: React.FC<{
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: clayColors.canvasBackground,
   },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.surface,
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ECEFF1',
+    borderBottomWidth: 1.5,
+    borderBottomColor: '#DFE7ED',
   },
   backButton: {
-    padding: 6,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#EDF4F8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 2,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#CDDCE6',
+    borderBottomColor: '#BDCED8',
   },
   backIcon: {
-    fontSize: 22,
-    color: colors.primary,
+    fontSize: 20,
+    color: clayColors.primary,
+    fontWeight: 'bold',
   },
   topBarTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.onSurface,
+    fontSize: 17,
+    fontWeight: '800',
+    color: clayColors.primary,
   },
   editButton: {
-    padding: 6,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#E5F3FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 2,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#BBD6E8',
+    borderBottomColor: '#BBD6E8',
   },
   editIcon: {
-    fontSize: 18,
+    fontSize: 16,
   },
   scrollContent: {
     padding: 16,
-    gap: 16,
+    gap: 14,
     paddingBottom: 40,
   },
   headerCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.card,
     padding: 18,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    borderWidth: 1,
-    borderColor: '#ECEFF1',
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CFD9E2',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#002E44',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+      },
+      android: {
+        elevation: 4,
+      },
+      default: {},
+    }),
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+  },
+  avatarPill: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#E5F3FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#FFFFFF',
+  },
+  avatarText: {
+    fontSize: 22,
   },
   headerTitleWrap: {
     flex: 1,
-    marginRight: 10,
+    marginRight: 8,
   },
   fullName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.onSurface,
+    fontSize: 18,
+    fontWeight: '800',
+    color: clayColors.textPrimary,
+  },
+  codePill: {
+    marginTop: 3,
   },
   farmerCode: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
-    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '700',
+    color: clayColors.primary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   divider: {
     height: 1,
-    backgroundColor: '#ECEFF1',
-    marginVertical: 10,
+    backgroundColor: '#E8EFF5',
+    marginVertical: 12,
   },
   uuidWrap: {
-    gap: 2,
+    backgroundColor: '#EDF5FA',
+    padding: 10,
+    borderRadius: clayRadius.sm,
+    gap: 3,
   },
   uuidLabel: {
     fontSize: 11,
-    color: colors.outline,
+    color: clayColors.textMuted,
+    fontWeight: '600',
   },
   uuidValue: {
     fontSize: 12,
-    fontWeight: '600',
-    color: colors.primary,
-    fontFamily: 'monospace',
+    fontWeight: '700',
+    color: clayColors.primary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   sectionCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.card,
     padding: 16,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-    borderWidth: 1,
-    borderColor: '#ECEFF1',
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CFD9E2',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#002E44',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 3,
+      },
+      default: {},
+    }),
   },
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  sectionIcon: {
-    fontSize: 18,
+  sectionIconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: '#EDF4F8',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 8,
+  },
+  sectionIcon: {
+    fontSize: 16,
   },
   sectionTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.onSurface,
+    color: clayColors.textPrimary,
   },
   sectionContent: {
     gap: 8,
@@ -474,13 +587,14 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   detailLabel: {
-    fontSize: 14,
-    color: colors.onSurfaceVariant,
+    fontSize: 13,
+    color: clayColors.textSecondary,
+    fontWeight: '500',
   },
   detailValue: {
     fontSize: 14,
-    fontWeight: '500',
-    color: colors.onSurface,
+    fontWeight: '600',
+    color: clayColors.textPrimary,
   },
   categoryPermissionsRow: {
     flexDirection: 'row',
@@ -492,63 +606,97 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   kycCard: {
-    backgroundColor: 'rgba(219, 228, 235, 0.4)',
-    borderRadius: 14,
+    backgroundColor: '#EBF4F9',
+    borderRadius: clayRadius.card,
     padding: 16,
     gap: 12,
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#CFDEE8',
+    borderBottomColor: '#BFD1DC',
+  },
+  kycHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  kycIconPill: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  kycIconEmoji: {
+    fontSize: 14,
   },
   kycTitle: {
     fontSize: 14,
-    fontWeight: '700',
-    color: colors.onSurface,
-    marginBottom: 4,
+    fontWeight: '800',
+    color: clayColors.primary,
   },
   kycRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   kycBadge: {
-    width: 24,
-    height: 24,
+    width: 26,
+    height: 26,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#FFFFFF',
   },
   kycBadgeCompleted: {
-    backgroundColor: '#E6F4EA',
+    backgroundColor: '#D1F0DA',
   },
   kycBadgePending: {
-    backgroundColor: '#FEF7E0',
+    backgroundColor: '#FEECC4',
   },
   kycCheck: {
     color: '#137333',
     fontWeight: 'bold',
-    fontSize: 13,
+    fontSize: 14,
   },
   kycPending: {
     color: '#B06000',
-    fontSize: 11,
+    fontSize: 12,
   },
   kycTexts: {
     flex: 1,
   },
   kycStepName: {
     fontSize: 13,
-    fontWeight: '600',
-    color: colors.onSurface,
+    fontWeight: '700',
+    color: clayColors.textPrimary,
   },
   kycNote: {
     fontSize: 11,
-    color: colors.onSurfaceVariant,
+    color: clayColors.textSecondary,
     marginTop: 1,
   },
   successBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E6F4EA',
-    borderRadius: 10,
+    backgroundColor: '#E4F6EB',
+    borderRadius: clayRadius.md,
     padding: 12,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 2,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#BCE8CA',
+    borderBottomColor: '#BCE8CA',
   },
   successBannerIcon: {
     fontSize: 16,
@@ -557,52 +705,74 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   successBannerText: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '700',
     color: '#137333',
   },
   restoreButton: {
     flexDirection: 'row',
-    height: 50,
-    backgroundColor: '#137333',
-    borderRadius: 12,
+    height: 52,
+    backgroundColor: clayColors.success,
+    borderRadius: clayRadius.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3.5,
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderLeftColor: 'rgba(255, 255, 255, 0.25)',
+    borderRightColor: 'rgba(0, 40, 15, 0.25)',
+    borderBottomColor: 'rgba(0, 30, 10, 0.45)',
   },
   restoreIcon: {
     fontSize: 16,
     marginRight: 8,
   },
   restoreButtonText: {
-    color: colors.onPrimary,
+    color: '#FFFFFF',
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   deactivateButton: {
     flexDirection: 'row',
-    height: 50,
-    borderWidth: 1,
-    borderColor: colors.error,
-    borderRadius: 12,
+    height: 52,
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#F9C2C2',
+    borderBottomColor: '#E6A8A8',
   },
   deactivateIcon: {
     fontSize: 16,
     marginRight: 8,
   },
   deactivateButtonText: {
-    color: colors.error,
-    fontSize: 15,
-    fontWeight: '600',
+    color: clayColors.error,
+    fontSize: 14,
+    fontWeight: '700',
   },
   dialogInput: {
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
-    borderRadius: 8,
-    padding: 10,
+    backgroundColor: '#EDF4F9',
+    borderRadius: clayRadius.sm,
+    padding: 12,
     marginTop: 8,
     fontSize: 14,
-    color: colors.onSurface,
+    color: clayColors.textPrimary,
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 1,
+    borderTopColor: '#CBDDE8',
+    borderLeftColor: '#CBDDE8',
+    borderRightColor: '#FFFFFF',
+    borderBottomColor: '#FFFFFF',
   },
 });

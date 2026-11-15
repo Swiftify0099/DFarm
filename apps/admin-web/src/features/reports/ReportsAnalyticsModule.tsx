@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext.js';
 import { useToast } from '../../context/ToastContext.js';
 import { reportsApi } from '../../api/reportsApi.js';
+import { ClayButton } from '../../components/ClayButton.js';
 
 type ReportType =
   | 'daily'
@@ -102,194 +103,218 @@ export const ReportsAnalyticsModule: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 select-none">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-gray-200">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-slate-200/80">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">📊 Authoritative Business Reports & Analytics</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+            <span>📊</span>
+            <span>Authoritative Business Reports & Analytics</span>
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">
             Authoritative backend aggregations, farmer summaries, Fat/SNF distributions, and double-entry ledger audits.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <ClayButton
+            variant="brand"
+            size="sm"
             onClick={handleExportCsv}
             disabled={loading || reportData.length === 0}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-50"
+            icon={<span>📥</span>}
           >
-            📥 Export CSV
-          </button>
+            Export CSV
+          </ClayButton>
         </div>
       </div>
 
       {/* Report Selection Tabs */}
-      <div className="flex border-b border-gray-200 overflow-x-auto space-x-2 pb-1 text-sm font-semibold">
+      <div className="flex border-b border-slate-200/80 overflow-x-auto space-x-2 pb-1 text-sm font-semibold">
         <button
           onClick={() => setActiveReport('daily')}
-          className={`px-3.5 py-2 rounded-t-lg transition whitespace-nowrap ${
+          className={`px-3.5 py-2.5 rounded-t-xl transition-all duration-150 whitespace-nowrap flex items-center gap-1.5 font-bold ${
             activeReport === 'daily'
-              ? 'bg-emerald-600 text-white shadow'
-              : 'text-gray-600 hover:text-emerald-600 hover:bg-gray-50'
+              ? 'bg-white text-[#00506E] border-b-2 border-[#00506E] shadow-[0_-4px_12px_rgba(0,80,110,0.06),inset_0_2px_2px_rgba(255,255,255,0.95)]'
+              : 'text-slate-600 hover:text-[#00506E] hover:bg-white/60'
           }`}
         >
-          📅 Daily Collections
+          <span>📅</span>
+          <span>Daily Collections</span>
         </button>
         <button
           onClick={() => setActiveReport('monthly')}
-          className={`px-3.5 py-2 rounded-t-lg transition whitespace-nowrap ${
+          className={`px-3.5 py-2.5 rounded-t-xl transition-all duration-150 whitespace-nowrap flex items-center gap-1.5 font-bold ${
             activeReport === 'monthly'
-              ? 'bg-emerald-600 text-white shadow'
-              : 'text-gray-600 hover:text-emerald-600 hover:bg-gray-50'
+              ? 'bg-white text-[#00506E] border-b-2 border-[#00506E] shadow-[0_-4px_12px_rgba(0,80,110,0.06),inset_0_2px_2px_rgba(255,255,255,0.95)]'
+              : 'text-slate-600 hover:text-[#00506E] hover:bg-white/60'
           }`}
         >
-          🗓️ Monthly Collections
+          <span>🗓️</span>
+          <span>Monthly Collections</span>
         </button>
         <button
           onClick={() => setActiveReport('farmer')}
-          className={`px-3.5 py-2 rounded-t-lg transition whitespace-nowrap ${
+          className={`px-3.5 py-2.5 rounded-t-xl transition-all duration-150 whitespace-nowrap flex items-center gap-1.5 font-bold ${
             activeReport === 'farmer'
-              ? 'bg-emerald-600 text-white shadow'
-              : 'text-gray-600 hover:text-emerald-600 hover:bg-gray-50'
+              ? 'bg-white text-[#00506E] border-b-2 border-[#00506E] shadow-[0_-4px_12px_rgba(0,80,110,0.06),inset_0_2px_2px_rgba(255,255,255,0.95)]'
+              : 'text-slate-600 hover:text-[#00506E] hover:bg-white/60'
           }`}
         >
-          🧑‍🌾 Farmer-wise Summary
+          <span>🧑‍🌾</span>
+          <span>Farmer-wise Summary</span>
         </button>
         <button
           onClick={() => setActiveReport('cow_buffalo')}
-          className={`px-3.5 py-2 rounded-t-lg transition whitespace-nowrap ${
+          className={`px-3.5 py-2.5 rounded-t-xl transition-all duration-150 whitespace-nowrap flex items-center gap-1.5 font-bold ${
             activeReport === 'cow_buffalo'
-              ? 'bg-emerald-600 text-white shadow'
-              : 'text-gray-600 hover:text-emerald-600 hover:bg-gray-50'
+              ? 'bg-white text-[#00506E] border-b-2 border-[#00506E] shadow-[0_-4px_12px_rgba(0,80,110,0.06),inset_0_2px_2px_rgba(255,255,255,0.95)]'
+              : 'text-slate-600 hover:text-[#00506E] hover:bg-white/60'
           }`}
         >
-          🐄 Cow vs Buffalo
+          <span>🐄</span>
+          <span>Cow vs Buffalo</span>
         </button>
         <button
           onClick={() => setActiveReport('fat_snf')}
-          className={`px-3.5 py-2 rounded-t-lg transition whitespace-nowrap ${
+          className={`px-3.5 py-2.5 rounded-t-xl transition-all duration-150 whitespace-nowrap flex items-center gap-1.5 font-bold ${
             activeReport === 'fat_snf'
-              ? 'bg-emerald-600 text-white shadow'
-              : 'text-gray-600 hover:text-emerald-600 hover:bg-gray-50'
+              ? 'bg-white text-[#00506E] border-b-2 border-[#00506E] shadow-[0_-4px_12px_rgba(0,80,110,0.06),inset_0_2px_2px_rgba(255,255,255,0.95)]'
+              : 'text-slate-600 hover:text-[#00506E] hover:bg-white/60'
           }`}
         >
-          🧪 Fat / SNF Distribution
+          <span>🧪</span>
+          <span>Fat / SNF Distribution</span>
         </button>
         <button
           onClick={() => setActiveReport('ledger')}
-          className={`px-3.5 py-2 rounded-t-lg transition whitespace-nowrap ${
+          className={`px-3.5 py-2.5 rounded-t-xl transition-all duration-150 whitespace-nowrap flex items-center gap-1.5 font-bold ${
             activeReport === 'ledger'
-              ? 'bg-emerald-600 text-white shadow'
-              : 'text-gray-600 hover:text-emerald-600 hover:bg-gray-50'
+              ? 'bg-white text-[#00506E] border-b-2 border-[#00506E] shadow-[0_-4px_12px_rgba(0,80,110,0.06),inset_0_2px_2px_rgba(255,255,255,0.95)]'
+              : 'text-slate-600 hover:text-[#00506E] hover:bg-white/60'
           }`}
         >
-          📚 Double-Entry Ledger
+          <span>📚</span>
+          <span>Double-Entry Ledger</span>
         </button>
         <button
           onClick={() => setActiveReport('balances')}
-          className={`px-3.5 py-2 rounded-t-lg transition whitespace-nowrap ${
+          className={`px-3.5 py-2.5 rounded-t-xl transition-all duration-150 whitespace-nowrap flex items-center gap-1.5 font-bold ${
             activeReport === 'balances'
-              ? 'bg-emerald-600 text-white shadow'
-              : 'text-gray-600 hover:text-emerald-600 hover:bg-gray-50'
+              ? 'bg-white text-[#00506E] border-b-2 border-[#00506E] shadow-[0_-4px_12px_rgba(0,80,110,0.06),inset_0_2px_2px_rgba(255,255,255,0.95)]'
+              : 'text-slate-600 hover:text-[#00506E] hover:bg-white/60'
           }`}
         >
-          ⚖️ Customer Balances
+          <span>⚖️</span>
+          <span>Customer Balances</span>
         </button>
         <button
           onClick={() => setActiveReport('payouts')}
-          className={`px-3.5 py-2 rounded-t-lg transition whitespace-nowrap ${
+          className={`px-3.5 py-2.5 rounded-t-xl transition-all duration-150 whitespace-nowrap flex items-center gap-1.5 font-bold ${
             activeReport === 'payouts'
-              ? 'bg-emerald-600 text-white shadow'
-              : 'text-gray-600 hover:text-emerald-600 hover:bg-gray-50'
+              ? 'bg-white text-[#00506E] border-b-2 border-[#00506E] shadow-[0_-4px_12px_rgba(0,80,110,0.06),inset_0_2px_2px_rgba(255,255,255,0.95)]'
+              : 'text-slate-600 hover:text-[#00506E] hover:bg-white/60'
           }`}
         >
-          💸 Payout Disbursements
+          <span>💸</span>
+          <span>Payout Disbursements</span>
         </button>
       </div>
 
       {/* Date Filters Bar */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-wrap items-center gap-4">
+      <div className="clay-surface p-4 sm:p-5 flex flex-wrap items-center gap-4">
         {activeReport === 'daily' || activeReport === 'monthly' ? (
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-semibold text-gray-500 uppercase">Target Date:</label>
+          <div className="flex items-center gap-2 bg-[#EDF2F7] px-3 py-1.5 rounded-xl border border-slate-200/80 shadow-[inset_1.5px_1.5px_3px_rgba(15,23,42,0.05)]">
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Target Date:</label>
             <input
               type="date"
               value={filterDate}
               onChange={(e) => setFilterDate(e.target.value)}
-              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white font-medium"
+              className="bg-white border border-white/80 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#00506E] cursor-pointer"
             />
           </div>
         ) : (
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-gray-500 uppercase">From:</label>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 bg-[#EDF2F7] px-3 py-1.5 rounded-xl border border-slate-200/80 shadow-[inset_1.5px_1.5px_3px_rgba(15,23,42,0.05)]">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider">From:</label>
               <input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white font-medium"
+                className="bg-white border border-white/80 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#00506E] cursor-pointer"
               />
             </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-gray-500 uppercase">To:</label>
+            <div className="flex items-center gap-2 bg-[#EDF2F7] px-3 py-1.5 rounded-xl border border-slate-200/80 shadow-[inset_1.5px_1.5px_3px_rgba(15,23,42,0.05)]">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider">To:</label>
               <input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white font-medium"
+                className="bg-white border border-white/80 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#00506E] cursor-pointer"
               />
             </div>
           </div>
         )}
 
-        <button
+        <ClayButton
+          variant="secondary"
+          size="sm"
           onClick={loadReport}
-          className="px-3.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium transition"
+          icon={<span>🔄</span>}
         >
-          🔄 Apply Filters
-        </button>
+          Apply Filters
+        </ClayButton>
       </div>
 
       {/* Dynamic Report Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50">
-          <h2 className="font-semibold text-gray-800 text-sm capitalize">
-            {activeReport.replace('_', ' ')} Data ({reportData.length} records)
-          </h2>
-          <span className="text-xs text-gray-500">
+      <div className="clay-surface overflow-hidden">
+        <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 bg-gradient-to-r from-slate-50/70 to-white">
+          <div className="flex items-center gap-2">
+            <span className="text-base">📑</span>
+            <h2 className="font-black text-slate-800 text-sm tracking-tight capitalize">
+              {activeReport.replace('_', ' ')} Data ({reportData.length} records)
+            </h2>
+          </div>
+          <span className="text-[11px] font-bold text-slate-400">
             Source: Authoritative DB Ledger & Collections Aggregations
           </span>
         </div>
 
         <div className="overflow-x-auto max-h-[600px]">
           {loading ? (
-            <div className="p-12 text-center text-gray-500">
-              <span className="animate-spin inline-block mr-2">⏳</span> Aggregating authoritative report metrics...
+            <div className="p-12 text-center text-slate-500">
+              <div className="flex items-center justify-center gap-2 font-bold text-xs uppercase tracking-wider">
+                <span className="animate-spin inline-block mr-1">⏳</span> Aggregating authoritative report metrics...
+              </div>
             </div>
           ) : reportData.length === 0 ? (
-            <div className="p-12 text-center text-gray-500">
-              No report records found for the chosen date range and center.
+            <div className="p-12 text-center text-slate-500">
+              <div className="flex flex-col items-center justify-center space-y-2">
+                <span className="text-3xl">📊</span>
+                <p className="font-bold">No report records found for the chosen date range and center.</p>
+                <p className="text-[11px] text-slate-400">Try choosing a different date range or verifying intake operations.</p>
+              </div>
             </div>
           ) : (
-            <table className="w-full text-left text-sm text-gray-600">
-              <thead className="bg-gray-100 text-xs font-semibold text-gray-700 uppercase tracking-wider sticky top-0">
+            <table className="w-full text-left text-xs sm:text-sm text-slate-600">
+              <thead className="bg-[#F8FAFC] text-[11px] font-black text-slate-500 uppercase tracking-wider sticky top-0">
                 <tr>
                   {Object.keys(reportData[0]).map((col) => (
-                    <th key={col} className="px-4 py-3 whitespace-nowrap">
+                    <th key={col} className="px-4 py-3.5 whitespace-nowrap">
                       {col.replace(/_/g, ' ')}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
                 {reportData.map((row, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50 transition font-mono text-xs">
+                  <tr key={idx} className="hover:bg-slate-50/80 transition-colors font-mono text-xs">
                     {Object.keys(reportData[0]).map((col) => {
                       const val = row[col];
                       const isNum = typeof val === 'number';
                       return (
                         <td
                           key={col}
-                          className={`px-4 py-2.5 whitespace-nowrap ${isNum ? 'text-right' : ''}`}
+                          className={`px-4 py-3 whitespace-nowrap ${isNum ? 'text-right font-black text-slate-900' : ''}`}
                         >
                           {isNum ? (val % 1 !== 0 ? val.toFixed(2) : val) : String(val ?? '—')}
                         </td>

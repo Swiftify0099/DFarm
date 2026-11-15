@@ -5,16 +5,20 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Image,
 } from 'react-native';
 import { CollectionRepository } from '../domain/repository/CollectionRepository';
 import { Customer, IdentificationMethod } from '../types';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
-import { Card } from '../components/common/Card';
-import { Input } from '../components/common/Input';
-import { Button } from '../components/common/Button';
-import { FilterChip } from '../components/common/FilterChip';
-import { Dialog } from '../components/common/Dialog';
+import { ClayCard } from '../components/clay/ClayCard';
+import { ClayInput } from '../components/clay/ClayInput';
+import { ClayButton } from '../components/clay/ClayButton';
+import { ClayFilterChip } from '../components/clay/ClayFilterChip';
+import { ClayDialog } from '../components/clay/ClayDialog';
+import { ClayAlert } from '../components/clay/ClayAlert';
+import { ClayCategoryBadge } from '../components/clay/ClayCategoryBadge';
+import { ClayImages } from '../theme/assets';
 
 interface IdentificationScreenProps {
   repository: CollectionRepository;
@@ -120,12 +124,12 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
         CUSTOMER IDENTIFICATION
       </Text>
       <Text style={[typography.bodyMedium, { textAlign: 'center', marginTop: 4, marginBottom: 20 }]}>
-        Approved Methods: 1. Face (Fail-Safe Guard) -&gt; 2. RFID Card -&gt; 3. Supervisor Manual
+        Approved Methods: 1. Face (Fail-Safe Guard) &rarr; 2. RFID Card &rarr; 3. Supervisor Manual
       </Text>
 
       {/* Chip Selection Row */}
       <View style={styles.chipRow}>
-        <FilterChip
+        <ClayFilterChip
           label="1. FACE RECOGNITION"
           selected={selectedMethod === 'FACE'}
           onPress={() => {
@@ -133,7 +137,7 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
             setErrorMessage(null);
           }}
         />
-        <FilterChip
+        <ClayFilterChip
           label="2. RFID CARD TAP"
           selected={selectedMethod === 'RFID'}
           onPress={() => {
@@ -141,7 +145,7 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
             setErrorMessage(null);
           }}
         />
-        <FilterChip
+        <ClayFilterChip
           label="3. SUPERVISOR MANUAL"
           selected={selectedMethod === 'SUPERVISOR_MANUAL'}
           onPress={() => {
@@ -151,29 +155,43 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
         />
       </View>
 
-      <View style={{ height: 20 }} />
+      <View style={{ height: 16 }} />
 
       {errorMessage && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        </View>
+        <ClayAlert
+          type="error"
+          title="Identification Alert"
+          message={errorMessage}
+          onDismiss={() => setErrorMessage(null)}
+          style={{ maxWidth: 560 }}
+        />
       )}
 
       {/* Main Mode Card */}
-      <Card style={styles.mainCard} backgroundColor={colors.surfaceDark}>
+      <ClayCard variant="elevated" style={styles.mainCard}>
         {selectedMethod === 'FACE' && (
-          <View>
-            <View style={styles.failSafeBox}>
-              <Text style={styles.warningIcon}>📸</Text>
-              <Text style={styles.failSafeTitle}>CAMERA BIOMETRICS ACTIVE</Text>
-              <Text style={styles.failSafeText}>
-                MobileFaceNet-ArcFace v1.0.0 (512D) • Cosine Threshold: 0.720{'\n'}
-                Position farmer face within camera view for instant identification.
-              </Text>
+          <View style={styles.sectionContainer}>
+            {/* 3D Face Viewport Guide */}
+            <View style={styles.viewportGuideCard}>
+              <View style={styles.guideImageContainer}>
+                <Image
+                  source={ClayImages.faceScanGuide}
+                  style={styles.guideImage}
+                  resizeMode="contain"
+                />
+              </View>
+              <View style={styles.viewportHeader}>
+                <Text style={styles.failSafeTitle}>CAMERA BIOMETRICS (FAIL-SAFE ACTIVE)</Text>
+                <Text style={styles.failSafeText}>
+                  MobileFaceNet-ArcFace v1.0.0 (512D) • Cosine Threshold: 0.720{'\n'}
+                  Notice: Model uncalibrated for production without supervised baseline.
+                </Text>
+              </View>
             </View>
 
             <View style={{ height: 16 }} />
-            <Button
+
+            <ClayButton
               title={isLoading ? 'VERIFYING FACE BIOMETRICS...' : 'SCAN & RECOGNIZE FACE'}
               onPress={async () => {
                 setIsLoading(true);
@@ -194,75 +212,92 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
               }}
               variant="primary"
               disabled={isLoading}
-              style={{ height: 50 }}
+              size="lg"
             />
 
             <View style={{ height: 16 }} />
+            <Text style={styles.fallbackPrompt}>
+              Prefer physical card or manual search for counter speed:
+            </Text>
+            <View style={{ height: 8 }} />
             <View style={styles.failSafeButtonsRow}>
-              <Button
+              <ClayButton
                 title="USE RFID CARD TAP"
                 onPress={() => setSelectedMethod('RFID')}
                 variant="secondary"
-                style={{ flex: 1, height: 48 }}
+                style={{ flex: 1 }}
               />
-              <Button
+              <ClayButton
                 title="SUPERVISOR MANUAL"
                 onPress={() => setSelectedMethod('SUPERVISOR_MANUAL')}
                 variant="secondary"
-                style={{ flex: 1, height: 48 }}
+                style={{ flex: 1 }}
               />
             </View>
           </View>
         )}
 
         {selectedMethod === 'RFID' && (
-          <View>
-            <Text style={typography.bodyLarge}>
-              Hold or enter customer RFID card UID:
-            </Text>
+          <View style={styles.sectionContainer}>
+            <View style={styles.rfidHeroBanner}>
+              <Image
+                source={ClayImages.customerIdGuide}
+                style={styles.rfidHeroImage}
+                resizeMode="contain"
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={typography.titleMedium}>NFC &amp; USB RFID Reader Active</Text>
+                <Text style={styles.rfidSubText}>
+                  Hold customer smart card to terminal sensor or enter card UID manually:
+                </Text>
+              </View>
+            </View>
+
             <View style={{ height: 16 }} />
 
-            <Input
-              label="RFID Card UID (e.g. RFID-COW-1001 or 04A1B2C3)"
+            <ClayInput
+              label="RFID Card UID"
               value={rfidInput}
               onChangeText={(t) => {
                 setRfidInput(t);
                 setErrorMessage(null);
               }}
-              placeholder="Scan or enter RFID UID"
+              placeholder="e.g. RFID-COW-1001 or 04A1B2C3"
+              unitLabel="MIFARE / ISO14443"
             />
 
             <View style={{ height: 20 }} />
 
-            <Button
+            <ClayButton
               title="VERIFY RFID CARD"
               onPress={handleVerifyRfid}
               isLoading={isLoading}
               variant="primary"
-              style={{ height: 48 }}
+              size="lg"
             />
           </View>
         )}
 
         {selectedMethod === 'SUPERVISOR_MANUAL' && (
-          <View>
+          <View style={styles.sectionContainer}>
             <Text style={typography.bodyLarge}>
               Search Registered Customer by Farmer Code, Name, or Mobile:
             </Text>
             <View style={{ height: 12 }} />
 
             <View style={styles.searchRow}>
-              <Input
-                label="Farmer Code, Name, or Mobile"
-                value={searchCode}
-                onChangeText={(t) => {
-                  setSearchCode(t);
-                  setErrorMessage(null);
-                }}
-                placeholder="e.g. FARMER-001 or Patil"
-                style={{ flex: 1 }}
-              />
-              <Button
+              <View style={{ flex: 1 }}>
+                <ClayInput
+                  label="Farmer Code, Name, or Mobile"
+                  value={searchCode}
+                  onChangeText={(t) => {
+                    setSearchCode(t);
+                    setErrorMessage(null);
+                  }}
+                  placeholder="e.g. FARMER-001 or Patil"
+                />
+              </View>
+              <ClayButton
                 title="SEARCH"
                 onPress={handleSearchCustomers}
                 isLoading={isLoading}
@@ -276,28 +311,35 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
                 <Text style={typography.titleMedium}>
                   Select Customer for Supervisor Verification:
                 </Text>
-                <View style={{ height: 8 }} />
+                <View style={{ height: 10 }} />
 
-                <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled>
+                <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled>
                   {searchResults.map((cust) => (
                     <TouchableOpacity
                       key={cust.id}
-                      style={styles.candidateRow}
+                      style={styles.candidateCard}
                       onPress={() => {
                         setSelectedCandidate(cust);
                         setShowSupervisorDialog(true);
                       }}
-                      activeOpacity={0.7}
+                      activeOpacity={0.8}
                     >
-                      <View>
+                      <View style={{ flex: 1 }}>
                         <Text style={[typography.bodyLarge, { fontWeight: 'bold' }]}>
                           {cust.fullName}
                         </Text>
                         <Text style={[typography.caption, { marginTop: 2 }]}>
-                          Code: {cust.farmerCode} | Permitted: {cust.permittedCategories.join(', ')}
+                          Code: {cust.farmerCode} {cust.mobileNumber ? `• ${cust.mobileNumber}` : ''}
                         </Text>
+                        <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+                          {cust.permittedCategories.map((c) => (
+                            <ClayCategoryBadge key={c} category={c} size="sm" />
+                          ))}
+                        </View>
                       </View>
-                      <Text style={{ fontSize: 18, color: colors.primaryLight }}>✓</Text>
+                      <View style={styles.selectPill}>
+                        <Text style={styles.selectPillText}>SELECT &rarr;</Text>
+                      </View>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -307,28 +349,28 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
         )}
 
         <View style={{ height: 16 }} />
-        <Button
-          title="CANCEL"
+        <ClayButton
+          title="CANCEL TO DASHBOARD"
           onPress={onCancel}
           variant="outline"
-          style={{ width: '100%' }}
+          size="md"
         />
-      </Card>
+      </ClayCard>
 
       {/* Supervisor Verification Modal Dialog */}
-      <Dialog
+      <ClayDialog
         visible={showSupervisorDialog && selectedCandidate !== null}
         onDismiss={() => setShowSupervisorDialog(false)}
+        title="Supervisor Identity Verification"
+        subtitle={
+          selectedCandidate
+            ? `Customer: ${selectedCandidate.fullName} (${selectedCandidate.farmerCode})`
+            : undefined
+        }
       >
         {selectedCandidate && (
           <View>
-            <Text style={typography.titleLarge}>Supervisor Identity Verification</Text>
-            <Text style={[typography.bodyMedium, { color: colors.accentAmber, marginTop: 4 }]}>
-              Customer: {selectedCandidate.fullName} ({selectedCandidate.farmerCode})
-            </Text>
-
-            <View style={{ height: 16 }} />
-            <Text style={styles.reasonLabel}>Reason Category:</Text>
+            <Text style={styles.reasonLabel}>Audit Reason Category:</Text>
             <View style={styles.reasonsList}>
               {REASONS.map((r) => (
                 <TouchableOpacity
@@ -338,6 +380,7 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
                     supervisorReason === r && styles.reasonOptionSelected,
                   ]}
                   onPress={() => setSupervisorReason(r)}
+                  activeOpacity={0.7}
                 >
                   <Text
                     style={[
@@ -352,7 +395,7 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
             </View>
 
             <View style={{ height: 12 }} />
-            <Input
+            <ClayInput
               label="Audit Justification Notes (min 5 chars)"
               value={supervisorNotes}
               onChangeText={setSupervisorNotes}
@@ -361,7 +404,7 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
             />
 
             <View style={{ height: 12 }} />
-            <Input
+            <ClayInput
               label="Supervisor PIN (Optional)"
               value={supervisorPin}
               onChangeText={setSupervisorPin}
@@ -371,13 +414,13 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
 
             <View style={{ height: 20 }} />
             <View style={styles.dialogButtonsRow}>
-              <Button
+              <ClayButton
                 title="CANCEL"
                 onPress={() => setShowSupervisorDialog(false)}
                 variant="outline"
                 style={{ flex: 1 }}
               />
-              <Button
+              <ClayButton
                 title="CONFIRM"
                 onPress={handleConfirmSupervisor}
                 isLoading={isLoading}
@@ -387,7 +430,7 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
             </View>
           </View>
         )}
-      </Dialog>
+      </ClayDialog>
     </ScrollView>
   );
 };
@@ -395,7 +438,7 @@ export const IdentificationScreen: React.FC<IdentificationScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundDark,
+    backgroundColor: colors.clayBgDark,
   },
   content: {
     padding: 24,
@@ -403,57 +446,81 @@ const styles = StyleSheet.create({
   },
   chipRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
     flexWrap: 'wrap',
     justifyContent: 'center',
   },
-  errorBox: {
-    backgroundColor: 'rgba(229, 57, 53, 0.15)',
-    borderColor: colors.statusError,
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    width: '100%',
-    maxWidth: 550,
-    marginBottom: 16,
-  },
-  errorText: {
-    color: colors.statusError,
-    fontSize: 13,
-    textAlign: 'center',
-  },
   mainCard: {
     width: '100%',
-    maxWidth: 550,
+    maxWidth: 560,
     padding: 24,
   },
-  failSafeBox: {
-    backgroundColor: colors.cardBackground,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: colors.accentAmber,
+  sectionContainer: {
+    width: '100%',
+  },
+  viewportGuideCard: {
+    backgroundColor: colors.clayInsetBg,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 143, 0, 0.4)',
     padding: 16,
     alignItems: 'center',
+    gap: 12,
   },
-  warningIcon: {
-    fontSize: 32,
-    marginBottom: 8,
+  guideImageContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  guideImage: {
+    width: '100%',
+    height: '100%',
+  },
+  viewportHeader: {
+    alignItems: 'center',
   },
   failSafeTitle: {
     color: colors.accentAmber,
-    fontWeight: 'bold',
-    fontSize: 16,
-    marginBottom: 6,
+    fontWeight: '800',
+    fontSize: 14,
+    letterSpacing: 0.5,
+    marginBottom: 4,
+    textAlign: 'center',
   },
   failSafeText: {
-    color: colors.textPrimary,
-    fontSize: 13,
+    color: colors.textSecondary,
+    fontSize: 12,
     textAlign: 'center',
     lineHeight: 18,
+  },
+  fallbackPrompt: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    textAlign: 'center',
   },
   failSafeButtonsRow: {
     flexDirection: 'row',
     gap: 12,
+  },
+  rfidHeroBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.clayInsetBg,
+    padding: 14,
+    borderRadius: 14,
+    gap: 14,
+  },
+  rfidHeroImage: {
+    width: 64,
+    height: 64,
+  },
+  rfidSubText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 4,
+    lineHeight: 16,
   },
   searchRow: {
     flexDirection: 'row',
@@ -461,37 +528,53 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   searchBtn: {
-    height: 50,
+    height: 52,
     marginBottom: 6,
     paddingHorizontal: 16,
   },
-  candidateRow: {
+  candidateCard: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: colors.cardBackground,
-    padding: 12,
-    borderRadius: 8,
+    backgroundColor: colors.claySurfaceElevated,
+    padding: 14,
+    borderRadius: 12,
     marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  selectPill: {
+    backgroundColor: 'rgba(76, 175, 80, 0.2)',
+    borderColor: colors.clayGreenLight,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  selectPillText: {
+    color: colors.clayGreenLight,
+    fontSize: 11,
+    fontWeight: '800',
   },
   reasonLabel: {
     fontSize: 13,
     color: colors.textSecondary,
     marginBottom: 6,
+    fontWeight: '600',
   },
   reasonsList: {
     gap: 6,
   },
   reasonOption: {
-    padding: 8,
-    borderRadius: 6,
-    backgroundColor: colors.cardBackground,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: colors.clayInsetBg,
     borderWidth: 1,
     borderColor: 'transparent',
   },
   reasonOptionSelected: {
-    borderColor: colors.primaryLight,
-    backgroundColor: 'rgba(76, 175, 80, 0.15)',
+    borderColor: colors.clayGreenLight,
+    backgroundColor: 'rgba(76, 175, 80, 0.2)',
   },
   reasonOptionText: {
     color: colors.textSecondary,

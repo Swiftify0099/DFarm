@@ -5,14 +5,18 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
+  Image,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { useAuth } from '../auth/AuthContext';
 import { customerApi } from '../api/customerApi';
 import { CustomerDto } from '../types/models';
 import { colors } from '../theme/colors';
+import { clayColors, clayRadius, clayStyles } from '../theme/claymorphism';
+import { clayAssets } from '../theme/assets';
 import { FormInput } from '../components/FormInput';
 import { PhoneInput } from '../components/PhoneInput';
 import {
@@ -206,11 +210,12 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Top Bar */}
+      {/* 3D Clay Top Bar */}
       <View style={styles.topBar}>
         {currentStep !== WizardStep.REGISTRATION_STATUS ? (
           <TouchableOpacity
             style={styles.backButton}
+            activeOpacity={0.8}
             onPress={() => {
               if (currentStep === WizardStep.PERSONAL_DETAILS) {
                 navigation.goBack();
@@ -228,16 +233,20 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.topBarCenter}>
           <Text style={styles.topBarTitle}>Customer Registration</Text>
           {currentStep !== WizardStep.REGISTRATION_STATUS ? (
-            <Text style={styles.topBarSubtitle}>
-              Step {currentStep} of 4: {STEP_TITLES[currentStep]}
-            </Text>
+            <View style={styles.stepBadgeRow}>
+              <View style={styles.stepBadge}>
+                <Text style={styles.stepBadgeText}>
+                  Step {currentStep} of 4: {STEP_TITLES[currentStep]}
+                </Text>
+              </View>
+            </View>
           ) : null}
         </View>
 
         <View style={styles.backButtonPlaceholder} />
       </View>
 
-      {/* Progress Bar */}
+      {/* 3D Recessed Progress Bar */}
       {currentStep !== WizardStep.REGISTRATION_STATUS ? (
         <View style={styles.progressBarTrack}>
           <View
@@ -253,6 +262,7 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         {/* General Error Banner */}
         {generalError ? (
@@ -265,91 +275,115 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
         {/* STEP 1: Personal Details */}
         {currentStep === WizardStep.PERSONAL_DETAILS ? (
           <View style={styles.stepContainer}>
-            <Text style={styles.sectionTitle}>Farmer Personal Information</Text>
-            <Text style={styles.sectionSubtitle}>
-              Enter authoritative farmer identity as registered with local center.
-            </Text>
+            {/* 3D Clay Illustration Card */}
+            <View style={styles.illustrationCard}>
+              <Image
+                source={clayAssets.registrationIllustration}
+                style={styles.stepIllustration}
+                resizeMode="contain"
+              />
+              <View style={styles.illustrationTextWrap}>
+                <Text style={styles.sectionTitle}>Farmer Personal Profile</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Enter legal farmer identity details for canonical dairy records.
+                </Text>
+              </View>
+            </View>
 
-            <FormInput
-              value={fullName}
-              onValueChange={(val) => {
-                setFullName(val);
-                setFullNameError(null);
-              }}
-              label="Farmer Full Name *"
-              placeholder="e.g. Pandurang Tukaram Patil"
-              leadingIcon="👤"
-              isError={!!fullNameError}
-              errorMessage={fullNameError}
-            />
+            {/* Clay Form Card */}
+            <View style={styles.formCard}>
+              <FormInput
+                value={fullName}
+                onValueChange={(val) => {
+                  setFullName(val);
+                  setFullNameError(null);
+                }}
+                label="Farmer Full Name *"
+                placeholder="e.g. Pandurang Tukaram Patil"
+                leadingIcon="👤"
+                isError={!!fullNameError}
+                errorMessage={fullNameError}
+              />
 
-            <FormInput
-              value={village}
-              onValueChange={(val) => {
-                setVillage(val);
-                setVillageError(null);
-              }}
-              label="Village *"
-              placeholder="e.g. Wadgaon"
-              leadingIcon="📍"
-              isError={!!villageError}
-              errorMessage={villageError}
-            />
+              <FormInput
+                value={village}
+                onValueChange={(val) => {
+                  setVillage(val);
+                  setVillageError(null);
+                }}
+                label="Village *"
+                placeholder="e.g. Wadgaon"
+                leadingIcon="📍"
+                isError={!!villageError}
+                errorMessage={villageError}
+              />
 
-            <FormInput
-              value={taluka}
-              onValueChange={setTaluka}
-              label="Taluka / Subdistrict"
-              placeholder="e.g. Karveer"
-            />
+              <FormInput
+                value={taluka}
+                onValueChange={setTaluka}
+                label="Taluka / Subdistrict"
+                placeholder="e.g. Karveer"
+              />
 
-            <FormInput
-              value={district}
-              onValueChange={(val) => {
-                setDistrict(val);
-                setDistrictError(null);
-              }}
-              label="District *"
-              placeholder="e.g. Kolhapur"
-              isError={!!districtError}
-              errorMessage={districtError}
-            />
+              <FormInput
+                value={district}
+                onValueChange={(val) => {
+                  setDistrict(val);
+                  setDistrictError(null);
+                }}
+                label="District *"
+                placeholder="e.g. Kolhapur"
+                isError={!!districtError}
+                errorMessage={districtError}
+              />
 
-            <FormInput
-              value={postalCode}
-              onValueChange={(val) => setPostalCode(val.replace(/[^0-9]/g, '').slice(0, 6))}
-              label="Postal PIN Code"
-              placeholder="e.g. 416001"
-              keyboardType="number-pad"
-            />
+              <FormInput
+                value={postalCode}
+                onValueChange={(val) => setPostalCode(val.replace(/[^0-9]/g, '').slice(0, 6))}
+                label="Postal PIN Code"
+                placeholder="e.g. 416001"
+                keyboardType="number-pad"
+              />
+            </View>
           </View>
         ) : null}
 
         {/* STEP 2: Mobile Validation */}
         {currentStep === WizardStep.MOBILE_VALIDATION ? (
           <View style={styles.stepContainer}>
-            <Text style={styles.sectionTitle}>Primary Mobile & Verification</Text>
-            <Text style={styles.sectionSubtitle}>
-              The mobile number serves as the primary unique communication key. It
-              must be unique within the dairy organization.
-            </Text>
-
-            <PhoneInput
-              rawDigits={mobileDigits}
-              onValueChange={handleMobileDigitsChange}
-              isError={!!mobileError}
-              errorMessage={mobileError}
-            />
-
-            {normalizedMobile ? (
-              <View style={styles.normalizedCard}>
-                <Text style={styles.greenCheckIcon}>✓</Text>
-                <View style={styles.normalizedTextWrap}>
-                  <Text style={styles.normalizedLabel}>Normalized E.164 Format</Text>
-                  <Text style={styles.normalizedNumber}>{normalizedMobile}</Text>
-                </View>
+            <View style={styles.stepHeaderCard}>
+              <View style={styles.stepIconWrap}>
+                <Text style={styles.stepHeaderEmoji}>📱</Text>
               </View>
-            ) : null}
+              <View style={styles.stepHeaderText}>
+                <Text style={styles.sectionTitle}>Primary Mobile & Identity</Text>
+                <Text style={styles.sectionSubtitle}>
+                  The mobile number serves as the primary unique communication key. It
+                  must be unique within the dairy organization.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.formCard}>
+              <PhoneInput
+                rawDigits={mobileDigits}
+                onValueChange={handleMobileDigitsChange}
+                isError={!!mobileError}
+                errorMessage={mobileError}
+              />
+
+              {normalizedMobile ? (
+                <View style={styles.normalizedCard}>
+                  <View style={styles.greenCheckPill}>
+                    <Text style={styles.greenCheckIcon}>✓</Text>
+                  </View>
+                  <View style={styles.normalizedTextWrap}>
+                    <Text style={styles.normalizedLabel}>Canonical E.164 Format</Text>
+                    <Text style={styles.normalizedNumber}>{normalizedMobile}</Text>
+                  </View>
+                </View>
+              ) : null}
+            </View>
           </View>
         ) : null}
 
@@ -366,10 +400,17 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
         {/* STEP 4: Review Details */}
         {currentStep === WizardStep.REVIEW_DETAILS ? (
           <View style={styles.stepContainer}>
-            <Text style={styles.sectionTitle}>Review Registration Details</Text>
-            <Text style={styles.sectionSubtitle}>
-              Verify all details carefully before submitting to the canonical dairy ledger.
-            </Text>
+            <View style={styles.stepHeaderCard}>
+              <View style={styles.stepIconWrap}>
+                <Text style={styles.stepHeaderEmoji}>📋</Text>
+              </View>
+              <View style={styles.stepHeaderText}>
+                <Text style={styles.sectionTitle}>Review Registration Details</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Verify all KYC details carefully before committing to the canonical dairy ledger.
+                </Text>
+              </View>
+            </View>
 
             <View style={styles.reviewCard}>
               <ReviewRow label="Full Name" value={fullName} />
@@ -382,7 +423,7 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
               <View style={styles.divider} />
 
               <View style={styles.reviewCategoriesRow}>
-                <Text style={styles.reviewLabel}>Milk Categories</Text>
+                <Text style={styles.reviewLabel}>Permitted Milk</Text>
                 <View style={styles.categoryBadgesWrap}>
                   {selectedCategories.map((cat) => (
                     <MilkCategoryBadge key={cat} category={cat} />
@@ -392,10 +433,10 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
             </View>
 
             <View style={styles.declarationCard}>
-              <Text style={styles.declarationIcon}>📋</Text>
+              <Text style={styles.declarationIcon}>🛡️</Text>
               <Text style={styles.declarationText}>
-                I verify that the farmer has provided valid physical KYC
-                documentation and consent for dairy registration.
+                I confirm that physical KYC documentation and farmer biometric consent
+                have been verified in compliance with DFarm Dairy Policy.
               </Text>
             </View>
           </View>
@@ -404,9 +445,12 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
         {/* STEP 5: Registration Status */}
         {currentStep === WizardStep.REGISTRATION_STATUS && createdCustomer ? (
           <View style={styles.successContainer}>
-            <View style={styles.successCircle}>
-              <Text style={styles.successCheck}>✓</Text>
-            </View>
+            {/* 3D Success Medallion Illustration */}
+            <Image
+              source={clayAssets.registrationSuccess}
+              style={styles.successIllustration}
+              resizeMode="contain"
+            />
 
             <Text style={styles.successTitle}>Registration Created!</Text>
             <Text style={styles.successSubtitle}>
@@ -427,7 +471,7 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
               <View style={styles.divider} />
 
               <View style={styles.uuidSection}>
-                <Text style={styles.uuidLabel}>Server Canonical UUID</Text>
+                <Text style={styles.uuidLabel}>Server Canonical Customer UUID</Text>
                 <Text style={styles.uuidValue}>{createdCustomer.id}</Text>
               </View>
 
@@ -437,7 +481,7 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
               </View>
 
               <View style={styles.reviewCategoriesRow}>
-                <Text style={styles.reviewLabel}>Permitted Milk</Text>
+                <Text style={styles.reviewLabel}>Permitted Categories</Text>
                 <View style={styles.categoryBadgesWrap}>
                   {(createdCustomer.permittedCategories || []).map((cat) => (
                     <MilkCategoryBadge key={cat} category={cat} />
@@ -451,12 +495,18 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
               <Text style={styles.nextStepsTitle}>
                 Required Lifecycle Next Steps:
               </Text>
-              <Text style={styles.stepItemText}>
-                👉 Step 2: Biometric Face Enrollment (MobileFaceNet-ArcFace v1.0.0)
-              </Text>
-              <Text style={styles.stepItemText}>
-                👉 Step 3: RFID Assignment (Software Manual Entry / Physical Deferred)
-              </Text>
+              <View style={styles.stepItemRow}>
+                <Text style={styles.stepDot}>👉</Text>
+                <Text style={styles.stepItemText}>
+                  Step 2: Biometric Face Enrollment (MobileFaceNet-ArcFace v1.0.0)
+                </Text>
+              </View>
+              <View style={styles.stepItemRow}>
+                <Text style={styles.stepDot}>👉</Text>
+                <Text style={styles.stepItemText}>
+                  Step 3: RFID Assignment (Software Manual Entry / Physical Deferred)
+                </Text>
+              </View>
             </View>
 
             <PrimaryButton
@@ -468,9 +518,11 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
                   farmerCode: createdCustomer.farmerCode || '',
                 });
               }}
+              leadingIcon="👤"
             />
 
             <TouchableOpacity
+              activeOpacity={0.85}
               style={styles.outlineNavButton}
               onPress={() => navigation.navigate('CustomerList')}
             >
@@ -478,6 +530,7 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
             </TouchableOpacity>
 
             <TouchableOpacity
+              activeOpacity={0.85}
               style={styles.outlineNavButton}
               onPress={handleResetWizard}
             >
@@ -494,10 +547,11 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.bottomBar}>
           {currentStep !== WizardStep.PERSONAL_DETAILS ? (
             <TouchableOpacity
+              activeOpacity={0.85}
               style={styles.previousButton}
               onPress={handlePreviousStep}
             >
-              <Text style={styles.previousButtonText}>Previous</Text>
+              <Text style={styles.previousButtonText}>← Previous</Text>
             </TouchableOpacity>
           ) : null}
 
@@ -506,7 +560,7 @@ export const RegistrationWizardScreen: React.FC<Props> = ({ navigation }) => {
               text={
                 currentStep === WizardStep.REVIEW_DETAILS
                   ? 'Submit Registration'
-                  : 'Continue'
+                  : 'Continue →'
               }
               onClick={handleNextStep}
               isLoading={isSubmitting}
@@ -528,61 +582,94 @@ const ReviewRow: React.FC<{ label: string; value: string }> = ({ label, value })
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: clayColors.canvasBackground,
   },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: colors.surface,
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ECEFF1',
+    borderBottomWidth: 1.5,
+    borderBottomColor: '#DFE7ED',
   },
   backButton: {
-    padding: 6,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#EDF4F8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 2,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#CDDCE6',
+    borderBottomColor: '#BDCED8',
   },
   backIcon: {
-    fontSize: 22,
-    color: colors.primary,
+    fontSize: 20,
+    color: clayColors.primary,
+    fontWeight: 'bold',
   },
   backButtonPlaceholder: {
-    width: 32,
+    width: 38,
   },
   topBarCenter: {
     alignItems: 'center',
   },
   topBarTitle: {
     fontSize: 17,
-    fontWeight: '700',
-    color: colors.onSurface,
+    fontWeight: '800',
+    color: clayColors.primary,
   },
-  topBarSubtitle: {
-    fontSize: 12,
-    color: colors.onSurfaceVariant,
-    marginTop: 2,
+  stepBadgeRow: {
+    marginTop: 4,
+  },
+  stepBadge: {
+    backgroundColor: '#E5F3FA',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: clayRadius.pill,
+  },
+  stepBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: clayColors.primary,
   },
   progressBarTrack: {
-    height: 4,
-    backgroundColor: colors.surfaceVariant,
+    height: 6,
+    backgroundColor: '#D9E8F2',
     width: '100%',
   },
   progressBarFill: {
-    height: 4,
-    backgroundColor: colors.primary,
+    height: 6,
+    backgroundColor: clayColors.primary,
+    borderTopRightRadius: 3,
+    borderBottomRightRadius: 3,
   },
   scrollContent: {
-    padding: 20,
-    paddingBottom: 100,
+    padding: 18,
+    paddingBottom: 110,
   },
   generalErrorBox: {
     flexDirection: 'row',
-    backgroundColor: colors.errorContainer,
-    borderRadius: 12,
+    backgroundColor: clayColors.errorSurface,
+    borderRadius: clayRadius.card,
     padding: 14,
     marginBottom: 16,
     alignItems: 'center',
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: clayColors.errorBorder,
+    borderBottomColor: clayColors.errorBorder,
   },
   warningIcon: {
     fontSize: 20,
@@ -590,37 +677,156 @@ const styles = StyleSheet.create({
   },
   generalErrorText: {
     fontSize: 13,
-    color: colors.onErrorContainer,
+    color: clayColors.error,
     flex: 1,
     lineHeight: 18,
+    fontWeight: '600',
   },
   stepContainer: {
     gap: 14,
   },
+  illustrationCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.card,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CFD9E2',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#002E44',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 3,
+      },
+      default: {},
+    }),
+  },
+  stepIllustration: {
+    width: 80,
+    height: 80,
+    marginRight: 14,
+  },
+  illustrationTextWrap: {
+    flex: 1,
+  },
+  stepHeaderCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.card,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CFD9E2',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#002E44',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 3,
+      },
+      default: {},
+    }),
+  },
+  stepIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#EDF4F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  stepHeaderEmoji: {
+    fontSize: 22,
+  },
+  stepHeaderText: {
+    flex: 1,
+  },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.onSurface,
+    fontSize: 16,
+    fontWeight: '800',
+    color: clayColors.textPrimary,
   },
   sectionSubtitle: {
-    fontSize: 13,
-    color: colors.onSurfaceVariant,
-    lineHeight: 18,
-    marginBottom: 4,
+    fontSize: 12,
+    color: clayColors.textSecondary,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  formCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.card,
+    padding: 18,
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CFD9E2',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#002E44',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+      },
+      android: {
+        elevation: 4,
+      },
+      default: {},
+    }),
   },
   normalizedCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(35, 117, 155, 0.15)',
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 8,
+    backgroundColor: '#E5F3FA',
+    borderRadius: clayRadius.md,
+    padding: 12,
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 2,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#C4DDEB',
+    borderBottomColor: '#C4DDEB',
+  },
+  greenCheckPill: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: clayColors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
   },
   greenCheckIcon: {
-    fontSize: 20,
-    color: colors.primary,
+    fontSize: 15,
+    color: '#FFFFFF',
     fontWeight: 'bold',
-    marginRight: 10,
   },
   normalizedTextWrap: {
     flex: 1,
@@ -628,19 +834,40 @@ const styles = StyleSheet.create({
   normalizedLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.primary,
+    color: clayColors.primary,
   },
   normalizedNumber: {
     fontSize: 16,
-    fontWeight: '700',
-    color: colors.onSurface,
+    fontWeight: '800',
+    color: clayColors.textPrimary,
     marginTop: 2,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   reviewCard: {
-    backgroundColor: 'rgba(219, 228, 235, 0.4)',
-    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.card,
     padding: 18,
-    gap: 10,
+    gap: 12,
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CFD9E2',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#002E44',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+      },
+      android: {
+        elevation: 4,
+      },
+      default: {},
+    }),
   },
   reviewRow: {
     flexDirection: 'row',
@@ -648,17 +875,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   reviewLabel: {
-    fontSize: 14,
-    color: colors.onSurfaceVariant,
+    fontSize: 13,
+    color: clayColors.textSecondary,
+    fontWeight: '500',
   },
   reviewValue: {
     fontSize: 14,
-    fontWeight: '600',
-    color: colors.onSurface,
+    fontWeight: '700',
+    color: clayColors.textPrimary,
   },
   divider: {
     height: 1,
-    backgroundColor: colors.outlineVariant,
+    backgroundColor: '#E2ECF3',
     marginVertical: 4,
   },
   reviewCategoriesRow: {
@@ -673,11 +901,17 @@ const styles = StyleSheet.create({
   declarationCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: 12,
+    backgroundColor: '#EDF5FA',
+    borderRadius: clayRadius.md,
     padding: 14,
-    borderWidth: 1,
-    borderColor: '#ECEFF1',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 2,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#D1E1EC',
+    borderBottomColor: '#C4D6E2',
   },
   declarationIcon: {
     fontSize: 22,
@@ -685,115 +919,174 @@ const styles = StyleSheet.create({
   },
   declarationText: {
     fontSize: 12,
-    color: colors.onSurface,
+    color: clayColors.textSecondary,
     flex: 1,
     lineHeight: 18,
+    fontWeight: '500',
   },
   successContainer: {
     alignItems: 'center',
     gap: 16,
   },
-  successCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#E6F4EA',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-  successCheck: {
-    fontSize: 40,
-    color: '#137333',
-    fontWeight: 'bold',
+  successIllustration: {
+    width: 140,
+    height: 140,
+    marginTop: 8,
   },
   successTitle: {
     fontSize: 22,
-    fontWeight: '700',
-    color: colors.onSurface,
+    fontWeight: '800',
+    color: clayColors.primary,
   },
   successSubtitle: {
-    fontSize: 14,
-    color: colors.onSurfaceVariant,
+    fontSize: 13,
+    color: clayColors.textSecondary,
     textAlign: 'center',
+    maxWidth: 320,
+    lineHeight: 18,
   },
   summaryCard: {
     width: '100%',
-    backgroundColor: colors.surface,
-    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.card,
     padding: 18,
     gap: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CFD9E2',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#002E44',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+      },
+      android: {
+        elevation: 4,
+      },
+      default: {},
+    }),
   },
   uuidSection: {
-    gap: 2,
+    backgroundColor: '#EBF4FA',
+    padding: 10,
+    borderRadius: clayRadius.sm,
+    gap: 3,
   },
   uuidLabel: {
     fontSize: 11,
-    color: colors.onSurfaceVariant,
+    color: clayColors.textMuted,
+    fontWeight: '600',
   },
   uuidValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.primary,
-    fontFamily: 'monospace',
+    fontSize: 12,
+    fontWeight: '700',
+    color: clayColors.primary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   nextStepsCard: {
     width: '100%',
-    backgroundColor: 'rgba(35, 117, 155, 0.12)',
-    borderRadius: 14,
+    backgroundColor: '#E4F2F8',
+    borderRadius: clayRadius.card,
     padding: 16,
     gap: 8,
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#CCE3F0',
+    borderBottomColor: '#BDD9E8',
   },
   nextStepsTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '800',
+    color: clayColors.primary,
+    marginBottom: 2,
+  },
+  stepItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  stepDot: {
+    fontSize: 14,
+    marginRight: 6,
+    marginTop: 1,
   },
   stepItemText: {
-    fontSize: 13,
-    color: colors.onSurface,
+    fontSize: 12,
+    color: clayColors.textPrimary,
     lineHeight: 18,
+    flex: 1,
+    fontWeight: '500',
   },
   outlineNavButton: {
     width: '100%',
     height: 50,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
+    borderRadius: clayRadius.lg,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CEDAE2',
     alignItems: 'center',
     justifyContent: 'center',
   },
   outlineNavButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.onSurface,
+    fontSize: 14,
+    fontWeight: '700',
+    color: clayColors.textPrimary,
   },
   bottomBar: {
     flexDirection: 'row',
     padding: 16,
-    backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: '#ECEFF1',
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1.5,
+    borderTopColor: '#DFE7ED',
     gap: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#002E44',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+      },
+      android: {
+        elevation: 8,
+      },
+      default: {},
+    }),
   },
   previousButton: {
     flex: 1,
     height: 52,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
+    borderRadius: clayRadius.lg,
+    backgroundColor: '#EDF3F8',
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#CDDCE6',
+    borderBottomColor: '#BDCED8',
     alignItems: 'center',
     justifyContent: 'center',
   },
   previousButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.onSurface,
+    fontSize: 14,
+    fontWeight: '700',
+    color: clayColors.textSecondary,
   },
   nextButtonWrap: {
     flex: 1,

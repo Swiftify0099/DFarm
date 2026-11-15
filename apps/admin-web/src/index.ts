@@ -25,6 +25,10 @@ export * from './components/SearchBar.js';
 export * from './components/Sidebar.js';
 export * from './components/Header.js';
 export * from './components/DashboardLayout.js';
+export * from './components/ClayCard.js';
+export * from './components/ClayButton.js';
+export * from './components/ClayTabs.js';
+export * from './components/ClayEmptyState.js';
 
 // Phase 14: Feed Management & POS
 export * from './features/feed/types.js';

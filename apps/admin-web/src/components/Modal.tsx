@@ -47,31 +47,31 @@ export const Modal: React.FC<ModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 animate-fade-in">
       <div
-        className={`bg-white rounded-2xl shadow-2xl border border-gray-100 w-full ${widthClasses[maxWidth]} overflow-hidden animate-scale-in`}
+        className={`bg-white rounded-3xl border border-white/90 shadow-[0_25px_60px_-15px_rgba(15,23,42,0.25),0_0_0_1px_rgba(255,255,255,0.85)_inset,0_10px_20px_-5px_rgba(15,23,42,0.1)] w-full ${widthClasses[maxWidth]} overflow-hidden transform transition-all`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-slate-50/90 to-white">
           <div>
-            <h3 className="text-lg font-bold text-gray-900">{title}</h3>
-            {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
+            <h3 className="text-lg font-black text-slate-900 tracking-tight">{title}</h3>
+            {subtitle && <p className="text-xs text-slate-500 font-medium mt-0.5">{subtitle}</p>}
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+            className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200/80 shadow-[inset_1px_1px_2px_rgba(255,255,255,0.9),0_2px_4px_rgba(0,0,0,0.05)] transition-all duration-150 active:scale-95 font-bold"
           >
             ✕
           </button>
         </div>
 
         {/* Content */}
-        <div className="px-6 py-5 max-h-[75vh] overflow-y-auto">{children}</div>
+        <div className="px-6 py-6 max-h-[75vh] overflow-y-auto">{children}</div>
 
         {/* Footer */}
         {footer && (
-          <div className="px-6 py-3.5 bg-gray-50 border-t border-gray-100 flex items-center justify-end gap-3">
+          <div className="px-6 py-4 bg-[#F8FAFC] border-t border-slate-100 flex items-center justify-end gap-3">
             {footer}
           </div>
         )}

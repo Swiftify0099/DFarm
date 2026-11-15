@@ -3,8 +3,10 @@ import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Customer, MilkCategory, RateCalculationResult } from '../types';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
-import { Card } from '../components/common/Card';
-import { Button } from '../components/common/Button';
+import { ClayCard } from '../components/clay/ClayCard';
+import { ClayButton } from '../components/clay/ClayButton';
+import { ClayAlert } from '../components/clay/ClayAlert';
+import { ClayCategoryBadge } from '../components/clay/ClayCategoryBadge';
 
 interface TransactionReviewScreenProps {
   customer: Customer;
@@ -34,80 +36,120 @@ export const TransactionReviewScreen: React.FC<TransactionReviewScreenProps> = (
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={[typography.headlineMedium, { textAlign: 'center' }]}>
-        TRANSACTION REVIEW & PRICING
+        TRANSACTION REVIEW &amp; PRICING
       </Text>
       <Text style={[typography.bodyMedium, { textAlign: 'center', marginTop: 4, marginBottom: 16 }]}>
-        Customer: {customer.fullName} ({customer.farmerCode})
+        Verify intake measurements and matrix pricing before committing to ledger
       </Text>
 
       {errorMessage && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{errorMessage}</Text>
-        </View>
+        <ClayAlert
+          type="error"
+          title="Commit Failure"
+          message={errorMessage}
+          style={{ maxWidth: 560 }}
+        />
       )}
 
-      <Card style={styles.card} backgroundColor={colors.surfaceDark}>
-        <View style={styles.reviewRow}>
-          <Text style={styles.label}>Milk Category:</Text>
-          <Text style={styles.value}>{category}</Text>
-        </View>
-
-        <View style={styles.reviewRow}>
-          <Text style={styles.label}>Net Quantity:</Text>
-          <Text style={styles.value}>{netWeight.toFixed(2)} KG</Text>
-        </View>
-
-        <View style={styles.reviewRow}>
-          <Text style={styles.label}>Fat / SNF:</Text>
-          <Text style={styles.value}>
-            {fat.toFixed(1)}% / {snf.toFixed(1)}%
-          </Text>
+      {/* Main Review Card */}
+      <ClayCard variant="elevated" style={styles.card}>
+        {/* Customer Header Info */}
+        <View style={styles.customerHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.farmerCodeTag}>{customer.farmerCode}</Text>
+            <Text style={typography.headlineMedium}>{customer.fullName}</Text>
+            {customer.mobileNumber ? (
+              <Text style={styles.mobileText}>📱 {customer.mobileNumber}</Text>
+            ) : null}
+          </View>
+          <ClayCategoryBadge category={category} size="md" />
         </View>
 
         <View style={styles.divider} />
 
+        {/* Measurements Grid */}
+        <View style={styles.measurementRow}>
+          <View style={styles.measureWell}>
+            <Text style={styles.measureLabel}>NET WEIGHT</Text>
+            <Text style={styles.measureValue}>{netWeight.toFixed(2)}</Text>
+            <Text style={styles.measureUnit}>KG</Text>
+          </View>
+
+          <View style={styles.measureWell}>
+            <Text style={styles.measureLabel}>FAT %</Text>
+            <Text style={styles.measureValue}>{fat.toFixed(1)}%</Text>
+            <Text style={styles.measureUnit}>ANALYZER</Text>
+          </View>
+
+          <View style={styles.measureWell}>
+            <Text style={styles.measureLabel}>SNF %</Text>
+            <Text style={styles.measureValue}>{snf.toFixed(1)}%</Text>
+            <Text style={styles.measureUnit}>ANALYZER</Text>
+          </View>
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Pricing Matrix Breakdown */}
         <View style={styles.reviewRow}>
-          <Text style={styles.label}>Applied Rate:</Text>
+          <Text style={styles.label}>Applied Unit Rate:</Text>
           <Text style={[styles.value, { color: colors.accentAmber }]}>
             INR {rateCalculation.appliedRate.toFixed(2)} / KG
           </Text>
         </View>
 
         <View style={styles.reviewRow}>
-          <Text style={styles.label}>Calculation Rule:</Text>
-          <Text style={[styles.value, { fontSize: 12, fontWeight: 'normal' }]}>
+          <Text style={styles.label}>Pricing Rule:</Text>
+          <Text style={[styles.value, { fontSize: 12, fontWeight: 'normal', color: colors.textSecondary }]}>
             {rateCalculation.calculationRule}
           </Text>
         </View>
 
-        <View style={{ height: 12 }} />
+        <View style={{ height: 16 }} />
 
-        <View style={styles.reviewRow}>
-          <Text style={typography.titleLarge}>TOTAL AMOUNT:</Text>
-          <Text style={[typography.headlineMedium, { color: colors.statusValid }]}>
-            INR {rateCalculation.totalAmount.toFixed(2)}
+        {/* Highlighted Total Amount Card */}
+        <View style={styles.totalAmountWell}>
+          <View style={styles.totalHeaderRow}>
+            <Text style={styles.totalLabel}>TOTAL AMOUNT PAYABLE</Text>
+            <View style={styles.bankerRoundingPill}>
+              <Text style={styles.bankerRoundingText}>HALF-EVEN ROUNDED</Text>
+            </View>
+          </View>
+
+          <View style={styles.totalRow}>
+            <Text style={styles.currencySymbol}>INR</Text>
+            <Text style={styles.totalValue}>
+              {rateCalculation.totalAmount.toFixed(2)}
+            </Text>
+          </View>
+
+          <Text style={styles.authoritativeNote}>
+            Authoritative rate calculation computed via center rate matrix. Idempotent ledger entry will be recorded.
           </Text>
         </View>
 
         <View style={{ height: 24 }} />
 
+        {/* Session Action Buttons */}
         <View style={styles.buttonsRow}>
-          <Button
+          <ClayButton
             title="CANCEL SESSION"
             onPress={onCancelSession}
             disabled={isLoading}
             variant="outline"
             style={{ flex: 1 }}
+            size="lg"
           />
-          <Button
-            title="COMMIT & PRINT"
+          <ClayButton
+            title="COMMIT &amp; PRINT &rarr;"
             onPress={onConfirmCommit}
             isLoading={isLoading}
             variant="primary"
             style={{ flex: 1 }}
+            size="lg"
           />
         </View>
-      </Card>
+      </ClayCard>
     </ScrollView>
   );
 };
@@ -115,7 +157,7 @@ export const TransactionReviewScreen: React.FC<TransactionReviewScreenProps> = (
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundDark,
+    backgroundColor: colors.clayBgDark,
   },
   content: {
     padding: 24,
@@ -125,43 +167,137 @@ const styles = StyleSheet.create({
   },
   card: {
     width: '100%',
-    maxWidth: 550,
+    maxWidth: 560,
     padding: 24,
   },
-  errorBox: {
-    backgroundColor: 'rgba(229, 57, 53, 0.15)',
-    borderColor: colors.statusError,
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    width: '100%',
-    maxWidth: 550,
-    marginBottom: 16,
+  customerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
   },
-  errorText: {
-    color: colors.statusError,
+  farmerCodeTag: {
     fontSize: 13,
-    textAlign: 'center',
+    fontWeight: '800',
+    color: colors.accentAmber,
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  mobileText: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginVertical: 14,
+  },
+  measurementRow: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+  },
+  measureWell: {
+    flex: 1,
+    backgroundColor: colors.clayInsetBg,
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1.5,
+    borderBottomWidth: 1.5,
+    borderRightWidth: 1.5,
+    borderTopColor: colors.clayInsetBorderTop,
+    borderLeftColor: colors.clayInsetBorderTop,
+    borderBottomColor: colors.clayInsetBorderBottom,
+    borderRightColor: colors.clayInsetBorderBottom,
+  },
+  measureLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.textSecondary,
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  measureValue: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  measureUnit: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.clayGreenLight,
+    marginTop: 2,
   },
   reviewRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 6,
+    paddingVertical: 4,
   },
   label: {
-    fontSize: 14,
+    fontSize: 13,
     color: colors.textSecondary,
   },
   value: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: 'bold',
     color: colors.textPrimary,
   },
-  divider: {
-    height: 1,
-    backgroundColor: colors.cardBackground,
-    marginVertical: 12,
+  totalAmountWell: {
+    backgroundColor: 'rgba(76, 175, 80, 0.12)',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: 'rgba(76, 175, 80, 0.4)',
+    padding: 16,
+  },
+  totalHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  totalLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.clayGreenLight,
+    letterSpacing: 0.5,
+  },
+  bankerRoundingPill: {
+    backgroundColor: 'rgba(76, 175, 80, 0.25)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  bankerRoundingText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    letterSpacing: 0.5,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+  },
+  currencySymbol: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.statusValid,
+  },
+  totalValue: {
+    fontSize: 38,
+    fontWeight: '900',
+    color: colors.statusValid,
+    letterSpacing: -0.5,
+  },
+  authoritativeNote: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginTop: 6,
+    lineHeight: 15,
   },
   buttonsRow: {
     flexDirection: 'row',

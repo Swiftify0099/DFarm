@@ -6,11 +6,16 @@ import {
   TouchableOpacity,
   StyleSheet,
   Modal,
+  Image,
+  Platform,
+  SafeAreaView,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types/navigation';
 import { useAuth } from '../auth/AuthContext';
 import { colors } from '../theme/colors';
+import { clayColors, clayRadius, clayStyles } from '../theme/claymorphism';
+import { clayAssets } from '../theme/assets';
 import { FormInput } from '../components/FormInput';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { AssignedCenter, OfficerProfile } from '../types/models';
@@ -76,27 +81,49 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
   };
 
   return (
-    <View style={styles.root}>
+    <SafeAreaView style={styles.root}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        {/* DFarm Dairy Branding */}
-        <View style={styles.brandIconContainer}>
-          <Text style={styles.brandEmoji}>🥛</Text>
+        {/* 3D Clay Hero Onboarding Illustration */}
+        <View style={styles.heroContainer}>
+          <View style={styles.heroGlowBackdrop} />
+          <Image
+            source={clayAssets.onboarding3d}
+            style={styles.heroImage}
+            resizeMode="cover"
+          />
         </View>
 
-        <Text style={styles.brandTitle}>DFarm Dairy</Text>
-        <Text style={styles.brandSubtitle}>
-          Officer Registration & KYC Portal
-        </Text>
-
-        {/* Login Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Officer Sign In</Text>
-          <Text style={styles.cardSubtitle}>
-            Enter authorized staff credentials to manage center registrations.
+        {/* DFarm Dairy Header Branding */}
+        <View style={styles.brandHeader}>
+          <View style={styles.brandPill}>
+            <Text style={styles.brandPillEmoji}>🥛</Text>
+            <Text style={styles.brandPillText}>DFARM SMART DAIRY</Text>
+          </View>
+          <Text style={styles.brandTitle}>Officer Registration Portal</Text>
+          <Text style={styles.brandSubtitle}>
+            Farmer KYC Ledger • Biometric Vault • RFID Provisioning
           </Text>
+        </View>
+
+        {/* 3D Clay Login Card */}
+        <View style={styles.card}>
+          <View style={styles.cardHeaderRow}>
+            <View style={styles.cardIconBadge}>
+              <Text style={styles.cardIconEmoji}>🔐</Text>
+            </View>
+            <View style={styles.cardTitleWrap}>
+              <Text style={styles.cardTitle}>Staff Authentication</Text>
+              <Text style={styles.cardSubtitle}>
+                Enter authorized credentials to operate dairy centers
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.formGap} />
 
           <FormInput
             value={email}
@@ -104,7 +131,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
               setEmail(val);
               setErrorMessage(null);
             }}
-            label="Officer Email"
+            label="Authorized Officer Email"
             placeholder="officer@dfarm.local"
             leadingIcon="✉️"
             keyboardType="email-address"
@@ -117,7 +144,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
               setPassword(val);
               setErrorMessage(null);
             }}
-            label="Password"
+            label="Staff Password"
             leadingIcon="🔒"
             secureTextEntry
             returnKeyType="done"
@@ -126,6 +153,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
           {errorMessage ? (
             <View style={styles.errorBox}>
+              <Text style={styles.errorIcon}>⚠️</Text>
               <Text style={styles.errorBoxText}>{errorMessage}</Text>
             </View>
           ) : null}
@@ -133,19 +161,21 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
           <View style={styles.buttonSpacer} />
 
           <PrimaryButton
-            text="Secure Sign In"
+            text="Secure Officer Sign In"
             onClick={handleLogin}
             isLoading={isLoading}
             leadingIcon="🛡️"
           />
         </View>
 
-        {/* Footnote */}
+        {/* Security Trust Footnote */}
         <View style={styles.footnoteRow}>
-          <Text style={styles.footnoteIcon}>🛡️</Text>
-          <Text style={styles.footnoteText}>
-            Hardware Keystore Encrypted • P05/P06 Verified
-          </Text>
+          <View style={styles.footnotePill}>
+            <Text style={styles.footnoteIcon}>🛡️</Text>
+            <Text style={styles.footnoteText}>
+              Hardware Keystore Encrypted • P05/P06 Verified
+            </Text>
+          </View>
         </View>
       </ScrollView>
 
@@ -160,10 +190,17 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select Operational Center</Text>
-            <Text style={styles.modalSubtitle}>
-              Please select the milk collection center for this session:
-            </Text>
+            <View style={styles.modalHeaderRow}>
+              <View style={styles.modalIconPill}>
+                <Text style={styles.modalIconText}>🏢</Text>
+              </View>
+              <View style={styles.modalTitleWrap}>
+                <Text style={styles.modalTitle}>Select Operating Center</Text>
+                <Text style={styles.modalSubtitle}>
+                  Choose the active milk collection center for this session:
+                </Text>
+              </View>
+            </View>
 
             <View style={styles.centersList}>
               {availableCenters.map((center) => {
@@ -171,7 +208,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
                 return (
                   <TouchableOpacity
                     key={center.centerId}
-                    activeOpacity={0.7}
+                    activeOpacity={0.8}
                     style={[
                       styles.centerOptionCard,
                       isSelected && styles.centerOptionSelected,
@@ -189,7 +226,7 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
                     <View style={styles.centerDetails}>
                       <Text style={styles.centerName}>{center.centerName}</Text>
                       <Text style={styles.centerCode}>
-                        Code: {center.centerCode}
+                        Center Code: {center.centerCode}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -197,107 +234,211 @@ export const LoginScreen: React.FC<Props> = ({ navigation }) => {
               })}
             </View>
 
-            <TouchableOpacity
-              style={styles.modalConfirmButton}
-              onPress={() => {
+            <PrimaryButton
+              text="Confirm & Continue to Dashboard"
+              onClick={() => {
                 if (selectedCenterId) {
                   handleCenterSelect(selectedCenterId);
                 }
               }}
-            >
-              <Text style={styles.modalConfirmText}>Continue</Text>
-            </TouchableOpacity>
+              leadingIcon="✓"
+            />
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: clayColors.canvasBackground,
   },
   scrollContent: {
-    padding: 24,
+    padding: 20,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: '100%',
   },
-  brandIconContainer: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: colors.primary,
+  heroContainer: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 4,
+    position: 'relative',
+    ...Platform.select({
+      ios: {
+        shadowColor: clayColors.primary,
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.22,
+        shadowRadius: 16,
+      },
+      android: {
+        elevation: 8,
+      },
+      default: {},
+    }),
   },
-  brandEmoji: {
-    fontSize: 36,
+  heroGlowBackdrop: {
+    position: 'absolute',
+    width: 154,
+    height: 154,
+    borderRadius: 77,
+    backgroundColor: 'rgba(0, 80, 110, 0.12)',
+  },
+  heroImage: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
+  },
+  brandHeader: {
+    alignItems: 'center',
+    marginBottom: 22,
+  },
+  brandPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E0F0F8',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: clayRadius.pill,
+    marginBottom: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#FFFFFF',
+  },
+  brandPillEmoji: {
+    fontSize: 14,
+    marginRight: 6,
+  },
+  brandPillText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: clayColors.primary,
+    letterSpacing: 0.8,
   },
   brandTitle: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: colors.primary,
+    fontSize: 24,
+    fontWeight: '800',
+    color: clayColors.primary,
     marginBottom: 4,
+    textAlign: 'center',
   },
   brandSubtitle: {
-    fontSize: 14,
-    color: colors.onSurfaceVariant,
-    marginBottom: 28,
+    fontSize: 13,
+    color: clayColors.textSecondary,
+    textAlign: 'center',
+    maxWidth: 320,
+    lineHeight: 18,
   },
   card: {
     width: '100%',
-    backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 4,
-    borderWidth: 1,
-    borderColor: '#E6E8EC',
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.card,
+    padding: 22,
+    borderTopWidth: 2.5,
+    borderLeftWidth: 1.5,
+    borderRightWidth: 1.5,
+    borderBottomWidth: 4,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#D8E4EC',
+    borderBottomColor: '#C4D5E2',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#002E44',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.14,
+        shadowRadius: 18,
+      },
+      android: {
+        elevation: 6,
+      },
+      default: {},
+    }),
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  cardIconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#EDF5FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    borderTopWidth: 1.5,
+    borderTopColor: '#FFFFFF',
+  },
+  cardIconEmoji: {
+    fontSize: 22,
+  },
+  cardTitleWrap: {
+    flex: 1,
   },
   cardTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    color: colors.onSurface,
-    marginBottom: 4,
+    color: clayColors.textPrimary,
   },
   cardSubtitle: {
-    fontSize: 13,
-    color: colors.onSurfaceVariant,
-    marginBottom: 20,
-    lineHeight: 18,
+    fontSize: 12,
+    color: clayColors.textMuted,
+    marginTop: 2,
+  },
+  formGap: {
+    height: 10,
   },
   errorBox: {
-    backgroundColor: colors.errorContainer,
-    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: clayColors.errorSurface,
+    borderRadius: clayRadius.md,
     padding: 12,
     marginTop: 10,
-    marginBottom: 4,
+    marginBottom: 6,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 2,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: clayColors.errorBorder,
+    borderBottomColor: clayColors.errorBorder,
+  },
+  errorIcon: {
+    fontSize: 16,
+    marginRight: 8,
   },
   errorBoxText: {
-    color: colors.onErrorContainer,
+    color: clayColors.error,
     fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
     lineHeight: 18,
   },
   buttonSpacer: {
     height: 14,
   },
   footnoteRow: {
+    marginTop: 22,
+  },
+  footnotePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: clayRadius.pill,
+    borderTopWidth: 1,
+    borderTopColor: '#FFFFFF',
   },
   footnoteIcon: {
     fontSize: 14,
@@ -305,33 +446,74 @@ const styles = StyleSheet.create({
   },
   footnoteText: {
     fontSize: 11,
-    color: colors.outline,
-    fontWeight: '500',
+    color: clayColors.textSecondary,
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    backgroundColor: 'rgba(5, 20, 32, 0.65)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    padding: 20,
   },
   modalCard: {
     width: '100%',
-    backgroundColor: colors.surface,
-    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.dialog,
     padding: 22,
-    elevation: 8,
+    borderTopWidth: 2.5,
+    borderLeftWidth: 1.5,
+    borderRightWidth: 1.5,
+    borderBottomWidth: 4,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#D8E4EC',
+    borderBottomColor: '#C4D5E2',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#002538',
+        shadowOffset: { width: 0, height: 14 },
+        shadowOpacity: 0.24,
+        shadowRadius: 22,
+      },
+      android: {
+        elevation: 10,
+      },
+      default: {},
+    }),
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalIconPill: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#E8F3FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#FFFFFF',
+  },
+  modalIconText: {
+    fontSize: 22,
+  },
+  modalTitleWrap: {
+    flex: 1,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.onSurface,
-    marginBottom: 6,
+    color: clayColors.textPrimary,
   },
   modalSubtitle: {
-    fontSize: 14,
-    color: colors.onSurfaceVariant,
-    marginBottom: 16,
+    fontSize: 13,
+    color: clayColors.textMuted,
+    marginTop: 2,
+    lineHeight: 18,
   },
   centersList: {
     gap: 10,
@@ -341,33 +523,44 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
-    backgroundColor: colors.surface,
+    borderRadius: clayRadius.md,
+    backgroundColor: '#F5F9FC',
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.8)',
+    borderRightColor: '#DFE8EF',
+    borderBottomColor: '#CEDEE8',
   },
   centerOptionSelected: {
-    borderColor: colors.primary,
-    backgroundColor: 'rgba(35, 117, 155, 0.15)',
+    backgroundColor: '#E5F3FA',
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: clayColors.primaryLight,
+    borderRightColor: clayColors.primary,
+    borderBottomColor: clayColors.primary,
+    borderWidth: 1.5,
   },
   radioCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 2,
-    borderColor: colors.outline,
+    borderColor: '#B0C4D2',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
   radioCircleSelected: {
-    borderColor: colors.primary,
+    borderColor: clayColors.primary,
   },
   radioDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.primary,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: clayColors.primary,
   },
   centerDetails: {
     flex: 1,
@@ -375,22 +568,12 @@ const styles = StyleSheet.create({
   centerName: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.onSurface,
+    color: clayColors.textPrimary,
   },
   centerCode: {
     fontSize: 12,
-    color: colors.onSurfaceVariant,
+    color: clayColors.textMuted,
     marginTop: 2,
-  },
-  modalConfirmButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  modalConfirmText: {
-    color: colors.onPrimary,
-    fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '500',
   },
 });

@@ -18,30 +18,30 @@ export const Pagination: React.FC<PaginationProps> = ({
   const endItem = Math.min(currentPage * pageSize, totalItems);
 
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-white border-t border-gray-200 text-xs text-gray-600">
-      <div>
-        Showing <span className="font-semibold text-gray-900">{startItem}</span> to{' '}
-        <span className="font-semibold text-gray-900">{endItem}</span> of{' '}
-        <span className="font-semibold text-gray-900">{totalItems}</span> results
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-5 py-3.5 bg-white/80 backdrop-blur-sm border-t border-slate-100 rounded-b-2xl text-xs text-slate-600 select-none">
+      <div className="font-medium">
+        Showing <span className="font-extrabold text-slate-900">{startItem}</span> to{' '}
+        <span className="font-extrabold text-slate-900">{endItem}</span> of{' '}
+        <span className="font-extrabold text-slate-900">{totalItems}</span> results
       </div>
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-2">
         <button
           onClick={() => onPageChange(currentPage - 1)}
           disabled={currentPage <= 1}
-          className="px-3 py-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
+          className="px-3.5 py-1.5 rounded-xl border border-slate-200/90 bg-white text-slate-700 shadow-[0_2px_6px_rgba(15,23,42,0.06),inset_0_1px_1px_rgba(255,255,255,0.9)] hover:bg-slate-50 hover:shadow-[0_4px_10px_rgba(15,23,42,0.08)] disabled:opacity-40 disabled:cursor-not-allowed font-bold transition-all duration-150 active:translate-y-0.5"
         >
           Previous
         </button>
 
-        <span className="px-2 py-1 font-semibold text-gray-800">
+        <div className="px-3 py-1 rounded-xl bg-[#EDF2F7] border border-slate-200/80 shadow-[inset_1.5px_1.5px_3px_rgba(15,23,42,0.06),inset_-1.5px_-1.5px_3px_rgba(255,255,255,0.85)] font-bold text-slate-800 text-xs">
           Page {currentPage} of {totalPages}
-        </span>
+        </div>
 
         <button
           onClick={() => onPageChange(currentPage + 1)}
           disabled={currentPage >= totalPages}
-          className="px-3 py-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
+          className="px-3.5 py-1.5 rounded-xl border border-slate-200/90 bg-white text-slate-700 shadow-[0_2px_6px_rgba(15,23,42,0.06),inset_0_1px_1px_rgba(255,255,255,0.9)] hover:bg-slate-50 hover:shadow-[0_4px_10px_rgba(15,23,42,0.08)] disabled:opacity-40 disabled:cursor-not-allowed font-bold transition-all duration-150 active:translate-y-0.5"
         >
           Next
         </button>

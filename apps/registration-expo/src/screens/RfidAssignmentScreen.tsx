@@ -1,6 +1,7 @@
 /**
  * DFarm Registration App - RFID Assignment & Management Screen
  * Complete parity with Kotlin RfidAssignmentScreen.kt & RfidAssignmentViewModel.kt
+ * Transformed with Premium 3D Claymorphism Aesthetics
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -13,17 +14,20 @@ import {
   TextInput,
   ActivityIndicator,
   Modal,
-  Alert,
+  Platform,
+  SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 const Icon = Ionicons as unknown as React.ComponentType<any>;
 import { useNavigation } from '@react-navigation/native';
 import { colors } from '../theme/colors';
+import { clayColors, clayRadius } from '../theme/claymorphism';
 import { rfidAdapter } from '../hardware/RfidReaderAdapter';
 import { customerApi } from '../api/customerApi';
 import { rfidApi } from '../api/rfidApi';
 import { CustomerDto, RfidAssignmentDto } from '../types/models';
 import { useAuth } from '../auth/AuthContext';
+import { PrimaryButton } from '../components/PrimaryButton';
 
 export const RfidAssignmentScreen: React.FC = () => {
   const navigation = useNavigation();
@@ -98,7 +102,6 @@ export const RfidAssignmentScreen: React.FC = () => {
         )
       );
     } catch {
-      // In offline or fresh assignment scenarios, fallback to local state
       setActiveAssignment(null);
       setAssignmentHistory([]);
     }
@@ -220,30 +223,38 @@ export const RfidAssignmentScreen: React.FC = () => {
   const reasons = ['DAMAGED', 'LOST', 'STOLEN', 'DEFECTIVE'];
 
   return (
-    <View style={styles.container}>
-      {/* Top App Bar */}
+    <SafeAreaView style={styles.container}>
+      {/* 3D Clay Top App Bar */}
       <View style={styles.topAppBar}>
         <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.backButton}
           accessibilityLabel="Back"
+          activeOpacity={0.8}
         >
-          <Icon name="arrow-back" size={24} color={colors.onPrimaryContainer} />
+          <Icon name="arrow-back" size={20} color={clayColors.primary} />
         </TouchableOpacity>
-        <Text style={styles.topBarTitle}>RFID Assignment & Management</Text>
+        <Text style={styles.topBarTitle}>RFID Card Provisioning</Text>
+        <View style={styles.placeholder} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* 1. Hardware Boundary Banner */}
         <View style={styles.boundaryCard}>
           <View style={styles.boundaryRow}>
-            <Icon name="information-circle" size={22} color="#F57F17" />
+            <View style={styles.boundaryIconWrap}>
+              <Icon name="hardware-chip-outline" size={20} color="#B78103" />
+            </View>
             <View style={styles.boundaryContent}>
               <Text style={styles.boundaryTitle}>
-                HARDWARE BOUNDARY: {rfidAdapter.sourceLabel}
+                HARDWARE STATUS: {rfidAdapter.sourceLabel}
               </Text>
               <Text style={styles.boundarySubtitle}>
-                Physical reader hardware integration is deferred. Enter hexadecimal UID manually for testing and registration.
+                Physical reader integration is deferred. Enter hexadecimal UID manually
+                for testing, card provisioning, and canonical ledger association.
               </Text>
             </View>
           </View>
@@ -252,9 +263,12 @@ export const RfidAssignmentScreen: React.FC = () => {
         {/* 2. Feedback Banners */}
         {errorMessage ? (
           <View style={styles.errorBanner}>
-            <Icon name="warning" size={20} color={colors.error} />
+            <Icon name="warning" size={18} color={clayColors.error} />
             <Text style={styles.errorBannerText}>{errorMessage}</Text>
-            <TouchableOpacity onPress={() => setErrorMessage(null)}>
+            <TouchableOpacity
+              style={styles.dismissPill}
+              onPress={() => setErrorMessage(null)}
+            >
               <Text style={styles.errorDismiss}>Dismiss</Text>
             </TouchableOpacity>
           </View>
@@ -262,69 +276,101 @@ export const RfidAssignmentScreen: React.FC = () => {
 
         {successMessage ? (
           <View style={styles.successBanner}>
-            <Icon name="checkmark-circle" size={20} color="#2E7D32" />
+            <Icon name="checkmark-circle" size={18} color="#137333" />
             <Text style={styles.successBannerText}>{successMessage}</Text>
-            <TouchableOpacity onPress={() => setSuccessMessage(null)}>
+            <TouchableOpacity
+              style={styles.dismissPillGreen}
+              onPress={() => setSuccessMessage(null)}
+            >
               <Text style={styles.successDismiss}>OK</Text>
             </TouchableOpacity>
           </View>
         ) : null}
 
         {/* 3. Customer Selection Section */}
-        <View style={styles.section}>
-          <Text style={styles.fieldLabel}>Customer</Text>
+        <View style={styles.sectionCard}>
+          <Text style={styles.fieldLabel}>Select Registered Farmer</Text>
           <TouchableOpacity
             style={styles.dropdownTrigger}
+            activeOpacity={0.8}
             onPress={() => setShowCustomerPicker(true)}
           >
-            <Text style={styles.dropdownValue}>
-              {selectedCustomer
-                ? `${selectedCustomer.farmerCode} - ${selectedCustomer.fullName}`
-                : 'Select Customer'}
-            </Text>
-            <Icon name="chevron-down" size={20} color={colors.onSurfaceVariant} />
+            <View style={styles.dropdownLeft}>
+              <Text style={styles.dropdownEmoji}>🧑‍🌾</Text>
+              <Text style={styles.dropdownValue}>
+                {selectedCustomer
+                  ? `${selectedCustomer.farmerCode} - ${selectedCustomer.fullName}`
+                  : 'Select Customer'}
+              </Text>
+            </View>
+            <View style={styles.dropdownChevron}>
+              <Icon name="chevron-down" size={18} color={clayColors.primary} />
+            </View>
           </TouchableOpacity>
         </View>
 
         {/* 4. Selected Customer Details & Canonical UUID */}
         {selectedCustomer && (
-          <View style={styles.card}>
-            <Text style={styles.cardHeader}>Customer Profile</Text>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Canonical UUID:</Text>
-              <Text style={[styles.detailValue, styles.monoText]}>{selectedCustomer.id}</Text>
+          <View style={styles.profileCard}>
+            <View style={styles.profileHeaderRow}>
+              <Text style={styles.cardHeader}>Farmer Identity Profile</Text>
+              <View
+                style={[
+                  styles.statusPill,
+                  {
+                    backgroundColor:
+                      selectedCustomer.status === 'ACTIVE' ? '#E4F6EB' : '#FEF6E4',
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.statusPillText,
+                    {
+                      color:
+                        selectedCustomer.status === 'ACTIVE' ? '#137333' : '#B06000',
+                    },
+                  ]}
+                >
+                  {selectedCustomer.status}
+                </Text>
+              </View>
             </View>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Farmer Code:</Text>
-              <Text style={[styles.detailValue, styles.boldText]}>{selectedCustomer.farmerCode}</Text>
-            </View>
+
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Customer Name:</Text>
               <Text style={styles.detailValue}>{selectedCustomer.fullName}</Text>
             </View>
+
             <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Account Status:</Text>
-              <Text
-                style={[
-                  styles.detailValue,
-                  styles.boldText,
-                  { color: selectedCustomer.status === 'ACTIVE' ? '#2E7D32' : '#E65100' },
-                ]}
-              >
-                {selectedCustomer.status}
+              <Text style={styles.detailLabel}>Farmer Code:</Text>
+              <Text style={[styles.detailValue, styles.boldText]}>
+                {selectedCustomer.farmerCode}
               </Text>
             </View>
+
             <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Biometric Face Status:</Text>
+              <Text style={styles.detailLabel}>Biometric Status:</Text>
               <Text
                 style={[
                   styles.detailValue,
                   styles.boldText,
-                  { color: isCustomerFaceEnrolled(selectedCustomer) ? '#2E7D32' : '#C62828' },
+                  {
+                    color: isCustomerFaceEnrolled(selectedCustomer)
+                      ? '#137333'
+                      : '#BA1A1A',
+                  },
                 ]}
               >
                 {isCustomerFaceEnrolled(selectedCustomer) ? 'ENROLLED' : 'PENDING'}
               </Text>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.uuidBox}>
+              <Text style={styles.uuidLabel}>Canonical PostgreSQL UUID:</Text>
+              <Text style={styles.uuidValue}>{selectedCustomer.id}</Text>
             </View>
           </View>
         )}
@@ -335,19 +381,27 @@ export const RfidAssignmentScreen: React.FC = () => {
             {activeAssignment && !isReplacing ? (
               <View style={styles.activeCard}>
                 <View style={styles.activeCardHeaderRow}>
-                  <Icon name="card" size={22} color="#1565C0" />
-                  <Text style={styles.activeCardTitle}>Active RFID Card</Text>
+                  <View style={styles.activeIconPill}>
+                    <Icon name="card" size={20} color="#FFFFFF" />
+                  </View>
+                  <View style={styles.activeHeaderWrap}>
+                    <Text style={styles.activeCardTitle}>Active RFID Smart Card</Text>
+                    <Text style={styles.activeCardSub}>Authorized for Milk Weighing & Intake</Text>
+                  </View>
                 </View>
+
                 <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Card UID:</Text>
+                  <Text style={styles.detailLabel}>Assigned Card UID:</Text>
                   <Text style={[styles.detailValue, styles.monoText, styles.boldText]}>
                     {activeAssignment.cardUid}
                   </Text>
                 </View>
+
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Assigned At:</Text>
                   <Text style={styles.detailValue}>{activeAssignment.assignedAt}</Text>
                 </View>
+
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Assigned By:</Text>
                   <Text style={styles.detailValue}>{activeAssignment.assignedBy}</Text>
@@ -355,7 +409,8 @@ export const RfidAssignmentScreen: React.FC = () => {
 
                 <View style={styles.activeCardActions}>
                   <TouchableOpacity
-                    style={[styles.actionBtn, styles.primaryBtn]}
+                    style={[styles.actionBtn, styles.replaceBtn]}
+                    activeOpacity={0.85}
                     onPress={() => {
                       setIsReplacing(true);
                       setRawUidInput('');
@@ -363,25 +418,29 @@ export const RfidAssignmentScreen: React.FC = () => {
                       setIsValidUid(false);
                     }}
                   >
-                    <Text style={styles.primaryBtnText}>Replace Card</Text>
+                    <Text style={styles.replaceBtnText}>Replace Card</Text>
                   </TouchableOpacity>
+
                   <TouchableOpacity
-                    style={[styles.actionBtn, styles.outlinedBtn]}
+                    style={[styles.actionBtn, styles.revokeBtn]}
+                    activeOpacity={0.85}
                     onPress={() => {
                       setDialogReason('');
                       setShowRevokeDialog(true);
                     }}
                   >
-                    <Text style={[styles.outlinedBtnText, { color: colors.error }]}>Revoke</Text>
+                    <Text style={styles.revokeBtnText}>Revoke</Text>
                   </TouchableOpacity>
+
                   <TouchableOpacity
-                    style={[styles.actionBtn, styles.outlinedBtn]}
+                    style={[styles.actionBtn, styles.blockBtn]}
+                    activeOpacity={0.85}
                     onPress={() => {
                       setDialogReason('');
                       setShowBlockDialog(true);
                     }}
                   >
-                    <Text style={[styles.outlinedBtnText, { color: colors.error }]}>Block</Text>
+                    <Text style={styles.blockBtnText}>Block</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -398,7 +457,11 @@ export const RfidAssignmentScreen: React.FC = () => {
                       {reasons.map((reason) => (
                         <TouchableOpacity
                           key={reason}
-                          style={styles.radioRow}
+                          activeOpacity={0.8}
+                          style={[
+                            styles.radioRow,
+                            replacementReason === reason && styles.radioRowActive,
+                          ]}
                           onPress={() => setReplacementReason(reason)}
                         >
                           <Icon
@@ -408,7 +471,7 @@ export const RfidAssignmentScreen: React.FC = () => {
                                 : 'radio-button-off'
                             }
                             size={18}
-                            color={colors.primary}
+                            color={clayColors.primary}
                           />
                           <Text style={styles.radioLabel}>{reason}</Text>
                         </TouchableOpacity>
@@ -419,25 +482,35 @@ export const RfidAssignmentScreen: React.FC = () => {
 
                 <View style={styles.inputContainer}>
                   <Text style={styles.inputTitle}>
-                    SOFTWARE MANUAL UID ENTRY — PHYSICAL READER DEFERRED
+                    MANUAL HEXADECIMAL UID ENTRY
                   </Text>
-                  <TextInput
-                    style={styles.textInput}
-                    value={rawUidInput}
-                    onChangeText={onUidInputChanged}
-                    placeholder="e.g. 04:A1:B2:C3:D4 or 04A1B2C3D4"
-                    autoCapitalize="characters"
-                    autoCorrect={false}
-                  />
+                  <View style={styles.textInputWrap}>
+                    <TextInput
+                      style={styles.textInput}
+                      value={rawUidInput}
+                      onChangeText={onUidInputChanged}
+                      placeholder="e.g. 04:A1:B2:C3:D4 or 04A1B2C3D4"
+                      placeholderTextColor={clayColors.textMuted}
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                    />
+                  </View>
                   {normalizedUid.length > 0 && (
-                    <Text
+                    <View
                       style={[
-                        styles.supportingText,
-                        { color: isValidUid ? '#2E7D32' : colors.error },
+                        styles.uidValidationPill,
+                        { backgroundColor: isValidUid ? '#E4F6EB' : '#FDECEC' },
                       ]}
                     >
-                      Normalized UID: {normalizedUid} ({isValidUid ? 'Valid Hex' : 'Invalid'})
-                    </Text>
+                      <Text
+                        style={[
+                          styles.supportingText,
+                          { color: isValidUid ? '#137333' : clayColors.error },
+                        ]}
+                      >
+                        Normalized: {normalizedUid} ({isValidUid ? '✓ Valid Hex UID' : '✕ Invalid Hex Format'})
+                      </Text>
+                    </View>
                   )}
                 </View>
 
@@ -454,7 +527,7 @@ export const RfidAssignmentScreen: React.FC = () => {
                       {isLoading ? (
                         <ActivityIndicator color="#FFFFFF" size="small" />
                       ) : (
-                        <Text style={styles.submitBtnText}>Confirm Replacement</Text>
+                        <Text style={styles.submitBtnText}>Confirm Card Replacement</Text>
                       )}
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -480,8 +553,8 @@ export const RfidAssignmentScreen: React.FC = () => {
                       <ActivityIndicator color="#FFFFFF" size="small" />
                     ) : (
                       <View style={styles.btnContentRow}>
-                        <Icon name="card" size={18} color="#FFFFFF" />
-                        <Text style={styles.submitBtnText}>Assign RFID Card</Text>
+                        <Icon name="card-outline" size={18} color="#FFFFFF" />
+                        <Text style={styles.submitBtnText}>Assign RFID Smart Card</Text>
                       </View>
                     )}
                   </TouchableOpacity>
@@ -495,35 +568,44 @@ export const RfidAssignmentScreen: React.FC = () => {
                 Assignment History ({assignmentHistory.length})
               </Text>
               {assignmentHistory.length === 0 ? (
-                <Text style={styles.emptyHistoryText}>
-                  No prior RFID card history recorded for this customer.
-                </Text>
+                <View style={styles.emptyHistoryBox}>
+                  <Text style={styles.emptyHistoryText}>
+                    No prior RFID card history recorded for this customer.
+                  </Text>
+                </View>
               ) : (
                 assignmentHistory.map((item, idx) => (
                   <View
                     key={item.id || idx}
                     style={[
                       styles.historyCard,
-                      { backgroundColor: item.isActive ? '#E8F5E9' : '#F5F5F5' },
+                      { backgroundColor: item.isActive ? '#FFFFFF' : '#F8FAFC' },
                     ]}
                   >
                     <View style={styles.historyCardRow}>
                       <Text style={[styles.monoText, styles.boldText]}>{item.cardUid}</Text>
-                      <Text
+                      <View
                         style={[
-                          styles.historyStatusText,
-                          { color: item.isActive ? '#2E7D32' : '#757575' },
+                          styles.historyStatusPill,
+                          { backgroundColor: item.isActive ? '#E4F6EB' : '#EDF2F7' },
                         ]}
                       >
-                        {item.isActive ? 'ACTIVE' : 'DEACTIVATED'}
-                      </Text>
+                        <Text
+                          style={[
+                            styles.historyStatusText,
+                            { color: item.isActive ? '#137333' : '#64748B' },
+                          ]}
+                        >
+                          {item.isActive ? 'ACTIVE' : 'DEACTIVATED'}
+                        </Text>
+                      </View>
                     </View>
                     <Text style={styles.historyMetaText}>
                       Assigned: {item.assignedAt} by {item.assignedBy}
                     </Text>
                     {item.revokedAt ? (
-                      <Text style={[styles.historyMetaText, { color: colors.error }]}>
-                        Revoked: {item.revokedAt} - Reason: {item.revocationReason || 'None'}
+                      <Text style={[styles.historyMetaText, { color: clayColors.error }]}>
+                        Revoked: {item.revokedAt} • Reason: {item.revocationReason || 'None'}
                       </Text>
                     ) : null}
                   </View>
@@ -538,20 +620,28 @@ export const RfidAssignmentScreen: React.FC = () => {
       <Modal visible={showCustomerPicker} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalDialog}>
-            <Text style={styles.dialogTitle}>Select Customer</Text>
-            <ScrollView style={{ maxHeight: 350 }}>
+            <View style={styles.dialogHeader}>
+              <Text style={styles.dialogTitle}>Select Registered Customer</Text>
+            </View>
+            <ScrollView style={{ maxHeight: 350 }} showsVerticalScrollIndicator={false}>
               {customers.map((c) => (
                 <TouchableOpacity
                   key={c.id}
                   style={styles.pickerItem}
+                  activeOpacity={0.8}
                   onPress={() => handleSelectCustomer(c)}
                 >
-                  <Text style={styles.pickerItemName}>
-                    {c.farmerCode} - {c.fullName}
-                  </Text>
-                  <Text style={styles.pickerItemSub}>
-                    Status: {c.status} | Face: {isCustomerFaceEnrolled(c) ? 'Enrolled' : 'Pending'}
-                  </Text>
+                  <View style={styles.pickerAvatar}>
+                    <Text style={styles.pickerEmoji}>🧑‍🌾</Text>
+                  </View>
+                  <View style={styles.pickerTexts}>
+                    <Text style={styles.pickerItemName}>
+                      {c.farmerCode} - {c.fullName}
+                    </Text>
+                    <Text style={styles.pickerItemSub}>
+                      Status: {c.status} | Face: {isCustomerFaceEnrolled(c) ? 'Enrolled' : 'Pending'}
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -569,15 +659,16 @@ export const RfidAssignmentScreen: React.FC = () => {
       <Modal visible={showRevokeDialog} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalDialog}>
-            <Text style={styles.dialogTitle}>Revoke RFID Card</Text>
+            <Text style={styles.dialogTitle}>Revoke Active RFID Card</Text>
             <Text style={styles.dialogMessage}>
-              Are you sure you want to revoke active card {activeAssignment?.cardUid}?
+              Are you sure you want to revoke card {activeAssignment?.cardUid}? The farmer will require a replacement to resume intake.
             </Text>
             <TextInput
               style={styles.dialogInput}
               value={dialogReason}
               onChangeText={setDialogReason}
               placeholder="e.g. Farmer requested deactivation"
+              placeholderTextColor={clayColors.textMuted}
             />
             <View style={styles.dialogBtnRow}>
               <TouchableOpacity
@@ -587,10 +678,10 @@ export const RfidAssignmentScreen: React.FC = () => {
                 <Text style={styles.dialogCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.dialogConfirmBtn, { backgroundColor: colors.error }]}
+                style={[styles.dialogConfirmBtn, { backgroundColor: clayColors.error }]}
                 onPress={handleRevoke}
               >
-                <Text style={styles.dialogConfirmText}>Revoke</Text>
+                <Text style={styles.dialogConfirmText}>Revoke Card</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -601,15 +692,16 @@ export const RfidAssignmentScreen: React.FC = () => {
       <Modal visible={showBlockDialog} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalDialog}>
-            <Text style={styles.dialogTitle}>Block RFID Card</Text>
+            <Text style={styles.dialogTitle}>Block Suspicious RFID Card</Text>
             <Text style={styles.dialogMessage}>
-              Card {activeAssignment?.cardUid} will be placed into BLOCKED status.
+              Card {activeAssignment?.cardUid} will be placed into BLOCKED security status.
             </Text>
             <TextInput
               style={styles.dialogInput}
               value={dialogReason}
               onChangeText={setDialogReason}
               placeholder="e.g. Suspected fraudulent presentation"
+              placeholderTextColor={clayColors.textMuted}
             />
             <View style={styles.dialogBtnRow}>
               <TouchableOpacity
@@ -619,7 +711,7 @@ export const RfidAssignmentScreen: React.FC = () => {
                 <Text style={styles.dialogCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.dialogConfirmBtn, { backgroundColor: colors.error }]}
+                style={[styles.dialogConfirmBtn, { backgroundColor: clayColors.error }]}
                 onPress={handleBlock}
               >
                 <Text style={styles.dialogConfirmText}>Block Card</Text>
@@ -628,133 +720,256 @@ export const RfidAssignmentScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: clayColors.canvasBackground,
   },
   topAppBar: {
     height: 56,
-    backgroundColor: colors.primaryContainer,
+    backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 8,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    borderBottomWidth: 1.5,
+    borderBottomColor: '#DFE7ED',
   },
   backButton: {
-    padding: 8,
-    marginRight: 8,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#EDF4F8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 2,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#CDDCE6',
+    borderBottomColor: '#BDCED8',
   },
   topBarTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.onPrimaryContainer,
+    fontSize: 17,
+    fontWeight: '800',
+    color: clayColors.primary,
+  },
+  placeholder: {
+    width: 38,
   },
   scrollContent: {
     padding: 16,
-    gap: 16,
+    gap: 14,
+    paddingBottom: 40,
   },
   boundaryCard: {
-    backgroundColor: '#FFF8E1',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#FFE082',
-    padding: 12,
+    backgroundColor: '#FFF8E6',
+    borderRadius: clayRadius.card,
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#FDE0A8',
+    borderBottomColor: '#F2D08E',
+    padding: 14,
   },
   boundaryRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
+  boundaryIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   boundaryContent: {
-    marginLeft: 10,
+    marginLeft: 12,
     flex: 1,
   },
   boundaryTitle: {
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: '800',
     color: '#B78103',
   },
   boundarySubtitle: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#5D4037',
     marginTop: 2,
-    lineHeight: 16,
+    lineHeight: 17,
   },
   errorBanner: {
-    backgroundColor: colors.errorContainer,
-    borderRadius: 8,
+    backgroundColor: clayColors.errorSurface,
+    borderRadius: clayRadius.md,
     padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#FFFFFF',
+    borderBottomWidth: 2,
+    borderBottomColor: clayColors.errorBorder,
   },
   errorBannerText: {
     flex: 1,
-    color: colors.onErrorContainer,
+    color: clayColors.error,
     fontSize: 13,
+    fontWeight: '600',
+  },
+  dismissPill: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
   },
   errorDismiss: {
-    color: colors.error,
-    fontWeight: 'bold',
-    fontSize: 13,
+    color: clayColors.error,
+    fontSize: 11,
+    fontWeight: '700',
   },
   successBanner: {
-    backgroundColor: '#E8F5E9',
-    borderRadius: 8,
+    backgroundColor: '#E4F6EB',
+    borderRadius: clayRadius.md,
     padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#FFFFFF',
+    borderBottomWidth: 2,
+    borderBottomColor: '#BCE8CA',
   },
   successBannerText: {
     flex: 1,
-    color: '#1B5E20',
+    color: '#137333',
     fontSize: 13,
+    fontWeight: '600',
+  },
+  dismissPillGreen: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
   },
   successDismiss: {
-    color: '#2E7D32',
-    fontWeight: 'bold',
-    fontSize: 13,
+    color: '#137333',
+    fontSize: 11,
+    fontWeight: '700',
   },
-  section: {
-    gap: 6,
+  sectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.card,
+    padding: 16,
+    gap: 8,
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CFD9E2',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#002E44',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 3,
+      },
+      default: {},
+    }),
   },
   fieldLabel: {
-    fontSize: 12,
-    color: colors.onSurfaceVariant,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '700',
+    color: clayColors.textSecondary,
+    marginBottom: 4,
   },
   dropdownTrigger: {
-    height: 52,
-    borderWidth: 1,
-    borderColor: colors.outline,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    backgroundColor: colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    backgroundColor: '#E5EEF5',
+    borderRadius: clayRadius.md,
+    paddingHorizontal: 12,
+    height: 50,
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 1,
+    borderTopColor: '#C4D5E2',
+    borderLeftColor: '#CAD9E5',
+    borderRightColor: '#FFFFFF',
+    borderBottomColor: '#FFFFFF',
+  },
+  dropdownLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  dropdownEmoji: {
+    fontSize: 18,
+    marginRight: 8,
   },
   dropdownValue: {
     fontSize: 14,
-    color: colors.onSurface,
+    fontWeight: '700',
+    color: clayColors.textPrimary,
   },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
+  dropdownChevron: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.card,
     padding: 16,
-    gap: 8,
+    gap: 10,
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CFD9E2',
+  },
+  profileHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
   },
   cardHeader: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: colors.onSurface,
-    marginBottom: 4,
+    fontSize: 15,
+    fontWeight: '800',
+    color: clayColors.textPrimary,
+  },
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: clayRadius.pill,
+  },
+  statusPillText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   detailRow: {
     flexDirection: 'row',
@@ -762,259 +977,442 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   detailLabel: {
-    fontSize: 12,
-    color: colors.outline,
+    fontSize: 13,
+    color: clayColors.textSecondary,
+    fontWeight: '500',
   },
   detailValue: {
-    fontSize: 12,
-    color: colors.onSurface,
-  },
-  monoText: {
-    fontFamily: 'monospace',
+    fontSize: 13,
+    fontWeight: '600',
+    color: clayColors.textPrimary,
   },
   boldText: {
-    fontWeight: 'bold',
+    fontWeight: '800',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#E8EFF5',
+    marginVertical: 4,
+  },
+  uuidBox: {
+    backgroundColor: '#EDF5FA',
+    padding: 10,
+    borderRadius: clayRadius.sm,
+    gap: 2,
+  },
+  uuidLabel: {
+    fontSize: 11,
+    color: clayColors.textMuted,
+    fontWeight: '600',
+  },
+  uuidValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: clayColors.primary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   activeCard: {
-    backgroundColor: '#E3F2FD',
-    borderRadius: 12,
-    padding: 16,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: '#BBDEFB',
+    backgroundColor: '#EBF4FB',
+    borderRadius: clayRadius.card,
+    padding: 18,
+    gap: 12,
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#CFDEEC',
+    borderBottomColor: '#BDD0E0',
   },
   activeCardHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
+  },
+  activeIconPill: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: clayColors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  activeHeaderWrap: {
+    flex: 1,
   },
   activeCardTitle: {
     fontSize: 15,
-    fontWeight: 'bold',
-    color: '#0D47A1',
+    fontWeight: '800',
+    color: clayColors.primary,
+  },
+  activeCardSub: {
+    fontSize: 11,
+    color: clayColors.textSecondary,
+    marginTop: 1,
+  },
+  monoText: {
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    letterSpacing: 0.5,
   },
   activeCardActions: {
     flexDirection: 'row',
     gap: 8,
-    marginTop: 8,
+    marginTop: 6,
   },
   actionBtn: {
     flex: 1,
-    height: 38,
-    borderRadius: 8,
-    justifyContent: 'center',
+    height: 42,
+    borderRadius: clayRadius.md,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  primaryBtn: {
-    backgroundColor: '#1565C0',
+  replaceBtn: {
+    backgroundColor: clayColors.primary,
+    borderTopWidth: 1.5,
+    borderTopColor: 'rgba(255,255,255,0.4)',
+    borderBottomWidth: 2.5,
+    borderBottomColor: 'rgba(0,25,40,0.4)',
   },
-  primaryBtnText: {
+  replaceBtnText: {
     color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
-  outlinedBtn: {
-    borderWidth: 1,
-    borderColor: colors.error,
-    backgroundColor: 'transparent',
+  revokeBtn: {
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1.5,
+    borderTopColor: '#FFFFFF',
+    borderBottomWidth: 2.5,
+    borderBottomColor: '#F8B6B6',
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: '#F8B6B6',
   },
-  outlinedBtnText: {
+  revokeBtnText: {
+    color: clayColors.error,
     fontSize: 12,
-    fontWeight: 'bold',
+    fontWeight: '700',
+  },
+  blockBtn: {
+    backgroundColor: '#FDECEC',
+    borderTopWidth: 1.5,
+    borderTopColor: '#FFFFFF',
+    borderBottomWidth: 2.5,
+    borderBottomColor: '#F8A4A4',
+  },
+  blockBtnText: {
+    color: clayColors.error,
+    fontSize: 12,
+    fontWeight: '700',
   },
   formCard: {
-    backgroundColor: colors.surfaceVariant,
-    borderRadius: 12,
-    padding: 16,
-    gap: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.card,
+    padding: 18,
+    gap: 14,
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CFD9E2',
   },
   formCardTitle: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: colors.onSurfaceVariant,
+    fontSize: 16,
+    fontWeight: '800',
+    color: clayColors.textPrimary,
   },
   replacementReasonSection: {
-    gap: 6,
+    gap: 8,
   },
   subLabel: {
     fontSize: 12,
-    color: colors.onSurfaceVariant,
+    fontWeight: '700',
+    color: clayColors.textSecondary,
   },
   radioGroup: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginVertical: 4,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   radioRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    backgroundColor: '#EDF4F9',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: clayRadius.sm,
+    gap: 6,
+  },
+  radioRowActive: {
+    backgroundColor: '#E0F0F8',
+    borderColor: clayColors.primary,
+    borderWidth: 1,
   },
   radioLabel: {
-    fontSize: 11,
-    color: colors.onSurfaceVariant,
+    fontSize: 12,
+    fontWeight: '700',
+    color: clayColors.textPrimary,
   },
   inputContainer: {
-    gap: 4,
+    gap: 6,
   },
   inputTitle: {
     fontSize: 11,
-    fontWeight: 'bold',
-    color: colors.primary,
+    fontWeight: '800',
+    color: clayColors.textMuted,
+    letterSpacing: 0.5,
+  },
+  textInputWrap: {
+    backgroundColor: '#E5EEF5',
+    borderRadius: clayRadius.md,
+    paddingHorizontal: 12,
+    borderTopWidth: 2,
+    borderLeftWidth: 1.5,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderTopColor: '#C4D5E2',
+    borderLeftColor: '#CAD9E5',
+    borderRightColor: '#FFFFFF',
+    borderBottomColor: '#FFFFFF',
   },
   textInput: {
     height: 50,
-    borderWidth: 1,
-    borderColor: colors.outline,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    backgroundColor: colors.surface,
-    fontSize: 14,
+    fontSize: 15,
+    fontWeight: '700',
+    color: clayColors.textPrimary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  supportingText: {
-    fontSize: 11,
-    fontFamily: 'monospace',
+  uidValidationPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: clayRadius.sm,
+    alignSelf: 'flex-start',
     marginTop: 2,
   },
+  supportingText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  replacementActions: {
+    gap: 8,
+  },
   submitBtn: {
-    height: 48,
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    justifyContent: 'center',
+    height: 52,
+    backgroundColor: clayColors.primary,
+    borderRadius: clayRadius.lg,
     alignItems: 'center',
-    marginTop: 4,
+    justifyContent: 'center',
+    borderTopWidth: 2,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 3.5,
+    borderTopColor: 'rgba(255, 255, 255, 0.45)',
+    borderLeftColor: 'rgba(255, 255, 255, 0.25)',
+    borderRightColor: 'rgba(0, 30, 45, 0.25)',
+    borderBottomColor: 'rgba(0, 20, 35, 0.5)',
   },
   disabledBtn: {
-    backgroundColor: colors.outline,
-    opacity: 0.6,
+    opacity: 0.5,
+    borderBottomWidth: 1,
   },
   submitBtnText: {
     color: '#FFFFFF',
-    fontWeight: 'bold',
     fontSize: 14,
-    marginLeft: 6,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  cancelOutlinedBtn: {
+    height: 48,
+    borderRadius: clayRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EDF3F8',
+    borderWidth: 1,
+    borderColor: '#CBDCE8',
+  },
+  cancelOutlinedText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: clayColors.textSecondary,
   },
   btnContentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  replacementActions: {
-    flexDirection: 'row',
     gap: 8,
-  },
-  cancelOutlinedBtn: {
-    flex: 1,
-    height: 48,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.outline,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  cancelOutlinedText: {
-    fontSize: 14,
-    color: colors.onSurfaceVariant,
   },
   historySection: {
-    gap: 8,
-    marginTop: 8,
+    marginTop: 6,
+    gap: 10,
   },
   historyHeader: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: colors.onSurface,
+    fontSize: 14,
+    fontWeight: '800',
+    color: clayColors.textPrimary,
+  },
+  emptyHistoryBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.md,
+    padding: 16,
+    alignItems: 'center',
   },
   emptyHistoryText: {
     fontSize: 13,
-    color: colors.outline,
+    color: clayColors.textMuted,
   },
   historyCard: {
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: clayRadius.md,
+    padding: 14,
     gap: 4,
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 2.5,
+    borderTopColor: '#FFFFFF',
+    borderRightColor: '#DFE7ED',
+    borderBottomColor: '#CFD9E2',
   },
   historyCardRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  historyStatusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   historyStatusText: {
     fontSize: 11,
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
   historyMetaText: {
-    fontSize: 11,
-    color: colors.outline,
+    fontSize: 12,
+    color: clayColors.textSecondary,
+    lineHeight: 16,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(5, 20, 32, 0.65)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    padding: 20,
   },
   modalDialog: {
     width: '100%',
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 20,
-    gap: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: clayRadius.dialog,
+    padding: 22,
+    gap: 14,
+    borderTopWidth: 2.5,
+    borderLeftWidth: 1.5,
+    borderRightWidth: 1.5,
+    borderBottomWidth: 4,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: 'rgba(255, 255, 255, 0.9)',
+    borderRightColor: '#D8E4EC',
+    borderBottomColor: '#C4D5E2',
+  },
+  dialogHeader: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#EDF3F8',
+    paddingBottom: 10,
   },
   dialogTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: colors.onSurface,
+    fontSize: 17,
+    fontWeight: '800',
+    color: clayColors.textPrimary,
   },
   dialogMessage: {
     fontSize: 13,
-    color: colors.onSurfaceVariant,
+    color: clayColors.textSecondary,
+    lineHeight: 18,
   },
   dialogInput: {
-    height: 44,
-    borderWidth: 1,
-    borderColor: colors.outline,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    backgroundColor: colors.surface,
-    fontSize: 13,
+    backgroundColor: '#EDF4F9',
+    borderRadius: clayRadius.sm,
+    padding: 12,
+    fontSize: 14,
+    color: clayColors.textPrimary,
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 1,
+    borderTopColor: '#CBDDE8',
+    borderLeftColor: '#CBDDE8',
+    borderRightColor: '#FFFFFF',
+    borderBottomColor: '#FFFFFF',
   },
   dialogBtnRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
-    marginTop: 8,
+    gap: 10,
+    marginTop: 4,
   },
   dialogCancelBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    flex: 1,
+    height: 46,
+    borderRadius: clayRadius.md,
+    backgroundColor: '#EDF3F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#FFFFFF',
   },
   dialogCancelText: {
-    color: colors.outline,
     fontSize: 13,
+    fontWeight: '700',
+    color: clayColors.textSecondary,
   },
   dialogConfirmBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    flex: 1,
+    height: 46,
+    borderRadius: clayRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1.5,
+    borderTopColor: 'rgba(255,255,255,0.4)',
+    borderBottomWidth: 2.5,
+    borderBottomColor: 'rgba(0,0,0,0.3)',
   },
   dialogConfirmText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
     fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   pickerItem: {
-    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
     borderBottomWidth: 1,
-    borderBottomColor: colors.outlineVariant,
+    borderBottomColor: '#F0F4F8',
+  },
+  pickerAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: '#EDF5FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  pickerEmoji: {
+    fontSize: 18,
+  },
+  pickerTexts: {
+    flex: 1,
   },
   pickerItemName: {
     fontSize: 14,
-    fontWeight: 'bold',
-    color: colors.onSurface,
+    fontWeight: '700',
+    color: clayColors.textPrimary,
   },
   pickerItemSub: {
     fontSize: 11,
-    color: colors.outline,
+    color: clayColors.textMuted,
     marginTop: 2,
   },
 });

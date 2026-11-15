@@ -34,66 +34,74 @@ export const LoginPage: React.FC = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col justify-center py-12 sm:px-6 lg:px-8 text-slate-100 antialiased">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="inline-flex w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-600 items-center justify-center text-white text-3xl font-black shadow-xl shadow-emerald-500/30 mb-4">
+    <div className="min-h-screen bg-[#F4F7FB] flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 text-slate-800 antialiased relative overflow-hidden select-none">
+      {/* Ambient Clay Background Elements */}
+      <div className="absolute top-12 left-1/4 w-80 h-80 rounded-full bg-emerald-200/30 blur-3xl pointer-events-none" />
+      <div className="absolute bottom-12 right-1/4 w-96 h-96 rounded-full bg-teal-200/25 blur-3xl pointer-events-none" />
+
+      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center relative z-10">
+        <div className="inline-flex w-16 h-16 rounded-3xl bg-gradient-to-tr from-[#10B981] via-[#0D9488] to-[#00506E] items-center justify-center text-white text-3xl font-black border border-white/40 shadow-[0_12px_24px_rgba(16,185,129,0.35),inset_0_2px_3px_rgba(255,255,255,0.6),inset_0_-2px_4px_rgba(0,0,0,0.25)] mb-4 transform hover:scale-105 transition-transform duration-200">
           D
         </div>
-        <h2 className="text-3xl font-extrabold tracking-tight text-white">
+        <h2 className="text-3xl font-black tracking-tight text-slate-900">
           DFARM Admin Web
         </h2>
-        <p className="mt-2 text-sm text-slate-400 font-medium">
+        <p className="mt-1.5 text-xs sm:text-sm text-slate-500 font-bold uppercase tracking-wider">
           Smart Dairy Operations & Management Portal
         </p>
       </div>
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-slate-800/90 backdrop-blur-md py-8 px-6 shadow-2xl rounded-2xl sm:px-10 border border-slate-700">
+      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md relative z-10">
+        <div className="bg-white/95 backdrop-blur-md py-8 px-6 sm:px-10 rounded-3xl border border-white/90 shadow-[0_20px_50px_-10px_rgba(15,23,42,0.08),0_0_0_1px_rgba(255,255,255,0.9)_inset,inset_1px_1px_2px_rgba(255,255,255,1),inset_-1px_-1px_3px_rgba(0,0,0,0.02)]">
           {error && (
-            <div className="mb-6 p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-center gap-2">
-              <span>⚠</span>
+            <div className="mb-6 p-4 rounded-2xl bg-[#FFF6F6] border border-rose-200/80 text-rose-700 text-xs sm:text-sm font-semibold flex items-center gap-2.5 shadow-[inset_1px_1px_2px_rgba(255,255,255,0.9)]">
+              <span className="text-base">⚠</span>
               <span>{error}</span>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5">
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
                 Staff Username or Email
               </label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g. owner_sangli"
-                disabled={isLoading}
-                required
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="e.g. owner_sangli"
+                  disabled={isLoading}
+                  required
+                  className="w-full px-4 py-2.5 rounded-xl bg-[#EDF2F7] border border-slate-200/90 text-slate-900 placeholder-slate-400 text-sm font-semibold shadow-[inset_2px_2px_4px_rgba(15,23,42,0.05),inset_-2px_-2px_4px_rgba(255,255,255,0.85)] focus:bg-white focus:outline-none focus:border-[#00506E] focus:shadow-[inset_1px_1px_2px_rgba(0,80,110,0.1),0_0_0_3px_rgba(0,80,110,0.15)] transition"
+                />
+              </div>
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5">
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
                 Staff Passcode
               </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                disabled={isLoading}
-                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition"
-              />
+              <div className="relative">
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  disabled={isLoading}
+                  className="w-full px-4 py-2.5 rounded-xl bg-[#EDF2F7] border border-slate-200/90 text-slate-900 placeholder-slate-400 text-sm font-semibold shadow-[inset_2px_2px_4px_rgba(15,23,42,0.05),inset_-2px_-2px_4px_rgba(255,255,255,0.85)] focus:bg-white focus:outline-none focus:border-[#00506E] focus:shadow-[inset_1px_1px_2px_rgba(0,80,110,0.1),0_0_0_3px_rgba(0,80,110,0.15)] transition"
+                />
+              </div>
             </div>
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full mt-2 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm shadow-lg shadow-emerald-600/30 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full mt-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#00688F] to-[#00506E] hover:from-[#005A7C] hover:to-[#00425C] text-white font-black text-sm tracking-wide border border-white/30 shadow-[0_6px_16px_-2px_rgba(0,80,110,0.35),0_2px_4px_-1px_rgba(0,80,110,0.2),inset_0_2px_2px_rgba(255,255,255,0.35),inset_0_-2px_4px_rgba(0,0,0,0.2)] hover:shadow-[0_8px_20px_-2px_rgba(0,80,110,0.45)] hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[inset_0_3px_6px_rgba(0,0,0,0.3)] transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {isLoading ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
                   <span>Signing In...</span>
                 </>
               ) : (
@@ -103,34 +111,45 @@ export const LoginPage: React.FC = () => {
           </form>
 
           {/* Quick Staff Role Selection */}
-          <div className="mt-8 pt-6 border-t border-slate-700/80">
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 text-center">
+          <div className="mt-8 pt-6 border-t border-slate-100">
+            <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 mb-3 text-center">
               Quick Role Switch (Testing & QA)
             </p>
             <div className="space-y-2">
-              {quickRoles.map((role) => (
-                <button
-                  key={role.username}
-                  type="button"
-                  onClick={() => {
-                    setUsername(role.username);
-                    setPassword('password123');
-                  }}
-                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition ${
-                    username === role.username
-                      ? 'bg-emerald-950/60 border-emerald-500/60 text-white'
-                      : 'bg-slate-900/60 border-slate-700/60 text-slate-300 hover:bg-slate-900 hover:text-white'
-                  }`}
-                >
-                  <div>
-                    <span className="text-xs font-bold block">{role.label}</span>
-                    <span className="text-[10px] text-slate-400 block">{role.desc}</span>
-                  </div>
-                  <span className="text-[10px] font-mono font-bold bg-slate-800 px-2 py-1 rounded text-slate-300">
-                    {role.username}
-                  </span>
-                </button>
-              ))}
+              {quickRoles.map((role) => {
+                const isSelected = username === role.username;
+                return (
+                  <button
+                    key={role.username}
+                    type="button"
+                    onClick={() => {
+                      setUsername(role.username);
+                      setPassword('password123');
+                    }}
+                    className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition-all duration-150 ${
+                      isSelected
+                        ? 'bg-[#E6F4FA] border-[#23759B]/50 shadow-[0_4px_10px_rgba(0,80,110,0.1),inset_0_1px_1px_rgba(255,255,255,0.9)] transform -translate-y-0.5'
+                        : 'bg-[#F8FAFC] border-slate-200/80 hover:bg-white hover:border-slate-300 shadow-[0_2px_4px_rgba(0,0,0,0.03)]'
+                    }`}
+                  >
+                    <div>
+                      <span className={`text-xs font-black block ${isSelected ? 'text-[#00506E]' : 'text-slate-800'}`}>
+                        {role.label}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-medium block">{role.desc}</span>
+                    </div>
+                    <span
+                      className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border ${
+                        isSelected
+                          ? 'bg-white text-[#00506E] border-[#23759B]/30'
+                          : 'bg-slate-200/70 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      {role.username}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

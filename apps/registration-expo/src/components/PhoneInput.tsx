@@ -5,8 +5,10 @@ import {
   TextInput,
   StyleSheet,
   ReturnKeyTypeOptions,
+  Platform,
 } from 'react-native';
 import { colors } from '../theme/colors';
+import { clayColors, clayRadius } from '../theme/claymorphism';
 
 interface PhoneInputProps {
   rawDigits: string;
@@ -45,17 +47,17 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({
           isError && styles.inputError,
         ]}
       >
-        <View style={styles.prefixContainer}>
+        <View style={styles.prefixPill}>
           <Text style={styles.phoneIcon}>📞</Text>
           <Text style={styles.prefixText}>+91</Text>
-          <Text style={styles.divider}>|</Text>
         </View>
+        <View style={styles.divider} />
         <TextInput
           style={styles.input}
           value={rawDigits}
           onChangeText={handleTextChange}
           placeholder="9876543210"
-          placeholderTextColor={colors.outline}
+          placeholderTextColor={clayColors.textMuted}
           keyboardType="phone-pad"
           maxLength={10}
           returnKeyType={returnKeyType}
@@ -63,9 +65,17 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
         />
+        {rawDigits.length === 10 ? (
+          <View style={styles.checkPill}>
+            <Text style={styles.checkText}>✓</Text>
+          </View>
+        ) : null}
       </View>
       {isError && errorMessage ? (
-        <Text style={styles.errorText}>{errorMessage}</Text>
+        <View style={styles.errorRow}>
+          <Text style={styles.errorIcon}>⚠️</Text>
+          <Text style={styles.errorText}>{errorMessage}</Text>
+        </View>
       ) : null}
     </View>
   );
@@ -74,62 +84,125 @@ export const PhoneInput: React.FC<PhoneInputProps> = ({
 const styles = StyleSheet.create({
   container: {
     width: '100%',
-    marginBottom: 4,
+    marginBottom: 8,
   },
   label: {
     fontSize: 13,
-    fontWeight: '600',
-    color: colors.onSurface,
+    fontWeight: '700',
+    color: clayColors.textSecondary,
     marginBottom: 6,
+    letterSpacing: 0.2,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
-    borderRadius: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: '#E5EEF5',
+    borderRadius: clayRadius.md,
     paddingHorizontal: 12,
     minHeight: 52,
+    borderTopWidth: 2,
+    borderLeftWidth: 1.5,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderTopColor: '#C4D5E2',
+    borderLeftColor: '#CAD9E5',
+    borderRightColor: '#FFFFFF',
+    borderBottomColor: '#FFFFFF',
   },
   inputFocused: {
-    borderColor: colors.primary,
+    backgroundColor: '#EDF5FA',
+    borderTopColor: clayColors.primary,
+    borderLeftColor: clayColors.primary,
+    borderRightColor: clayColors.primaryLight,
+    borderBottomColor: clayColors.primaryLight,
     borderWidth: 1.5,
+    ...Platform.select({
+      ios: {
+        shadowColor: clayColors.primary,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+      },
+      android: {
+        elevation: 2,
+      },
+      default: {},
+    }),
   },
   inputError: {
-    borderColor: colors.error,
+    backgroundColor: '#FFF0F0',
+    borderTopColor: clayColors.error,
+    borderLeftColor: clayColors.error,
+    borderRightColor: clayColors.errorLight,
+    borderBottomColor: clayColors.errorLight,
   },
-  prefixContainer: {
+  prefixPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 6,
+    backgroundColor: '#D9E6F0',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: clayRadius.sm,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 0.5,
+    borderBottomWidth: 1.5,
+    borderTopColor: '#FFFFFF',
+    borderLeftColor: '#FFFFFF',
+    borderRightColor: '#BDCFDE',
+    borderBottomColor: '#BDCFDE',
   },
   phoneIcon: {
-    fontSize: 16,
-    marginRight: 6,
+    fontSize: 13,
+    marginRight: 4,
   },
   prefixText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
-    color: colors.onSurface,
-    marginRight: 8,
+    color: clayColors.primary,
   },
   divider: {
-    fontSize: 16,
-    color: colors.outlineVariant,
-    marginRight: 8,
+    width: 1,
+    height: 24,
+    backgroundColor: '#CAD7E2',
+    marginHorizontal: 10,
   },
   input: {
     flex: 1,
     fontSize: 16,
-    color: colors.onSurface,
-    paddingVertical: 10,
+    color: clayColors.textPrimary,
+    fontWeight: '600',
     letterSpacing: 1,
+    paddingVertical: 10,
+  },
+  checkPill: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: clayColors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.6)',
+  },
+  checkText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  errorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 5,
+    paddingHorizontal: 4,
+  },
+  errorIcon: {
+    fontSize: 12,
+    marginRight: 4,
   },
   errorText: {
     fontSize: 12,
-    color: colors.error,
-    marginTop: 4,
-    marginLeft: 4,
+    color: clayColors.error,
+    fontWeight: '600',
   },
 });

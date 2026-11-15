@@ -157,17 +157,17 @@ export const SalaryManagement: React.FC<SalaryManagementProps> = ({ initialEmplo
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+      <div className="clay-card rounded-3xl p-6 bg-white shadow-clay-card border border-white/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-bold text-gray-800">💰 Salary & Advances Management</h2>
-          <p className="text-sm text-gray-500">Configure compensation packages, allowances, statutory deductions, and employee loans</p>
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight">💰 Salary & Advances Management</h2>
+          <p className="text-sm text-slate-500 font-medium">Configure compensation packages, allowances, statutory deductions, and employee loans</p>
         </div>
         <div className="flex items-center gap-3">
-          <label className="text-sm font-semibold text-gray-700">Select Employee:</label>
+          <label className="text-xs font-extrabold uppercase tracking-wider text-slate-600">Select Employee:</label>
           <select
             value={selectedEmployeeId}
             onChange={(e) => setSelectedEmployeeId(e.target.value)}
-            className="px-3 py-2 border rounded-md text-sm bg-white font-medium"
+            className="clay-inset bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
           >
             {employees.map((emp) => (
               <option key={emp.id} value={emp.id}>
@@ -179,37 +179,37 @@ export const SalaryManagement: React.FC<SalaryManagementProps> = ({ initialEmplo
       </div>
 
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-sm font-semibold shadow-sm">
           {error}
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols: Salary Structure Form */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-gray-200 space-y-6">
-          <div className="flex justify-between items-center border-b pb-3">
+        <div className="lg:col-span-2 clay-card rounded-3xl p-6 sm:p-8 bg-white shadow-clay-card border border-white/80 space-y-6">
+          <div className="flex justify-between items-center border-b border-slate-100 pb-3">
             <div>
-              <h3 className="font-bold text-gray-800 text-base">Compensation Structure</h3>
+              <h3 className="font-black text-slate-800 text-lg">Compensation Structure</h3>
               {currentStructure && (
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-slate-500 font-medium">
                   Active since {currentStructure.effectiveFrom} (Gross: ₹{currentStructure.grossSalary.toFixed(2)})
                 </span>
               )}
             </div>
-            <span className="text-xs bg-emerald-50 text-emerald-700 font-semibold px-2 py-0.5 rounded-full border border-emerald-200">
+            <span className="text-xs bg-emerald-50 text-emerald-800 font-bold px-3 py-1 rounded-full border border-emerald-200 shadow-sm">
               {loading ? 'Refreshing...' : 'PostgreSQL NUMERIC Precision'}
             </span>
           </div>
 
-          <form onSubmit={handleSaveSalaryStructure} className="space-y-4 text-sm">
+          <form onSubmit={handleSaveSalaryStructure} className="space-y-5 text-sm">
             {/* Calculation Basis */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="clay-inset p-4 rounded-2xl bg-[#EEF2F6] border border-[#CBD5E1]/50 grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase">Calculation Basis *</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Calculation Basis *</label>
                 <select
                   value={salaryForm.calculationBasis}
                   onChange={(e) => setSalaryForm({ ...salaryForm, calculationBasis: e.target.value as SalaryCalculationBasis })}
-                  className="w-full mt-1 px-3 py-2 border rounded-md"
+                  className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                 >
                   <option value={SalaryCalculationBasis.MONTHLY}>Monthly Fixed</option>
                   <option value={SalaryCalculationBasis.DAILY_WAGE}>Daily Wage</option>
@@ -217,23 +217,25 @@ export const SalaryManagement: React.FC<SalaryManagementProps> = ({ initialEmplo
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase">Effective From *</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Effective From *</label>
                 <input
                   type="date"
                   required
                   value={salaryForm.effectiveFrom}
                   onChange={(e) => setSalaryForm({ ...salaryForm, effectiveFrom: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 border rounded-md"
+                  className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                 />
               </div>
             </div>
 
             {/* Earnings Breakdown */}
-            <div className="border rounded-lg p-4 bg-gray-50 space-y-3">
-              <h4 className="font-bold text-xs uppercase text-gray-700">Gross Earnings Components</h4>
+            <div className="clay-card rounded-2xl p-5 bg-[#F8FAFC] border border-slate-200/80 space-y-3 shadow-sm">
+              <h4 className="font-extrabold text-xs uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <span>📈</span> Gross Earnings Components
+              </h4>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs text-gray-600">Base Salary (₹) *</label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Base Salary (₹) *</label>
                   <input
                     type="number"
                     min="0"
@@ -241,138 +243,140 @@ export const SalaryManagement: React.FC<SalaryManagementProps> = ({ initialEmplo
                     required
                     value={salaryForm.baseSalary}
                     onChange={(e) => setSalaryForm({ ...salaryForm, baseSalary: parseFloat(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-1.5 border rounded bg-white font-medium"
+                    className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-600">HRA (₹)</label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">HRA (₹)</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={salaryForm.hra}
                     onChange={(e) => setSalaryForm({ ...salaryForm, hra: parseFloat(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-1.5 border rounded bg-white font-medium"
+                    className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-600">Travel Allowance (₹)</label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Travel Allowance (₹)</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={salaryForm.travelAllowance}
                     onChange={(e) => setSalaryForm({ ...salaryForm, travelAllowance: parseFloat(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-1.5 border rounded bg-white font-medium"
+                    className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-600">Special Allowance (₹)</label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Special Allowance (₹)</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={salaryForm.specialAllowance}
                     onChange={(e) => setSalaryForm({ ...salaryForm, specialAllowance: parseFloat(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-1.5 border rounded bg-white font-medium"
+                    className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-600">Medical Allowance (₹)</label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Medical Allowance (₹)</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={salaryForm.medicalAllowance}
                     onChange={(e) => setSalaryForm({ ...salaryForm, medicalAllowance: parseFloat(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-1.5 border rounded bg-white font-medium"
+                    className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-600">OT Hourly Rate (₹)</label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">OT Hourly Rate (₹)</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={salaryForm.overtimeHourlyRate}
                     onChange={(e) => setSalaryForm({ ...salaryForm, overtimeHourlyRate: parseFloat(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-1.5 border rounded bg-white font-medium"
+                    className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                   />
                 </div>
               </div>
             </div>
 
             {/* Deductions Breakdown */}
-            <div className="border rounded-lg p-4 bg-gray-50 space-y-3">
-              <h4 className="font-bold text-xs uppercase text-gray-700">Deductions</h4>
+            <div className="clay-card rounded-2xl p-5 bg-[#F8FAFC] border border-slate-200/80 space-y-3 shadow-sm">
+              <h4 className="font-extrabold text-xs uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                <span>📉</span> Deductions
+              </h4>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
-                  <label className="block text-xs text-gray-600">Provident Fund (₹)</label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Provident Fund (₹)</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={salaryForm.providentFundEmployee}
                     onChange={(e) => setSalaryForm({ ...salaryForm, providentFundEmployee: parseFloat(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-1.5 border rounded bg-white font-medium"
+                    className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-600">Professional Tax (₹)</label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Professional Tax (₹)</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={salaryForm.professionalTax}
                     onChange={(e) => setSalaryForm({ ...salaryForm, professionalTax: parseFloat(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-1.5 border rounded bg-white font-medium"
+                    className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-600">TDS Tax (₹)</label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">TDS Tax (₹)</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={salaryForm.tdsTax}
                     onChange={(e) => setSalaryForm({ ...salaryForm, tdsTax: parseFloat(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-1.5 border rounded bg-white font-medium"
+                    className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-600">Other Deductions (₹)</label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Other Deductions (₹)</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={salaryForm.otherDeductions}
                     onChange={(e) => setSalaryForm({ ...salaryForm, otherDeductions: parseFloat(e.target.value) || 0 })}
-                    className="w-full mt-1 px-3 py-1.5 border rounded bg-white font-medium"
+                    className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                   />
                 </div>
               </div>
             </div>
 
             {/* Live Calculation Preview Banner */}
-            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex justify-between items-center">
+            <div className="clay-card rounded-2xl p-5 bg-gradient-to-r from-emerald-50/80 via-teal-50/60 to-emerald-50/80 border border-emerald-200/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm">
               <div>
-                <span className="text-xs text-gray-600 block">Gross Earnings:</span>
-                <span className="text-base font-bold text-gray-900">₹{computedGross.toFixed(2)}</span>
+                <span className="text-xs text-slate-500 font-bold uppercase block">Gross Earnings:</span>
+                <span className="text-lg font-black text-slate-900">₹{computedGross.toFixed(2)}</span>
               </div>
               <div>
-                <span className="text-xs text-gray-600 block">Total Deductions:</span>
-                <span className="text-base font-bold text-red-600">-₹{computedDeductions.toFixed(2)}</span>
+                <span className="text-xs text-slate-500 font-bold uppercase block">Total Deductions:</span>
+                <span className="text-lg font-black text-rose-600">-₹{computedDeductions.toFixed(2)}</span>
               </div>
-              <div className="text-right">
-                <span className="text-xs text-gray-600 block">Estimated Net Salary:</span>
-                <span className="text-xl font-extrabold text-emerald-700">₹{computedNet.toFixed(2)}</span>
+              <div className="sm:text-right">
+                <span className="text-xs text-slate-500 font-bold uppercase block">Estimated Net Salary:</span>
+                <span className="text-2xl font-black text-emerald-700">₹{computedNet.toFixed(2)}</span>
               </div>
             </div>
 
             <div className="flex justify-end pt-2">
               <button
                 type="submit"
-                className="px-5 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-bold text-sm shadow"
+                className="clay-btn-brand px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl font-extrabold text-sm shadow-clay-button active:scale-95 transition-all"
               >
                 💾 Save Compensation Structure
               </button>
@@ -381,51 +385,51 @@ export const SalaryManagement: React.FC<SalaryManagementProps> = ({ initialEmplo
         </div>
 
         {/* Right Col: Advances & Loans */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 space-y-4">
-          <div className="flex justify-between items-center border-b pb-3">
-            <h3 className="font-bold text-gray-800 text-base">Employee Advances</h3>
+        <div className="clay-card rounded-3xl p-6 bg-white shadow-clay-card border border-white/80 space-y-4">
+          <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+            <h3 className="font-black text-slate-800 text-lg">Employee Advances</h3>
             <button
               onClick={() => setIsAdvanceModalOpen(true)}
-              className="px-2.5 py-1 bg-emerald-600 text-white rounded text-xs font-semibold hover:bg-emerald-700 shadow"
+              className="clay-btn-brand px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-xl text-xs font-bold shadow-clay-button active:scale-95 transition-all"
             >
               ➕ Request
             </button>
           </div>
 
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-slate-500 font-medium">
             Dedicated employee loan tracking with monthly automatic payroll deduction.
           </p>
 
           {advances.length === 0 ? (
-            <div className="p-4 text-center text-gray-400 text-sm">No active or pending advances.</div>
+            <div className="p-8 text-center clay-inset rounded-2xl bg-slate-50 text-slate-400 text-xs font-medium">No active or pending advances.</div>
           ) : (
             <div className="space-y-3">
               {advances.map((adv) => (
-                <div key={adv.id} className="p-3 border rounded-lg bg-gray-50 text-xs space-y-1">
+                <div key={adv.id} className="clay-card p-3.5 rounded-2xl bg-[#F8FAFC] border border-slate-200/80 text-xs space-y-1.5 shadow-sm">
                   <div className="flex justify-between items-center">
-                    <span className="font-mono font-bold text-emerald-800">{adv.advanceNumber}</span>
-                    <span className={`px-1.5 py-0.5 rounded-full font-bold ${
+                    <span className="font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md">{adv.advanceNumber}</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
                       adv.status === EmployeeAdvanceStatus.ACTIVE
-                        ? 'bg-blue-100 text-blue-800'
+                        ? 'bg-sky-100 text-sky-800'
                         : adv.status === EmployeeAdvanceStatus.PENDING_APPROVAL
-                        ? 'bg-yellow-100 text-yellow-800'
-                        : 'bg-gray-200 text-gray-700'
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-slate-200 text-slate-700'
                     }`}>
                       {adv.status}
                     </span>
                   </div>
-                  <div className="flex justify-between text-gray-600">
+                  <div className="flex justify-between text-slate-600 font-medium">
                     <span>Principal: ₹{adv.amount.toFixed(2)}</span>
-                    <span className="font-bold text-gray-900">Balance: ₹{adv.remainingBalance.toFixed(2)}</span>
+                    <span className="font-black text-slate-900">Balance: ₹{adv.remainingBalance.toFixed(2)}</span>
                   </div>
-                  <div className="text-gray-500">Installment: ₹{adv.monthlyInstallment.toFixed(2)}/mo</div>
-                  <div className="text-gray-500 italic truncate">{adv.reason}</div>
+                  <div className="text-slate-500 font-medium">Installment: ₹{adv.monthlyInstallment.toFixed(2)}/mo</div>
+                  <div className="text-slate-500 italic truncate font-medium">{adv.reason}</div>
 
                   {adv.status === EmployeeAdvanceStatus.PENDING_APPROVAL && (
                     <div className="pt-2 flex justify-end">
                       <button
                         onClick={() => handleApproveAdvance(adv.id)}
-                        className="px-2 py-1 bg-emerald-600 text-white rounded font-bold hover:bg-emerald-700"
+                        className="px-3 py-1.5 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 active:scale-95 transition-all shadow-sm"
                       >
                         Approve Advance
                       </button>
@@ -440,12 +444,20 @@ export const SalaryManagement: React.FC<SalaryManagementProps> = ({ initialEmplo
 
       {/* Advance Request Modal */}
       {isAdvanceModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
-            <h3 className="font-bold text-gray-800 text-lg">💸 Request Employee Advance</h3>
-            <form onSubmit={handleRequestAdvance} className="space-y-3 text-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="clay-card bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 space-y-4 border border-white">
+            <div className="flex justify-between items-center border-b pb-2">
+              <h3 className="font-black text-slate-800 text-lg">💸 Request Employee Advance</h3>
+              <button
+                onClick={() => setIsAdvanceModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold text-xl"
+              >
+                &times;
+              </button>
+            </div>
+            <form onSubmit={handleRequestAdvance} className="space-y-3.5 text-sm">
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase">Advance Amount (₹) *</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Advance Amount (₹) *</label>
                 <input
                   type="number"
                   min="100"
@@ -453,12 +465,12 @@ export const SalaryManagement: React.FC<SalaryManagementProps> = ({ initialEmplo
                   required
                   value={advanceForm.amount}
                   onChange={(e) => setAdvanceForm({ ...advanceForm, amount: parseFloat(e.target.value) || 0 })}
-                  className="w-full mt-1 px-3 py-2 border rounded-md"
+                  className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase">Monthly Installment (₹) *</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Monthly Installment (₹) *</label>
                 <input
                   type="number"
                   min="100"
@@ -466,33 +478,33 @@ export const SalaryManagement: React.FC<SalaryManagementProps> = ({ initialEmplo
                   required
                   value={advanceForm.monthlyInstallment}
                   onChange={(e) => setAdvanceForm({ ...advanceForm, monthlyInstallment: parseFloat(e.target.value) || 0 })}
-                  className="w-full mt-1 px-3 py-2 border rounded-md"
+                  className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-600 uppercase">Documented Reason *</label>
+                <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Documented Reason *</label>
                 <textarea
                   required
                   rows={2}
                   placeholder="Reason for advance..."
                   value={advanceForm.reason}
                   onChange={(e) => setAdvanceForm({ ...advanceForm, reason: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 border rounded-md"
+                  className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
                 />
               </div>
 
-              <div className="flex justify-end space-x-2 pt-2 border-t">
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setIsAdvanceModalOpen(false)}
-                  className="px-3 py-1.5 border rounded text-gray-600"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-700 active:scale-95 transition-all"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-emerald-600 text-white rounded font-bold hover:bg-emerald-700"
+                  className="clay-btn-brand px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl font-extrabold text-xs shadow-clay-button active:scale-95 transition-all"
                 >
                   Submit Request
                 </button>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { SafeAreaView, StyleSheet, View, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { colors } from './src/theme/colors';
 import {
@@ -26,6 +27,8 @@ import { MeasurementScreen } from './src/screens/MeasurementScreen';
 import { TransactionReviewScreen } from './src/screens/TransactionReviewScreen';
 import { ReceiptScreen } from './src/screens/ReceiptScreen';
 import { HistoryScreen } from './src/screens/HistoryScreen';
+
+import { ClayLoading } from './src/components/clay/ClayLoading';
 
 export type CurrentScreen =
   | 'LOGIN'
@@ -137,7 +140,7 @@ export default function App() {
   if (isInitializing) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color={colors.primaryLight} />
+        <ClayLoading message="Initializing Dairy Terminal..." />
       </View>
     );
   }
@@ -311,9 +314,10 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundDark,
+    backgroundColor: colors.clayBgDark,
   },
   centered: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },

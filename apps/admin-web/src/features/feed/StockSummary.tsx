@@ -44,24 +44,24 @@ export const StockSummary: React.FC<StockSummaryProps> = ({
   });
 
   return (
-    <div className="stock-summary p-6 bg-white rounded-lg shadow">
-      <div className="flex justify-between items-center mb-6">
+    <div className="stock-summary clay-card rounded-3xl p-6 sm:p-8 bg-white shadow-clay-card border border-white/80 space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Center-Wise Feed Inventory & Valuation</h2>
-          <p className="text-sm text-gray-500">
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight">Center-Wise Feed Inventory & Valuation</h2>
+          <p className="text-sm text-slate-500 font-medium">
             Real-time stock ledger, minimum threshold reorder alerts, and Weighted Average Costing (WAC)
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2.5">
           <button
             onClick={() => onOpenTransferModal()}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded text-sm font-medium shadow"
+            className="clay-btn-brand bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-clay-button active:scale-95 transition-all"
           >
             ↔ Transfer Between Centers
           </button>
           <button
             onClick={() => onOpenAdjustmentModal()}
-            className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded text-sm font-medium shadow"
+            className="clay-btn-secondary bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-clay-button active:scale-95 transition-all"
           >
             ± Adjust / Write-off Stock
           </button>
@@ -69,116 +69,119 @@ export const StockSummary: React.FC<StockSummaryProps> = ({
       </div>
 
       {valuationData && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-4">
-            <div className="text-xs font-semibold text-emerald-800 uppercase">Total Stock Valuation (WAC)</div>
-            <div className="text-2xl font-bold text-emerald-700 mt-1">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="clay-card rounded-2xl p-5 bg-gradient-to-br from-emerald-50/80 to-teal-50/60 border border-emerald-100 shadow-sm relative overflow-hidden">
+            <div className="text-[11px] font-extrabold text-emerald-800 uppercase tracking-wider">Total Stock Valuation (WAC)</div>
+            <div className="text-2xl sm:text-3xl font-black text-emerald-700 mt-1.5 tracking-tight">
               ₹{Number(valuationData.totalValuation).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
             </div>
-            <div className="text-xs text-emerald-600 mt-1">Costing Method: Weighted Average Cost</div>
+            <div className="text-xs text-emerald-600/90 font-medium mt-1">Costing Method: Weighted Average Cost</div>
           </div>
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="text-xs font-semibold text-blue-800 uppercase">Active Center Inventory Rows</div>
-            <div className="text-2xl font-bold text-blue-700 mt-1">{inventory.length}</div>
-            <div className="text-xs text-blue-600 mt-1">Across all registered dairy centers</div>
+          <div className="clay-card rounded-2xl p-5 bg-gradient-to-br from-sky-50/80 to-blue-50/60 border border-sky-100 shadow-sm relative overflow-hidden">
+            <div className="text-[11px] font-extrabold text-sky-800 uppercase tracking-wider">Active Center Inventory Rows</div>
+            <div className="text-2xl sm:text-3xl font-black text-sky-700 mt-1.5 tracking-tight">{inventory.length}</div>
+            <div className="text-xs text-sky-600/90 font-medium mt-1">Across all registered dairy centers</div>
           </div>
-          <div className="bg-rose-50 border border-rose-200 rounded-lg p-4">
-            <div className="text-xs font-semibold text-rose-800 uppercase">Low Stock Alert Count</div>
-            <div className="text-2xl font-bold text-rose-700 mt-1">
+          <div className="clay-card rounded-2xl p-5 bg-gradient-to-br from-rose-50/80 to-amber-50/60 border border-rose-100 shadow-sm relative overflow-hidden">
+            <div className="text-[11px] font-extrabold text-rose-800 uppercase tracking-wider">Low Stock Alert Count</div>
+            <div className="text-2xl sm:text-3xl font-black text-rose-700 mt-1.5 tracking-tight">
               {inventory.filter((i: any) => Number(i.currentStock) <= Number(i.minimumStockLevel)).length}
             </div>
-            <div className="text-xs text-rose-600 mt-1">Stock at or below reorder threshold</div>
+            <div className="text-xs text-rose-600/90 font-medium mt-1">Stock at or below reorder threshold</div>
           </div>
         </div>
       )}
 
-      <div className="flex items-center gap-4 mb-4">
-        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+      <div className="clay-inset p-3 rounded-2xl bg-[#EEF2F6] border border-[#CBD5E1]/50 flex flex-wrap items-center justify-between gap-3">
+        <label className="flex items-center gap-2.5 text-xs font-bold text-slate-700 cursor-pointer select-none">
           <input
             type="checkbox"
             checked={filterLowStockOnly}
             onChange={(e) => setFilterLowStockOnly(e.target.checked)}
-            className="rounded text-emerald-600 focus:ring-emerald-500"
+            className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300"
           />
-          Show Low Stock Warnings Only
+          <span>Show Low Stock Warnings Only</span>
         </label>
         <button
           onClick={loadStock}
-          className="ml-auto text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded border"
+          className="text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 px-3.5 py-1.5 rounded-xl border border-slate-200 shadow-sm active:scale-95 transition-all"
         >
-          Refresh Stock
+          🔄 Refresh Stock
         </button>
       </div>
 
       {error && (
-        <div className="bg-red-50 text-red-700 p-4 rounded-md mb-4 text-sm border border-red-200">
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-sm font-semibold shadow-sm">
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="text-center py-12 text-gray-500 text-sm">Loading stock balances...</div>
+        <div className="text-center py-16 text-slate-400 text-sm font-semibold space-y-2">
+          <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <div>Loading stock balances...</div>
+        </div>
       ) : filteredItems.length === 0 ? (
-        <div className="text-center py-12 bg-gray-50 rounded text-gray-500 text-sm">
+        <div className="text-center py-16 clay-inset rounded-2xl bg-slate-50/80 text-slate-500 text-sm font-semibold">
           No inventory records found.
         </div>
       ) : (
-        <div className="overflow-x-auto border border-gray-200 rounded-lg">
-          <table className="min-w-full divide-y divide-gray-200 text-sm text-left">
-            <thead className="bg-gray-50 text-gray-600 font-semibold text-xs uppercase tracking-wider">
+        <div className="overflow-x-auto rounded-2xl border border-slate-200/80 shadow-sm">
+          <table className="min-w-full divide-y divide-slate-200 text-sm text-left">
+            <thead className="bg-[#F8FAFC] text-slate-600 font-extrabold text-xs uppercase tracking-wider">
               <tr>
-                <th className="px-4 py-3">Center</th>
-                <th className="px-4 py-3">Product</th>
-                <th className="px-4 py-3">Current Stock</th>
-                <th className="px-4 py-3">Min Threshold</th>
-                <th className="px-4 py-3">Avg Unit Cost (WAC)</th>
-                <th className="px-4 py-3">Selling Rate</th>
-                <th className="px-4 py-3">Valuation</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Quick Actions</th>
+                <th className="px-4 py-3.5">Center</th>
+                <th className="px-4 py-3.5">Product</th>
+                <th className="px-4 py-3.5">Current Stock</th>
+                <th className="px-4 py-3.5">Min Threshold</th>
+                <th className="px-4 py-3.5">Avg Unit Cost (WAC)</th>
+                <th className="px-4 py-3.5">Selling Rate</th>
+                <th className="px-4 py-3.5">Valuation</th>
+                <th className="px-4 py-3.5">Status</th>
+                <th className="px-4 py-3.5 text-right">Quick Actions</th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody className="bg-white divide-y divide-slate-100">
               {filteredItems.map((item: any) => {
                 const isLow = Number(item.currentStock) <= Number(item.minimumStockLevel);
                 const val = Number(item.currentStock) * Number(item.weightedAvgCost);
                 return (
-                  <tr key={item.id} className={`hover:bg-gray-50 ${isLow ? 'bg-amber-50/40' : ''}`}>
-                    <td className="px-4 py-3 font-medium text-gray-800">{item.centerName}</td>
-                    <td className="px-4 py-3">
-                      <div className="font-semibold text-gray-900">{item.productName}</div>
-                      <div className="text-xs font-mono text-gray-500">{item.productCode}</div>
+                  <tr key={item.id} className={`hover:bg-slate-50/80 transition-colors ${isLow ? 'bg-amber-50/40' : ''}`}>
+                    <td className="px-4 py-3.5 font-bold text-slate-800">{item.centerName}</td>
+                    <td className="px-4 py-3.5">
+                      <div className="font-extrabold text-slate-900">{item.productName}</div>
+                      <div className="text-xs font-mono font-bold text-slate-400">{item.productCode}</div>
                     </td>
-                    <td className="px-4 py-3 font-bold text-gray-900">
+                    <td className="px-4 py-3.5 font-black text-slate-900">
                       {Number(item.currentStock).toFixed(3)} {item.baseUnit}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">
+                    <td className="px-4 py-3.5 text-slate-600 font-medium">
                       {Number(item.minimumStockLevel).toFixed(3)} {item.baseUnit}
                     </td>
-                    <td className="px-4 py-3 text-gray-700">₹{Number(item.weightedAvgCost).toFixed(2)}</td>
-                    <td className="px-4 py-3 text-emerald-700 font-medium">₹{Number(item.sellingPrice).toFixed(2)}</td>
-                    <td className="px-4 py-3 font-semibold text-gray-900">₹{val.toFixed(2)}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3.5 text-slate-700 font-bold">₹{Number(item.weightedAvgCost).toFixed(2)}</td>
+                    <td className="px-4 py-3.5 text-emerald-700 font-bold">₹{Number(item.sellingPrice).toFixed(2)}</td>
+                    <td className="px-4 py-3.5 font-black text-slate-900">₹{val.toFixed(2)}</td>
+                    <td className="px-4 py-3.5">
                       {isLow ? (
-                        <span className="inline-block px-2 py-0.5 rounded text-xs font-bold bg-rose-100 text-rose-800 animate-pulse">
+                        <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
                           LOW STOCK
                         </span>
                       ) : (
-                        <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">
+                        <span className="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                           ADEQUATE
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right space-x-2">
+                    <td className="px-4 py-3.5 text-right space-x-2">
                       <button
                         onClick={() => onOpenAdjustmentModal(item.productId)}
-                        className="text-xs text-amber-700 hover:text-amber-900 font-medium"
+                        className="text-xs text-amber-700 hover:text-amber-900 font-bold px-2 py-1 rounded-lg hover:bg-amber-50 active:scale-95 transition-all"
                       >
                         Adjust
                       </button>
                       <button
                         onClick={() => onOpenTransferModal(item.productId)}
-                        className="text-xs text-indigo-700 hover:text-indigo-900 font-medium"
+                        className="text-xs text-indigo-700 hover:text-indigo-900 font-bold px-2 py-1 rounded-lg hover:bg-indigo-50 active:scale-95 transition-all"
                       >
                         Transfer
                       </button>

@@ -4,19 +4,21 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
 } from 'react-native';
 import { CollectionRepository } from '../domain/repository/CollectionRepository';
 import { CollectionHistoryItemDto, Shift, ShiftSummaryDto } from '../types';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
-import { Card } from '../components/common/Card';
-import { Button } from '../components/common/Button';
-import { Input } from '../components/common/Input';
-import { FilterChip } from '../components/common/FilterChip';
-import { Dialog } from '../components/common/Dialog';
+import { ClayCard } from '../components/clay/ClayCard';
+import { ClayButton } from '../components/clay/ClayButton';
+import { ClayInput } from '../components/clay/ClayInput';
+import { ClayFilterChip } from '../components/clay/ClayFilterChip';
+import { ClayDialog } from '../components/clay/ClayDialog';
+import { ClayCategoryBadge } from '../components/clay/ClayCategoryBadge';
+import { ClayEmptyState } from '../components/clay/ClayEmptyState';
+import { ClayLoading } from '../components/clay/ClayLoading';
 import { ReceiptFormatter } from '../domain/receipt/ReceiptFormatter';
+import { ClayImages } from '../theme/assets';
 
 interface HistoryScreenProps {
   repository: CollectionRepository;
@@ -93,76 +95,85 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Top Header */}
+      {/* Top Header Row */}
       <View style={styles.headerRow}>
         <View style={{ flex: 1 }}>
-          <Text style={typography.headlineMedium}>SHIFT COLLECTIONS & HISTORY</Text>
+          <Text style={typography.headlineMedium}>SHIFT COLLECTIONS &amp; HISTORY</Text>
           <Text style={[typography.bodyMedium, { marginTop: 4 }]}>
-            Center: {centerName} | Shift: {currentShift}
+            📍 Center: {centerName} | ☀️ Shift: {currentShift}
           </Text>
         </View>
 
-        <Button
+        <ClayButton
           title="BACK TO DASHBOARD"
           onPress={onDone}
-          variant="primary"
-          style={styles.backBtn}
+          variant="secondary"
+          size="md"
         />
       </View>
 
       <View style={{ height: 16 }} />
 
-      {/* Shift Summary Banner */}
+      {/* 3D Shift Summary Banner Card */}
       {shiftSummary && (
-        <Card style={styles.summaryCard} backgroundColor={colors.surfaceDark}>
+        <ClayCard variant="elevated" style={styles.summaryCard}>
+          <Text style={styles.summaryTitle}>SESSION METRICS SUMMARY</Text>
           <View style={styles.summaryStatsRow}>
-            <View style={styles.statColumn}>
-              <Text style={styles.statLabel}>Collections</Text>
-              <Text style={typography.titleLarge}>{shiftSummary.totalCollections}</Text>
+            <View style={styles.statWell}>
+              <Text style={styles.statLabel}>COLLECTIONS</Text>
+              <Text style={[typography.titleLarge, styles.statValue]}>
+                {shiftSummary.totalCollections}
+              </Text>
             </View>
-            <View style={styles.statColumn}>
-              <Text style={styles.statLabel}>Total Weight</Text>
-              <Text style={typography.titleLarge}>{shiftSummary.totalWeightKg.toFixed(2)} KG</Text>
+
+            <View style={styles.statWell}>
+              <Text style={styles.statLabel}>TOTAL QUANTITY</Text>
+              <Text style={[typography.titleLarge, styles.statValue]}>
+                {shiftSummary.totalWeightKg.toFixed(2)} KG
+              </Text>
             </View>
-            <View style={styles.statColumn}>
-              <Text style={styles.statLabel}>Avg Fat / SNF</Text>
-              <Text style={typography.titleLarge}>
+
+            <View style={styles.statWell}>
+              <Text style={styles.statLabel}>AVG FAT / SNF</Text>
+              <Text style={[typography.titleLarge, styles.statValue]}>
                 {shiftSummary.averageFat.toFixed(1)}% / {shiftSummary.averageSnf.toFixed(1)}%
               </Text>
             </View>
-            <View style={styles.statColumn}>
-              <Text style={styles.statLabel}>Total Payable</Text>
-              <Text style={[typography.titleLarge, { color: colors.statusValid }]}>
+
+            <View style={[styles.statWell, styles.statWellPayable]}>
+              <Text style={styles.statLabel}>TOTAL PAYABLE</Text>
+              <Text style={[typography.titleLarge, { color: colors.statusValid, fontWeight: '800' }]}>
                 INR {shiftSummary.totalAmount.toFixed(2)}
               </Text>
             </View>
           </View>
-        </Card>
+        </ClayCard>
       )}
 
       <View style={{ height: 16 }} />
 
       {/* Search & Filter Controls */}
       <View style={styles.controlsRow}>
-        <Input
-          placeholder="Search Farmer Code or Name"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          style={{ flex: 1, minWidth: 240 }}
-        />
+        <View style={{ flex: 1, minWidth: 260 }}>
+          <ClayInput
+            placeholder="Search Farmer Code or Name"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+        </View>
 
         <View style={styles.chipsRow}>
-          <FilterChip
+          <ClayFilterChip
             label="ALL SHIFTS"
             selected={selectedShiftFilter === 'ALL'}
             onPress={() => setSelectedShiftFilter('ALL')}
           />
-          <FilterChip
+          <ClayFilterChip
             label="MORNING"
             selected={selectedShiftFilter === 'MORNING'}
             onPress={() => setSelectedShiftFilter('MORNING')}
           />
-          <FilterChip
+          <ClayFilterChip
             label="EVENING"
             selected={selectedShiftFilter === 'EVENING'}
             onPress={() => setSelectedShiftFilter('EVENING')}
@@ -174,62 +185,78 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({
 
       {/* List / Loading / Empty */}
       {isLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={colors.primaryLight} />
-        </View>
+        <ClayLoading message="Loading shift history..." />
       ) : filteredItems.length === 0 ? (
-        <View style={styles.centered}>
-          <Text style={styles.emptyText}>No collections found matching criteria.</Text>
-        </View>
+        <ClayEmptyState
+          imageSource={ClayImages.emptyState}
+          title="No Collections Found"
+          description={
+            searchQuery.trim()
+              ? `No records match '${searchQuery}' in ${selectedShiftFilter} shift.`
+              : 'No collections have been recorded yet for this shift.'
+          }
+        />
       ) : (
         <View style={styles.listContainer}>
           {filteredItems.map((col) => (
-            <Card
+            <ClayCard
               key={col.id}
+              variant="elevated"
               style={styles.itemCard}
-              backgroundColor={colors.surfaceDark}
               onPress={() => handleOpenReceipt(col)}
             >
               <View style={styles.itemRow}>
                 <View style={{ flex: 1 }}>
-                  <Text style={[typography.bodyLarge, { fontWeight: 'bold' }]}>
-                    {col.customer_name} ({col.farmer_code})
-                  </Text>
-                  <Text style={[typography.caption, { marginTop: 4 }]}>
-                    {col.selected_milk_category} | {col.shift_type} | {col.business_date}
-                  </Text>
+                  <View style={styles.itemTitleRow}>
+                    <Text style={[typography.bodyLarge, { fontWeight: '800' }]}>
+                      {col.customer_name}
+                    </Text>
+                    <Text style={styles.itemCodeTag}>({col.farmer_code})</Text>
+                  </View>
+
+                  <View style={styles.itemMetaRow}>
+                    <ClayCategoryBadge category={col.selected_milk_category} size="sm" />
+                    <Text style={styles.itemMetaText}>
+                      {col.shift_type} &bull; {col.business_date}
+                    </Text>
+                  </View>
                 </View>
 
-                <View style={{ alignItems: 'flex-end' }}>
+                <View style={styles.itemRight}>
                   <Text style={styles.rateText}>
                     {(col.net_weight || 0).toFixed(2)} KG @ INR {(col.applied_rate_per_unit || 0).toFixed(2)}
                   </Text>
-                  <Text style={[typography.bodyLarge, { color: colors.statusValid, fontWeight: 'bold' }]}>
+                  <Text style={styles.amountText}>
                     INR {(col.total_amount || 0).toFixed(2)}
                   </Text>
+                  <Text style={styles.viewSlipHint}>VIEW SLIP &rarr;</Text>
                 </View>
               </View>
-            </Card>
+            </ClayCard>
           ))}
         </View>
       )}
 
       {/* Receipt Modal Dialog */}
-      <Dialog
+      <ClayDialog
         visible={selectedReceiptText !== null}
         onDismiss={() => setSelectedReceiptText(null)}
+        title="Thermal Receipt Slip"
+        subtitle="40-Column Historical Digital Record"
       >
         <View>
-          <Text style={typography.monospaceReceipt}>{selectedReceiptText}</Text>
+          <View style={styles.dialogReceiptBox}>
+            <Text style={typography.monospaceReceipt}>{selectedReceiptText}</Text>
+          </View>
           <View style={{ height: 16 }} />
-          <Button
+          <ClayButton
             title="CLOSE"
             onPress={() => setSelectedReceiptText(null)}
             variant="primary"
-            style={{ width: '100%' }}
+            size="md"
           />
         </View>
-      </Dialog>
+      </ClayDialog>
     </ScrollView>
   );
 };
@@ -237,7 +264,7 @@ export const HistoryScreen: React.FC<HistoryScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundDark,
+    backgroundColor: colors.clayBgDark,
   },
   content: {
     padding: 24,
@@ -249,48 +276,66 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 16,
   },
-  backBtn: {
-    height: 44,
-    paddingHorizontal: 16,
-  },
   summaryCard: {
-    padding: 16,
+    padding: 18,
+  },
+  summaryTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.textSecondary,
+    letterSpacing: 0.6,
+    marginBottom: 12,
   },
   summaryStatsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
     flexWrap: 'wrap',
-    gap: 16,
+    gap: 10,
   },
-  statColumn: {
+  statWell: {
+    flex: 1,
+    minWidth: 120,
+    backgroundColor: colors.clayInsetBg,
+    borderRadius: 12,
+    padding: 12,
     alignItems: 'center',
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1.5,
+    borderBottomWidth: 1.5,
+    borderRightWidth: 1.5,
+    borderTopColor: colors.clayInsetBorderTop,
+    borderLeftColor: colors.clayInsetBorderTop,
+    borderBottomColor: colors.clayInsetBorderBottom,
+    borderRightColor: colors.clayInsetBorderBottom,
+  },
+  statWellPayable: {
+    backgroundColor: 'rgba(76, 175, 80, 0.12)',
+    borderColor: 'rgba(76, 175, 80, 0.3)',
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 10,
+    fontWeight: '800',
     color: colors.textSecondary,
     marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  statValue: {
+    fontWeight: '800',
+    color: colors.textPrimary,
   },
   controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 14,
     flexWrap: 'wrap',
   },
   chipsRow: {
     flexDirection: 'row',
     gap: 8,
-  },
-  centered: {
-    padding: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyText: {
-    color: colors.textSecondary,
-    fontSize: 14,
+    flexWrap: 'wrap',
   },
   listContainer: {
-    gap: 8,
+    gap: 10,
   },
   itemCard: {
     padding: 16,
@@ -299,10 +344,59 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 12,
+  },
+  itemTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  itemCodeTag: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.accentAmber,
+  },
+  itemMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  itemMetaText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  itemRight: {
+    alignItems: 'flex-end',
   },
   rateText: {
-    fontSize: 13,
+    fontSize: 12,
     color: colors.textSecondary,
-    marginBottom: 4,
+    marginBottom: 2,
+  },
+  amountText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.statusValid,
+  },
+  viewSlipHint: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.clayBlueLight,
+    marginTop: 4,
+    letterSpacing: 0.4,
+  },
+  dialogReceiptBox: {
+    backgroundColor: colors.clayInsetBg,
+    borderRadius: 12,
+    padding: 16,
+    borderTopWidth: 1.5,
+    borderLeftWidth: 1.5,
+    borderBottomWidth: 1.5,
+    borderRightWidth: 1.5,
+    borderTopColor: colors.clayInsetBorderTop,
+    borderLeftColor: colors.clayInsetBorderTop,
+    borderBottomColor: colors.clayInsetBorderBottom,
+    borderRightColor: colors.clayInsetBorderBottom,
   },
 });

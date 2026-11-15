@@ -19,7 +19,7 @@ const AppContent = () => {
     const { isAuthenticated, loading } = useAuth();
     const [activeSection, setActiveSection] = useState('dashboard');
     if (loading) {
-        return (_jsxs("div", { className: "min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white", children: [_jsx("div", { className: "w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4" }), _jsx("p", { className: "text-sm font-semibold tracking-wider text-slate-300", children: "INITIALIZING DFARM DAIRY OPERATING PLATFORM..." })] }));
+        return (_jsx("div", { className: "min-h-screen bg-[#F4F7FB] flex flex-col items-center justify-center p-6 text-slate-800 antialiased", children: _jsxs("div", { className: "clay-surface p-10 max-w-sm w-full text-center space-y-5 flex flex-col items-center", children: [_jsxs("div", { className: "relative", children: [_jsx("div", { className: "w-16 h-16 rounded-3xl bg-gradient-to-tr from-[#10B981] via-[#0D9488] to-[#00506E] flex items-center justify-center text-white text-2xl font-black shadow-[0_10px_25px_rgba(16,185,129,0.35),inset_0_2px_2px_rgba(255,255,255,0.5)]", children: "D" }), _jsx("div", { className: "absolute -inset-2 border-2 border-[#10B981]/30 border-t-[#00506E] rounded-full animate-spin" })] }), _jsxs("div", { className: "space-y-1", children: [_jsx("h3", { className: "text-base font-black tracking-tight text-slate-900", children: "DFARM Smart Dairy" }), _jsx("p", { className: "text-xs font-bold tracking-wider text-slate-500 uppercase", children: "INITIALIZING DFARM DAIRY OPERATING PLATFORM..." })] })] }) }));
     }
     if (!isAuthenticated) {
         return _jsx(LoginPage, {});

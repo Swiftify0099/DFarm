@@ -69,25 +69,30 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
-        <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-          <h3 className="text-lg font-bold text-gray-800">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+      <div className="clay-card bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col border border-white">
+        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-gradient-to-r from-emerald-800 to-teal-900 text-white">
+          <h3 className="text-lg font-black tracking-tight">
             {isEditing ? `Edit Product: ${product?.name}` : 'Register New Cattle Feed Product'}
           </h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 font-bold text-xl">&times;</button>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center font-bold text-lg text-white transition-colors"
+          >
+            &times;
+          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4">
           {error && (
-            <div className="bg-red-50 text-red-700 p-3 rounded text-sm border border-red-200">
+            <div className="p-3 bg-rose-50 text-rose-700 rounded-xl text-xs font-bold border border-rose-200">
               {error}
             </div>
           )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Product Code *</label>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Product Code *</label>
               <input
                 type="text"
                 disabled={isEditing}
@@ -95,16 +100,16 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="e.g. FEED-PELLET-50KG"
-                className="w-full border rounded px-3 py-2 text-sm uppercase font-mono disabled:bg-gray-100"
+                className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs uppercase font-mono font-bold text-slate-800 disabled:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Category *</label>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Category *</label>
               <select
                 required
                 value={categoryId}
                 onChange={(e) => setCategoryId(e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
               >
                 {categories.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
@@ -114,24 +119,24 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">Product Name *</label>
+            <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Product Name *</label>
             <input
               type="text"
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Cattle Feed Pellet Super 20%"
-              className="w-full border rounded px-3 py-2 text-sm"
+              className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
             />
           </div>
 
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Base Unit *</label>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Base Unit *</label>
               <select
                 value={baseUnit}
                 onChange={(e) => setBaseUnit(e.target.value as FeedProductUnit)}
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
               >
                 <option value="KG">KG (Kilograms)</option>
                 <option value="BAG">BAG</option>
@@ -140,17 +145,17 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Pack Unit Name</label>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Pack Unit Name</label>
               <input
                 type="text"
                 value={packUnit}
                 onChange={(e) => setPackUnit(e.target.value)}
                 placeholder="BAG / SACK / BOTTLE"
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 uppercase focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Pack Size (in Base Units)</label>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Pack Size (in Base Units)</label>
               <input
                 type="number"
                 step="0.001"
@@ -158,14 +163,14 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 required
                 value={packSize}
                 onChange={(e) => setPackSize(Number(e.target.value))}
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Selling Price (₹) *</label>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Selling Price (₹) *</label>
               <input
                 type="number"
                 step="0.01"
@@ -173,22 +178,22 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 required
                 value={sellingPrice}
                 onChange={(e) => setSellingPrice(Number(e.target.value))}
-                className="w-full border rounded px-3 py-2 text-sm font-semibold text-emerald-700"
+                className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-black text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Default Purchase Cost (₹)</label>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Default Purchase Cost (₹)</label>
               <input
                 type="number"
                 step="0.01"
                 min="0"
                 value={defaultPurchasePrice}
                 onChange={(e) => setDefaultPurchasePrice(Number(e.target.value))}
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">GST Rate (%)</label>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">GST Rate (%)</label>
               <input
                 type="number"
                 step="0.01"
@@ -196,38 +201,38 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
                 max="100"
                 value={taxRatePercent}
                 onChange={(e) => setTaxRatePercent(Number(e.target.value))}
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">HSN / SAC Code</label>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">HSN / SAC Code</label>
               <input
                 type="text"
                 value={hsnCode}
                 onChange={(e) => setHsnCode(e.target.value)}
                 placeholder="e.g. 2309"
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Min Stock Alert Level</label>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Min Stock Alert Level</label>
               <input
                 type="number"
                 min="0"
                 value={minimumStockLevel}
                 onChange={(e) => setMinimumStockLevel(Number(e.target.value))}
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Status</label>
+              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Status</label>
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
               >
                 <option value="ACTIVE">ACTIVE</option>
                 <option value="INACTIVE">INACTIVE</option>
@@ -237,28 +242,28 @@ export const ProductFormModal: React.FC<ProductFormModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">Description</label>
+            <label className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-600 mb-1">Description</label>
             <textarea
               rows={2}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Nutritional composition, protein %, minerals..."
-              className="w-full border rounded px-3 py-2 text-sm"
+              className="w-full clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
             />
           </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+          <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border rounded text-sm text-gray-700 hover:bg-gray-100"
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-700 active:scale-95 transition-all"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-sm font-semibold disabled:opacity-50"
+              className="clay-btn-brand px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl text-xs font-extrabold shadow-clay-button disabled:opacity-50 active:scale-95 transition-all"
             >
               {saving ? 'Saving...' : isEditing ? 'Update Product' : 'Create Product'}
             </button>

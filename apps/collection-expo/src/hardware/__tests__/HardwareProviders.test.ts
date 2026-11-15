@@ -5,6 +5,7 @@ import {
   ManualEntryMilkAnalyzerProvider,
 } from '../ManualEntryProviders';
 import { UsbSerialWeightScaleService } from '../UsbSerialWeightScaleService';
+import { SerialMilkAnalyzerService } from '../SerialMilkAnalyzerService';
 import { BluetoothEscPosPrinterService } from '../BluetoothEscPosPrinterService';
 import { NfcRfidReaderService } from '../NfcRfidReaderService';
 
@@ -125,5 +126,43 @@ test('Hardware Providers Test Suite', async (t) => {
     assert.equal(NfcRfidReaderService.isValidHexUid('04A1B2C3D4'), true);
     assert.equal(NfcRfidReaderService.isValidHexUid('XYZ123'), false); // Non-hex
     assert.equal(NfcRfidReaderService.isValidHexUid('12'), false); // Too short
+  });
+
+  await t.test('10. SerialMilkAnalyzerService: Parse key-value tagged ultrasonic frame', () => {
+    const frame = 'FAT=04.20 SNF=08.65 CLR=28.5 ADD_WATER=00.00 TEMP=25.0 C\r\n';
+    const parsed = SerialMilkAnalyzerService.parseAnalyzerFrame(frame);
+
+    assert.equal(parsed.isValid, true);
+    assert.equal(parsed.isComplete, true);
+    assert.equal(parsed.fatPercentage, 4.2);
+    assert.equal(parsed.snfPercentage, 8.65);
+    assert.equal(parsed.density, 28.5);
+    assert.equal(parsed.waterContent, 0.0);
+  });
+
+  await t.test('11. SerialMilkAnalyzerService: Parse prefixed delimited frame ($F...S...#)', () => {
+    const frame = '$F04.50,S08.90,D29.00,W00.00#\r\n';
+    const parsed = SerialMilkAnalyzerService.parseAnalyzerFrame(frame);
+
+    assert.equal(parsed.isValid, true);
+    assert.equal(parsed.fatPercentage, 4.5);
+    assert.equal(parsed.snfPercentage, 8.9);
+    assert.equal(parsed.density, 29.0);
+  });
+
+  await t.test('12. SerialMilkAnalyzerService: Reject analyzer maintenance/cleaning state', () => {
+    const frame = 'STATUS: CLEANING_CYCLE_REQUIRED ERROR 03\r\n';
+    const parsed = SerialMilkAnalyzerService.parseAnalyzerFrame(frame);
+
+    assert.equal(parsed.isValid, false);
+    assert.ok(parsed.error?.includes('maintenance state'));
+  });
+
+  await t.test('13. SerialMilkAnalyzerService: Enforce biological boundary limits (1.0% - 18.0% FAT)', () => {
+    const frame = 'FAT=22.50 SNF=08.50 CLR=28.0\r\n';
+    const parsed = SerialMilkAnalyzerService.parseAnalyzerFrame(frame);
+
+    assert.equal(parsed.isValid, false);
+    assert.ok(parsed.error?.includes('biological limits'));
   });
 });

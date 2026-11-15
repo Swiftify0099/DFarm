@@ -1,1 +1,1 @@
-{"version":3,"file":"PayrollDashboard.d.ts","sourceRoot":"","sources":["../../../src/features/employees/PayrollDashboard.tsx"],"names":[],"mappings":"AAAA,OAAO,KAA8B,MAAM,OAAO,CAAC;AASnD,eAAO,MAAM,gBAAgB,EAAE,KAAK,CAAC,EAyXpC,CAAC"}
+{"version":3,"file":"PayrollDashboard.d.ts","sourceRoot":"","sources":["../../../src/features/employees/PayrollDashboard.tsx"],"names":[],"mappings":"AAAA,OAAO,KAA8B,MAAM,OAAO,CAAC;AASnD,eAAO,MAAM,gBAAgB,EAAE,KAAK,CAAC,EA0YpC,CAAC"}

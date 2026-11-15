@@ -6,10 +6,6 @@
     "orientation": "default",
     "userInterfaceStyle": "dark",
     "scheme": "dfarmcollection",
-    "splash": {
-      "resizeMode": "contain",
-      "backgroundColor": "#121212"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],

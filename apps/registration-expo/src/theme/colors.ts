@@ -1,7 +1,9 @@
 /**
- * DFarm Registration App - Color Palette
+ * DFarm Registration App - Color Palette & Claymorphism Palette
  * Mapped with exact parity from Kotlin Jetpack Compose Color.kt & Component Badges
  */
+
+import { clayColors } from './claymorphism';
 
 export const colors = {
   // Light Theme Colors (Kotlin Material 3 Tokens)
@@ -21,7 +23,7 @@ export const colors = {
   onError: '#FFFFFF',
   errorContainer: '#FFDAD6',
   onErrorContainer: '#410002',
-  background: '#F7F9FD',
+  background: '#EDF3F8', // Soft pastel clay canvas
   onBackground: '#191C1F',
   surface: '#FFFFFF',
   onSurface: '#191C1F',
@@ -51,8 +53,8 @@ export const colors = {
   categoryBothText: '#6A1B9A',
 
   // Biometric Camera & Hardware HUD Colors
-  darkBackground: '#121212',
-  darkSurface: '#1E1E1E',
+  darkBackground: '#12161A',
+  darkSurface: '#1C242C',
   hudGreen: '#4CAF50',
   hudGreenLight: '#81C784',
   hudGreenBg: 'rgba(76, 175, 80, 0.2)',
@@ -73,4 +75,7 @@ export const colors = {
   warningBannerBg: '#FFF8E1',
   warningBannerText: '#B78103',
   warningBannerDesc: '#5D4037',
+
+  // Claymorphism Extensions
+  clay: clayColors,
 };

@@ -29,7 +29,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-100/70 flex text-slate-800 antialiased">
+    <div className="min-h-screen bg-[#F4F7FB] flex text-slate-800 antialiased selection:bg-[#CFEAFD] selection:text-[#00506E]">
       {/* Sidebar */}
       <Sidebar
         activeSection={activeSection}
@@ -38,7 +38,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
         onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />
 
-      {/* Main Content Area */}
+      {/* Main Workspace Area */}
       <div className="flex-1 flex flex-col min-w-0">
         <Header
           onToggleMobileSidebar={() => setIsMobileSidebarOpen(true)}
@@ -49,8 +49,16 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({
           {children}
         </main>
 
-        <footer className="py-4 px-6 text-center text-xs text-gray-500 border-t border-gray-200 bg-white">
-          DFarm Smart Dairy Enterprise Platform &copy; 2026 &bull; Production Release Tier &bull; End-to-End Audit Log Active
+        <footer className="py-4 px-6 text-center text-xs text-slate-500 border-t border-slate-200/80 bg-white/60 backdrop-blur-sm select-none">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-bold text-slate-700">DFarm Smart Dairy Enterprise Platform &copy; 2026</span>
+            </div>
+            <div className="text-[11px] font-medium text-slate-400">
+              Claymorphism 3D Interface Tier &bull; End-to-End Audit Log Active &bull; Zero Biometric Exposure
+            </div>
+          </div>
         </footer>
       </div>
     </div>

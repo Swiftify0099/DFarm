@@ -1,14 +1,8 @@
 import React from 'react';
-import {
-  Modal,
-  View,
-  StyleSheet,
-  TouchableWithoutFeedback,
-  ViewStyle,
-} from 'react-native';
-import { colors } from '../../theme/colors';
+import { ViewStyle } from 'react-native';
+import { ClayDialog } from '../clay/ClayDialog';
 
-interface DialogProps {
+export interface DialogProps {
   visible: boolean;
   onDismiss: () => void;
   children: React.ReactNode;
@@ -22,43 +16,8 @@ export const Dialog: React.FC<DialogProps> = ({
   contentStyle,
 }) => {
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onDismiss}
-    >
-      <TouchableWithoutFeedback onPress={onDismiss}>
-        <View style={styles.overlay}>
-          <TouchableWithoutFeedback>
-            <View style={[styles.dialogContainer, contentStyle]}>
-              {children}
-            </View>
-          </TouchableWithoutFeedback>
-        </View>
-      </TouchableWithoutFeedback>
-    </Modal>
+    <ClayDialog visible={visible} onDismiss={onDismiss} contentStyle={contentStyle}>
+      {children}
+    </ClayDialog>
   );
 };
-
-const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  dialogContainer: {
-    width: '100%',
-    maxWidth: 500,
-    backgroundColor: colors.surfaceDark,
-    borderRadius: 12,
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-});

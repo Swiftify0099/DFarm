@@ -9,6 +9,7 @@ import {
 } from '../../api/rateApi.js';
 import { StatusBadge } from '../../components/Badge.js';
 import { Modal } from '../../components/Modal.js';
+import { ClayButton } from '../../components/ClayButton.js';
 
 export const RateManagementModule: React.FC = () => {
   const { currentCenterId, hasRole } = useAuth();
@@ -238,23 +239,28 @@ export const RateManagementModule: React.FC = () => {
   }, [matrixCells]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 select-none">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-gray-200">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-slate-200/80">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">📈 Milk Rate Chart & Matrix Management</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+            <span>📈</span>
+            <span>Milk Rate Chart & Matrix Management</span>
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">
             Authoritative Fat × SNF pricing matrices, four-eye draft approvals, published version locking, and live rate simulator.
           </p>
         </div>
         <div className="flex items-center gap-2">
           {canEditRates && selectedChart && (
-            <button
+            <ClayButton
+              variant="brand"
+              size="sm"
               onClick={() => setNewVersionModalOpen(true)}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium shadow-sm transition"
+              icon={<span className="text-base font-bold">+</span>}
             >
-              ➕ New Version
-            </button>
+              New Version
+            </ClayButton>
           )}
         </div>
       </div>
@@ -262,85 +268,92 @@ export const RateManagementModule: React.FC = () => {
       {/* Main Grid: Rate Charts on Left, Simulator on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: Charts Selection */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">
-              Configured Rate Charts
+        <div className="lg:col-span-2 space-y-5">
+          <div className="clay-surface p-5 sm:p-6">
+            <h2 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3.5 flex items-center gap-2">
+              <span>🏷️</span>
+              <span>Configured Rate Charts</span>
             </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
               {loading ? (
-                <div className="p-4 text-center text-gray-500">Loading rate charts...</div>
+                <div className="p-8 text-center text-slate-400 font-bold text-xs">Loading rate charts...</div>
               ) : charts.length === 0 ? (
-                <div className="p-4 text-center text-gray-500">No rate charts configured.</div>
+                <div className="p-8 text-center text-slate-400 font-bold text-xs">No rate charts configured.</div>
               ) : (
-                charts.map((c) => (
-                  <div
-                    key={c.id}
-                    onClick={() => setSelectedChart(c)}
-                    className={`p-4 rounded-xl border-2 cursor-pointer transition ${
-                      selectedChart?.id === c.id
-                        ? 'border-emerald-600 bg-emerald-50/40 shadow-sm'
-                        : 'border-gray-200 hover:border-gray-300 bg-white'
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="font-bold text-gray-900">{c.name}</span>
-                      <StatusBadge status={c.milkCategory} />
-                    </div>
-                    <div className="text-xs text-gray-500 font-mono space-y-1">
-                      <div>Code: {c.code}</div>
-                      <div>Formula: {c.pricingFormula}</div>
-                      <div>
-                        FAT: {c.minFat}%–{c.maxFat}% (Step {c.fatStep}) | SNF: {c.minSnf}%–{c.maxSnf}%
+                charts.map((c) => {
+                  const isSelected = selectedChart?.id === c.id;
+                  return (
+                    <div
+                      key={c.id}
+                      onClick={() => setSelectedChart(c)}
+                      className={`p-4 rounded-2xl border transition-all duration-200 cursor-pointer select-none ${
+                        isSelected
+                          ? 'bg-[#E6F4FA] border-[#23759B]/60 shadow-[0_6px_16px_rgba(0,80,110,0.12),inset_0_1.5px_2px_rgba(255,255,255,0.95)] transform -translate-y-0.5'
+                          : 'bg-[#F8FAFC] border-slate-200/80 hover:bg-white hover:border-slate-300 shadow-[0_2px_5px_rgba(0,0,0,0.03)]'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="font-black text-slate-900 text-sm">{c.name}</span>
+                        <StatusBadge status={c.milkCategory} />
+                      </div>
+                      <div className="text-xs text-slate-500 font-mono space-y-1">
+                        <div>Code: <span className="font-bold text-slate-700">{c.code}</span></div>
+                        <div>Formula: <span className="font-semibold text-slate-700">{c.pricingFormula}</span></div>
+                        <div className="text-[11px] text-slate-600">
+                          FAT: {c.minFat}%–{c.maxFat}% (Step {c.fatStep}) &bull; SNF: {c.minSnf}%–{c.maxSnf}%
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
 
           {/* Version History Table for Selected Chart */}
           {selectedChart && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50">
-                <h3 className="font-semibold text-gray-800 text-sm">
-                  Version History — {selectedChart.name}
-                </h3>
-                <span className="text-xs text-gray-500">
+            <div className="clay-surface overflow-hidden">
+              <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 bg-gradient-to-r from-slate-50/70 to-white">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">📜</span>
+                  <h3 className="font-black text-slate-800 text-sm tracking-tight">
+                    Version History — {selectedChart.name}
+                  </h3>
+                </div>
+                <span className="text-[11px] font-bold text-slate-400">
                   Published versions are immutable snapshots
                 </span>
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm text-gray-600">
-                  <thead className="bg-gray-100 text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                <table className="w-full text-left text-xs sm:text-sm text-slate-600">
+                  <thead className="bg-[#F8FAFC] text-[11px] font-black text-slate-500 uppercase tracking-wider">
                     <tr>
-                      <th className="px-4 py-3">Version</th>
-                      <th className="px-4 py-3">Effective Date</th>
-                      <th className="px-4 py-3">Base Rate</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3 text-center">Matrix</th>
-                      <th className="px-4 py-3 text-right">Actions</th>
+                      <th className="px-4 py-3.5">Version</th>
+                      <th className="px-4 py-3.5">Effective Date</th>
+                      <th className="px-4 py-3.5">Base Rate</th>
+                      <th className="px-4 py-3.5">Status</th>
+                      <th className="px-4 py-3.5 text-center">Matrix</th>
+                      <th className="px-4 py-3.5 text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-200">
+                  <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
                     {versions.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-6 text-center text-gray-500">
+                        <td colSpan={6} className="px-4 py-8 text-center text-slate-400 font-bold">
                           No versions recorded for this chart.
                         </td>
                       </tr>
                     ) : (
                       versions.map((v) => (
-                        <tr key={v.id} className="hover:bg-gray-50 transition">
-                          <td className="px-4 py-3 font-semibold text-gray-900">
+                        <tr key={v.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="px-4 py-3 font-black text-slate-900">
                             v{v.versionNumber}
                           </td>
-                          <td className="px-4 py-3 font-mono text-xs">
+                          <td className="px-4 py-3 font-mono text-xs font-bold text-slate-600">
                             {new Date(v.effectiveFrom).toLocaleDateString()}
                           </td>
-                          <td className="px-4 py-3 font-mono font-medium text-gray-800">
+                          <td className="px-4 py-3 font-mono font-black text-slate-900">
                             ₹{Number(v.baseRatePerUnit).toFixed(2)}/L
                           </td>
                           <td className="px-4 py-3">
@@ -349,7 +362,7 @@ export const RateManagementModule: React.FC = () => {
                           <td className="px-4 py-3 text-center">
                             <button
                               onClick={() => handleOpenMatrix(v)}
-                              className="px-2.5 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded font-medium transition"
+                              className="px-3 py-1 text-xs bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200/90 rounded-xl font-bold shadow-sm transition active:translate-y-0.5"
                             >
                               📊 {v.status === 'DRAFT' ? 'Edit Matrix' : 'View Matrix'}
                             </button>
@@ -359,7 +372,7 @@ export const RateManagementModule: React.FC = () => {
                               {v.status === 'DRAFT' && canEditRates && (
                                 <button
                                   onClick={() => handleSubmitVersion(v)}
-                                  className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded text-xs font-medium transition"
+                                  className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold shadow-sm transition active:translate-y-0.5"
                                 >
                                   Submit
                                 </button>
@@ -367,7 +380,7 @@ export const RateManagementModule: React.FC = () => {
                               {v.status === 'SUBMITTED' && isOwnerOrAdmin && (
                                 <button
                                   onClick={() => handleApproveVersion(v)}
-                                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium transition"
+                                  className="px-2.5 py-1 bg-[#00506E] hover:bg-[#003B52] text-white rounded-lg text-xs font-bold shadow-sm transition active:translate-y-0.5"
                                 >
                                   Approve
                                 </button>
@@ -375,7 +388,7 @@ export const RateManagementModule: React.FC = () => {
                               {v.status === 'APPROVED' && isOwnerOrAdmin && (
                                 <button
                                   onClick={() => handlePublishVersion(v)}
-                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium shadow-sm transition"
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-sm transition active:translate-y-0.5"
                                 >
                                   🚀 Publish
                                 </button>
@@ -394,74 +407,78 @@ export const RateManagementModule: React.FC = () => {
 
         {/* Right Column: Rate Preview & Simulation Sandbox */}
         <div className="space-y-4">
-          <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-200">
-            <h2 className="text-sm font-semibold text-gray-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              🔬 Rate Preview Calculator
+          <div className="clay-surface p-5 sm:p-6">
+            <h2 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-1.5 flex items-center gap-2">
+              <span>🔬</span>
+              <span>Rate Preview Calculator</span>
             </h2>
-            <p className="text-xs text-gray-500 mb-4">
+            <p className="text-xs text-slate-500 font-medium mb-4">
               Simulate collection calculation using the backend's active pricing engine.
             </p>
 
-            <div className="space-y-3">
+            <div className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Target Milk Category</label>
-                <div className="text-xs font-bold text-gray-800 bg-gray-50 p-2 rounded border border-gray-200">
+                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">Target Milk Category</label>
+                <div className="text-xs font-bold text-slate-800 bg-[#EDF2F7] p-2.5 rounded-xl border border-slate-200/90 shadow-[inset_1.5px_1.5px_3px_rgba(15,23,42,0.05)]">
                   {selectedChart ? `${selectedChart.name} (${selectedChart.milkCategory})` : 'Select a chart first'}
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">FAT Percentage (%)</label>
+                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">FAT Percentage (%)</label>
                 <input
                   type="number"
                   step="0.1"
                   value={simFat}
                   onChange={(e) => setSimFat(parseFloat(e.target.value) || 0)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  className="w-full px-3 py-2 bg-[#EDF2F7] border border-slate-200/90 rounded-xl text-xs font-bold text-slate-800 shadow-[inset_1.5px_1.5px_3px_rgba(15,23,42,0.05)] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00506E]"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">SNF Percentage (%)</label>
+                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">SNF Percentage (%)</label>
                 <input
                   type="number"
                   step="0.1"
                   value={simSnf}
                   onChange={(e) => setSimSnf(parseFloat(e.target.value) || 0)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  className="w-full px-3 py-2 bg-[#EDF2F7] border border-slate-200/90 rounded-xl text-xs font-bold text-slate-800 shadow-[inset_1.5px_1.5px_3px_rgba(15,23,42,0.05)] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00506E]"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Milk Quantity (Kg/L)</label>
+                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">Milk Quantity (Kg/L)</label>
                 <input
                   type="number"
                   step="0.1"
                   value={simWeight}
                   onChange={(e) => setSimWeight(parseFloat(e.target.value) || 0)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  className="w-full px-3 py-2 bg-[#EDF2F7] border border-slate-200/90 rounded-xl text-xs font-bold text-slate-800 shadow-[inset_1.5px_1.5px_3px_rgba(15,23,42,0.05)] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00506E]"
                 />
               </div>
 
-              <button
+              <ClayButton
+                variant="brand"
+                size="md"
+                className="w-full mt-2"
                 onClick={handleRunSimulation}
                 disabled={!selectedChart || calculatingSim}
-                className="w-full mt-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-50"
+                isLoading={calculatingSim}
               >
-                {calculatingSim ? 'Calculating...' : 'Run Simulation'}
-              </button>
+                Run Simulation
+              </ClayButton>
 
               {simResult && (
-                <div className="mt-4 p-4 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2 animate-fadeIn">
-                  <div className="flex justify-between items-center text-xs text-gray-600">
-                    <span>Applicable Unit Rate:</span>
-                    <span className="font-bold text-base text-gray-900 font-mono">
+                <div className="mt-4 p-4 rounded-2xl bg-gradient-to-br from-[#F2FBF6] to-white border border-emerald-200/90 space-y-2 shadow-[inset_1px_1px_2px_rgba(255,255,255,0.9)] animate-fadeIn">
+                  <div className="flex justify-between items-center text-xs text-slate-600">
+                    <span className="font-bold">Applicable Unit Rate:</span>
+                    <span className="font-black text-base text-slate-900 font-mono">
                       ₹{simResult.rate.toFixed(2)}/L
                     </span>
                   </div>
-                  <div className="flex justify-between items-center text-xs text-gray-600 pt-1 border-t border-emerald-200">
-                    <span>Total Milk Value:</span>
-                    <span className="font-bold text-lg text-emerald-800 font-mono">
+                  <div className="flex justify-between items-center text-xs text-slate-600 pt-1.5 border-t border-emerald-200/60">
+                    <span className="font-bold">Total Milk Value:</span>
+                    <span className="font-black text-lg text-[#137333] font-mono">
                       ₹{simResult.totalAmount.toFixed(2)}
                     </span>
                   </div>
@@ -479,79 +496,80 @@ export const RateManagementModule: React.FC = () => {
         title={`Rate Matrix Editor — ${selectedChart?.name} (v${selectedVersion?.versionNumber} - ${selectedVersion?.status})`}
         maxWidth="5xl"
       >
-        <div className="space-y-4">
+        <div className="space-y-4 text-xs">
           {selectedVersion?.status !== 'DRAFT' && (
-            <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs p-3 rounded-lg">
-              <strong>Read-Only Mode:</strong> This version is {selectedVersion?.status}. Historical finalized rates cannot be altered. Create a new draft version to modify pricing.
+            <div className="bg-[#FFFDF5] border border-amber-200/90 text-amber-900 text-xs p-4 rounded-2xl shadow-sm">
+              <strong className="font-black">Read-Only Mode:</strong> This version is {selectedVersion?.status}. Historical finalized rates cannot be altered. Create a new draft version to modify pricing.
             </div>
           )}
 
           {selectedVersion?.status === 'DRAFT' && (
-            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg flex flex-wrap items-center gap-3 text-xs">
-              <span className="font-semibold text-gray-700">Quick Generator:</span>
-              <div className="flex items-center gap-1">
-                <span>Base ₹:</span>
+            <div className="p-4 bg-[#F8FAFC] border border-slate-200/80 rounded-2xl flex flex-wrap items-center gap-3 text-xs">
+              <span className="font-black text-slate-700">Quick Generator:</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-600">Base ₹:</span>
                 <input
                   type="number"
                   step="0.5"
                   value={bulkBaseRate}
                   onChange={(e) => setBulkBaseRate(parseFloat(e.target.value) || 0)}
-                  className="w-20 px-2 py-1 border rounded text-xs"
+                  className="w-20 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold"
                 />
               </div>
-              <div className="flex items-center gap-1">
-                <span>+₹/0.1 Fat:</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-600">+₹/0.1 Fat:</span>
                 <input
                   type="number"
                   step="0.1"
                   value={fatDelta}
                   onChange={(e) => setFatDelta(parseFloat(e.target.value) || 0)}
-                  className="w-16 px-2 py-1 border rounded text-xs"
+                  className="w-16 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold"
                 />
               </div>
-              <div className="flex items-center gap-1">
-                <span>+₹/0.1 SNF:</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-600">+₹/0.1 SNF:</span>
                 <input
                   type="number"
                   step="0.1"
                   value={snfDelta}
                   onChange={(e) => setSnfDelta(parseFloat(e.target.value) || 0)}
-                  className="w-16 px-2 py-1 border rounded text-xs"
+                  className="w-16 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold"
                 />
               </div>
-              <button
+              <ClayButton
+                variant="brand"
+                size="sm"
                 onClick={handleGenerateMatrix}
-                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-medium transition"
               >
                 Populate Grid
-              </button>
+              </ClayButton>
             </div>
           )}
 
           {/* Matrix Grid Table */}
-          <div className="overflow-x-auto max-h-[500px] border border-gray-200 rounded-lg shadow-inner">
+          <div className="overflow-x-auto max-h-[500px] border border-slate-200/80 rounded-2xl shadow-inner">
             <table className="w-full text-center text-xs font-mono">
-              <thead className="bg-gray-100 sticky top-0 border-b border-gray-200">
+              <thead className="bg-[#F8FAFC] sticky top-0 border-b border-slate-200/90 font-black">
                 <tr>
-                  <th className="p-2 border-r bg-gray-200 font-bold text-gray-800">FAT \ SNF</th>
+                  <th className="p-2.5 border-r bg-slate-200/70 font-black text-slate-800">FAT \ SNF</th>
                   {matrixGrid.snfCols.map(s => (
-                    <th key={s} className="p-2 border-r text-gray-700 font-semibold min-w-[50px]">
+                    <th key={s} className="p-2.5 border-r text-slate-700 font-bold min-w-[55px]">
                       {s.toFixed(1)}%
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-slate-100 font-semibold">
                 {matrixGrid.fatRows.length === 0 ? (
                   <tr>
-                    <td colSpan={matrixGrid.snfCols.length + 1} className="p-8 text-center text-gray-500 font-sans">
+                    <td colSpan={matrixGrid.snfCols.length + 1} className="p-8 text-center text-slate-400 font-sans">
                       Matrix is empty. Use the generator above or configure cells to initialize.
                     </td>
                   </tr>
                 ) : (
                   matrixGrid.fatRows.map(f => (
-                    <tr key={f} className="hover:bg-gray-50">
-                      <td className="p-2 border-r bg-gray-100 font-bold text-gray-800">
+                    <tr key={f} className="hover:bg-slate-50">
+                      <td className="p-2.5 border-r bg-slate-100/80 font-black text-slate-900">
                         {f.toFixed(1)}%
                       </td>
                       {matrixGrid.snfCols.map(s => {
@@ -570,10 +588,10 @@ export const RateManagementModule: React.FC = () => {
                                   updated.push({ fat: f, snf: s, ratePerUnit: newVal });
                                   setMatrixCells(updated);
                                 }}
-                                className="w-14 text-center px-1 py-0.5 border border-gray-300 rounded text-xs focus:ring-1 focus:ring-emerald-500"
+                                className="w-14 text-center px-1 py-1 bg-[#EDF2F7] border border-slate-200 rounded-lg text-xs font-bold focus:bg-white focus:ring-1 focus:ring-[#00506E]"
                               />
                             ) : (
-                              <span className="text-gray-900 font-medium">₹{val.toFixed(2)}</span>
+                              <span className="text-slate-900 font-bold">₹{val.toFixed(2)}</span>
                             )}
                           </td>
                         );
@@ -585,21 +603,24 @@ export const RateManagementModule: React.FC = () => {
             </table>
           </div>
 
-          <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
-            <button
+          <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+            <ClayButton
+              variant="secondary"
+              size="sm"
               onClick={() => setMatrixModalOpen(false)}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition"
             >
               Close
-            </button>
+            </ClayButton>
             {selectedVersion?.status === 'DRAFT' && (
-              <button
+              <ClayButton
+                variant="brand"
+                size="sm"
                 onClick={handleSaveMatrix}
                 disabled={savingMatrix}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium shadow-sm transition disabled:opacity-50"
+                isLoading={savingMatrix}
               >
-                {savingMatrix ? 'Saving...' : 'Save Matrix Cells'}
-              </button>
+                Save Matrix Cells
+              </ClayButton>
             )}
           </div>
         </div>
@@ -612,36 +633,36 @@ export const RateManagementModule: React.FC = () => {
         title={`Create New Rate Version — ${selectedChart?.name}`}
         maxWidth="md"
       >
-        <form onSubmit={handleCreateVersion} className="space-y-4">
+        <form onSubmit={handleCreateVersion} className="space-y-4 text-xs">
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Effective From Date</label>
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-700 mb-1">Effective From Date</label>
             <input
               type="date"
               value={newVersionForm.effectiveFrom}
               onChange={(e) => setNewVersionForm({ ...newVersionForm, effectiveFrom: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              className="w-full px-3 py-2 bg-[#EDF2F7] border border-slate-200/90 rounded-xl text-xs font-bold text-slate-800 shadow-[inset_1.5px_1.5px_3px_rgba(15,23,42,0.05)] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00506E]"
               required
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Base Rate (₹/Liter)</label>
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-700 mb-1">Base Rate (₹/Liter)</label>
             <input
               type="number"
               step="0.5"
               value={newVersionForm.baseRatePerUnit}
               onChange={(e) => setNewVersionForm({ ...newVersionForm, baseRatePerUnit: parseFloat(e.target.value) || 0 })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              className="w-full px-3 py-2 bg-[#EDF2F7] border border-slate-200/90 rounded-xl text-xs font-bold text-slate-800 shadow-[inset_1.5px_1.5px_3px_rgba(15,23,42,0.05)] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00506E]"
               required
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Pricing Model</label>
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-700 mb-1">Pricing Model</label>
             <select
               value={newVersionForm.pricingModel}
               onChange={(e) => setNewVersionForm({ ...newVersionForm, pricingModel: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+              className="w-full px-3 py-2 bg-[#EDF2F7] border border-slate-200/90 rounded-xl text-xs font-bold text-slate-800 shadow-[inset_1.5px_1.5px_3px_rgba(15,23,42,0.05)] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#00506E] cursor-pointer"
             >
               <option value="FAT_SNF_MATRIX">FAT × SNF Matrix</option>
               <option value="TS_FORMULA">Total Solids (TS) Formula</option>
@@ -649,20 +670,22 @@ export const RateManagementModule: React.FC = () => {
             </select>
           </div>
 
-          <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
-            <button
+          <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+            <ClayButton
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={() => setNewVersionModalOpen(false)}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition"
             >
               Cancel
-            </button>
-            <button
+            </ClayButton>
+            <ClayButton
               type="submit"
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium shadow-sm transition"
+              variant="brand"
+              size="sm"
             >
               Create Draft Version
-            </button>
+            </ClayButton>
           </div>
         </form>
       </Modal>

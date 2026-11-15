@@ -6,13 +6,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
 } from 'react-native';
 import { CollectionRepository } from '../domain/repository/CollectionRepository';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
-import { Card } from '../components/common/Card';
-import { Input } from '../components/common/Input';
-import { Button } from '../components/common/Button';
+import { ClayCard } from '../components/clay/ClayCard';
+import { ClayInput } from '../components/clay/ClayInput';
+import { ClayButton } from '../components/clay/ClayButton';
+import { ClayAlert } from '../components/clay/ClayAlert';
+import { ClayImages } from '../theme/assets';
 
 interface LoginScreenProps {
   repository: CollectionRepository;
@@ -58,24 +61,49 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={[typography.headlineLarge, { color: colors.primaryLight, textAlign: 'center' }]}>
-          DFARM INTAKE COUNTER
-        </Text>
-        <Text style={[typography.bodyMedium, { textAlign: 'center', marginTop: 4, marginBottom: 32 }]}>
-          Dairy Milk Collection Terminal
-        </Text>
+        {/* Claymorphic 3D Terminal Hero */}
+        <View style={styles.heroSection}>
+          <View style={styles.imageCircle}>
+            <Image
+              source={ClayImages.onboarding}
+              style={styles.heroImage}
+              resizeMode="cover"
+            />
+          </View>
+          <Text style={[typography.headlineLarge, styles.appTitle]}>
+            DFARM INTAKE COUNTER
+          </Text>
+          <Text style={[typography.bodyMedium, styles.appSubtitle]}>
+            Dairy Milk Collection &amp; Weighing Terminal
+          </Text>
+        </View>
 
-        <Card style={styles.card} backgroundColor={colors.surfaceDark}>
-          <Text style={typography.titleLarge}>Operator Authentication</Text>
+        {/* 3D Clay Authentication Card */}
+        <ClayCard variant="elevated" style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={typography.titleLarge}>Operator Authentication</Text>
+            <View style={styles.statusPill}>
+              <View style={styles.statusDot} />
+              <Text style={styles.statusPillText}>TERMINAL ACTIVE</Text>
+            </View>
+          </View>
+
+          <Text style={styles.cardSubtitle}>
+            Sign in with center credentials to initiate intake sessions
+          </Text>
+
           <View style={{ height: 16 }} />
 
           {errorMessage && (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{errorMessage}</Text>
-            </View>
+            <ClayAlert
+              type="error"
+              title="Authentication Error"
+              message={errorMessage}
+              onDismiss={() => setErrorMessage(null)}
+            />
           )}
 
-          <Input
+          <ClayInput
             label="Operator Email or Username"
             value={username}
             onChangeText={(t) => {
@@ -86,9 +114,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             keyboardType="email-address"
           />
 
-          <View style={{ height: 12 }} />
+          <View style={{ height: 10 }} />
 
-          <Input
+          <ClayInput
             label="Password"
             value={password}
             onChangeText={(t) => {
@@ -101,15 +129,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
           <View style={{ height: 24 }} />
 
-          <Button
+          <ClayButton
             title="START COUNTER SESSION"
             onPress={handleLogin}
             isLoading={isLoading}
             variant="primary"
-            style={{ height: 50 }}
-            textStyle={{ fontSize: 16, fontWeight: 'bold' }}
+            size="lg"
           />
-        </Card>
+
+          <View style={styles.securityNotice}>
+            <Text style={styles.securityNoticeText}>
+              🛡️ Session encrypted via Android Keystore • Offline-First Journal Protected
+            </Text>
+          </View>
+        </ClayCard>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -118,30 +151,95 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundDark,
+    backgroundColor: colors.clayBgDark,
   },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 32,
+    padding: 24,
+  },
+  heroSection: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  imageCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    overflow: 'hidden',
+    borderTopWidth: 2,
+    borderLeftWidth: 2,
+    borderBottomWidth: 3,
+    borderRightWidth: 2,
+    borderTopColor: 'rgba(255, 255, 255, 0.4)',
+    borderLeftColor: 'rgba(255, 255, 255, 0.2)',
+    borderBottomColor: '#0E3711',
+    borderRightColor: '#0E3711',
+    marginBottom: 16,
+  },
+  heroImage: {
+    width: '100%',
+    height: '100%',
+  },
+  appTitle: {
+    color: colors.clayGreenLight,
+    textAlign: 'center',
+    letterSpacing: 0.5,
+  },
+  appSubtitle: {
+    textAlign: 'center',
+    marginTop: 4,
+    color: colors.textSecondary,
   },
   card: {
     width: '100%',
-    maxWidth: 450,
+    maxWidth: 480,
     padding: 24,
   },
-  errorBox: {
-    backgroundColor: 'rgba(229, 57, 53, 0.15)',
-    borderColor: colors.statusError,
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  errorText: {
-    color: colors.statusError,
+  cardSubtitle: {
     fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 4,
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.15)',
+    borderColor: 'rgba(76, 175, 80, 0.4)',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    gap: 6,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.clayGreenLight,
+  },
+  statusPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.clayGreenLight,
+    letterSpacing: 0.5,
+  },
+  securityNotice: {
+    marginTop: 18,
+    alignItems: 'center',
+  },
+  securityNoticeText: {
+    fontSize: 11,
+    color: colors.textSecondary,
     textAlign: 'center',
+    lineHeight: 16,
   },
 });

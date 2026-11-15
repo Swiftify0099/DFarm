@@ -3,8 +3,9 @@ import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Customer, IdentificationMethod } from '../types';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
-import { Card } from '../components/common/Card';
-import { Button } from '../components/common/Button';
+import { ClayCard } from '../components/clay/ClayCard';
+import { ClayButton } from '../components/clay/ClayButton';
+import { ClayCustomerCard } from '../components/clay/ClayCustomerCard';
 
 interface CustomerInfoScreenProps {
   customer: Customer;
@@ -24,59 +25,50 @@ export const CustomerInfoScreen: React.FC<CustomerInfoScreenProps> = ({
       <Text style={[typography.headlineMedium, { textAlign: 'center' }]}>
         VERIFIED CUSTOMER DETAILS
       </Text>
-      <View style={{ height: 24 }} />
+      <Text style={[typography.bodyMedium, { textAlign: 'center', marginTop: 4, marginBottom: 20 }]}>
+        Confirm farmer identity before recording weights &amp; quality measurements
+      </Text>
 
-      <Card style={styles.card} backgroundColor={colors.surfaceDark}>
-        <Text style={[typography.titleLarge, { color: colors.accentAmber }]}>
-          Farmer Code: {customer.farmerCode}
-        </Text>
-        <Text style={[typography.headlineMedium, { marginTop: 4 }]}>
-          Customer: {customer.fullName}
-        </Text>
-        {customer.mobileNumber ? (
-          <Text style={[typography.bodyMedium, { color: colors.textSecondary, marginTop: 4 }]}>
-            Mobile: {customer.mobileNumber}
+      <View style={styles.cardWrapper}>
+        {/* Clay Customer Card with Verified Identity */}
+        <ClayCustomerCard customer={customer} method={method} />
+
+        <View style={{ height: 16 }} />
+
+        {/* Verification Check & Next Steps Card */}
+        <ClayCard variant="subtle" style={styles.guidanceCard}>
+          <Text style={styles.guidanceTitle}>OPERATIONAL CHECKLIST:</Text>
+          <Text style={styles.guidanceItem}>
+            ✓ Verified Farmer Code: <Text style={styles.guidanceHighlight}>{customer.farmerCode}</Text>
           </Text>
-        ) : null}
-
-        <View style={styles.divider} />
-
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>Auth Method:</Text>
-          <Text style={styles.value}>{method}</Text>
-        </View>
-
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>Account Status:</Text>
-          <Text style={[styles.value, { color: colors.statusValid }]}>
-            {customer.status}
+          <Text style={styles.guidanceItem}>
+            ✓ Authorized Milk Categories: <Text style={styles.guidanceHighlight}>{customer.permittedCategories.join(', ')}</Text>
           </Text>
-        </View>
-
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>Authorized Milk:</Text>
-          <Text style={[styles.value, { color: colors.primaryLight }]}>
-            {customer.permittedCategories.join(', ')}
+          <Text style={styles.guidanceItem}>
+            ✓ Subledger Account Active &bull; Ready for intake weight recording
           </Text>
-        </View>
+        </ClayCard>
 
         <View style={{ height: 24 }} />
 
+        {/* Action Buttons Row */}
         <View style={styles.buttonsRow}>
-          <Button
+          <ClayButton
             title="NOT THIS FARMER"
             onPress={onReject}
             variant="outline"
             style={{ flex: 1 }}
+            size="lg"
           />
-          <Button
-            title="PROCEED"
+          <ClayButton
+            title="PROCEED &rarr;"
             onPress={onProceed}
             variant="primary"
             style={{ flex: 1 }}
+            size="lg"
           />
         </View>
-      </Card>
+      </View>
     </ScrollView>
   );
 };
@@ -84,7 +76,7 @@ export const CustomerInfoScreen: React.FC<CustomerInfoScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundDark,
+    backgroundColor: colors.clayBgDark,
   },
   content: {
     padding: 24,
@@ -92,30 +84,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexGrow: 1,
   },
-  card: {
+  cardWrapper: {
     width: '100%',
-    maxWidth: 550,
-    padding: 24,
+    maxWidth: 540,
   },
-  divider: {
-    height: 1,
-    backgroundColor: colors.cardBackground,
-    marginVertical: 16,
+  guidanceCard: {
+    padding: 16,
+    gap: 6,
   },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 6,
-  },
-  label: {
-    fontSize: 14,
+  guidanceTitle: {
+    fontSize: 11,
+    fontWeight: '800',
     color: colors.textSecondary,
+    letterSpacing: 0.5,
+    marginBottom: 4,
   },
-  value: {
-    fontSize: 15,
-    fontWeight: 'bold',
+  guidanceItem: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  guidanceHighlight: {
     color: colors.textPrimary,
+    fontWeight: '700',
   },
   buttonsRow: {
     flexDirection: 'row',

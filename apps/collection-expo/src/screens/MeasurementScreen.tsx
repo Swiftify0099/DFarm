@@ -4,9 +4,12 @@ import { CollectionRepository } from '../domain/repository/CollectionRepository'
 import { Customer, MilkCategory, RateCalculationResult } from '../types';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
-import { Card } from '../components/common/Card';
-import { Input } from '../components/common/Input';
-import { Button } from '../components/common/Button';
+import { ClayCard } from '../components/clay/ClayCard';
+import { ClayInput } from '../components/clay/ClayInput';
+import { ClayButton } from '../components/clay/ClayButton';
+import { ClayAlert } from '../components/clay/ClayAlert';
+import { ClayCategoryBadge } from '../components/clay/ClayCategoryBadge';
+import { ClayDeviceBadge } from '../components/clay/ClayDeviceBadge';
 
 interface MeasurementScreenProps {
   customer: Customer;
@@ -39,6 +42,15 @@ export const MeasurementScreen: React.FC<MeasurementScreenProps> = ({
   const [snfText, setSnfText] = useState(isCow ? '8.5' : '9.0');
   const [isLoading, setIsLoading] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Dynamic range check for live operator guidance
+  const parsedWeight = parseFloat(weightText);
+  const parsedFat = parseFloat(fatText);
+  const parsedSnf = parseFloat(snfText);
+
+  const isWeightValid = !isNaN(parsedWeight) && parsedWeight > 0 && parsedWeight <= 500.0;
+  const isFatValid = !isNaN(parsedFat) && parsedFat >= minFat && parsedFat <= maxFat;
+  const isSnfValid = !isNaN(parsedSnf) && parsedSnf >= minSnf && parsedSnf <= maxSnf;
 
   const handleValidateAndReview = async () => {
     const w = parseFloat(weightText);
@@ -80,29 +92,94 @@ export const MeasurementScreen: React.FC<MeasurementScreenProps> = ({
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={[typography.headlineMedium, { textAlign: 'center' }]}>
-        RECORD MEASUREMENTS: {category} MILK
-      </Text>
-      <Text style={[typography.bodyMedium, { textAlign: 'center', marginTop: 4, marginBottom: 16 }]}>
-        Customer: {customer.fullName} ({customer.farmerCode})
-      </Text>
+      {/* Screen Header */}
+      <View style={styles.headerRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={typography.headlineMedium}>
+            RECORD MEASUREMENTS
+          </Text>
+          <Text style={[typography.bodyMedium, { marginTop: 2 }]}>
+            Farmer: <Text style={styles.customerHighlight}>{customer.fullName}</Text> ({customer.farmerCode})
+          </Text>
+        </View>
 
-      {/* Biological Bounds Banner */}
-      <View style={styles.boundsBanner}>
-        <Text style={styles.boundsText}>
-          Biological Bounds for {category}: Fat: {minFat} - {maxFat}% | SNF: {minSnf} - {maxSnf}% | Canonical Unit: KG
-        </Text>
+        <ClayCategoryBadge category={category} size="lg" />
       </View>
 
-      {validationError && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{validationError}</Text>
+      <View style={{ height: 16 }} />
+
+      {/* Hardware Connection Ribbon */}
+      <View style={styles.hardwareBar}>
+        <ClayDeviceBadge
+          deviceType="SCALE"
+          state="MANUAL_ENTRY"
+          customLabel="SCALE: MANUAL (USB OTG DISCONNECTED)"
+        />
+        <ClayDeviceBadge
+          deviceType="ANALYZER"
+          state="MANUAL_ENTRY"
+          customLabel="ANALYZER: MANUAL ENTRY"
+        />
+      </View>
+
+      <View style={{ height: 16 }} />
+
+      {/* Biological Bounds Banner Card */}
+      <ClayCard variant="subtle" style={styles.boundsCard}>
+        <View style={styles.boundsHeader}>
+          <Text style={styles.boundsTitle}>
+            BIOLOGICAL LIMITS &bull; {category} MILK
+          </Text>
+          <Text style={styles.canonicalUnitBadge}>CANONICAL UNIT: KG</Text>
         </View>
+
+        <View style={styles.boundsStatsRow}>
+          <View style={styles.boundItem}>
+            <Text style={styles.boundLabel}>Fat Range</Text>
+            <Text style={[styles.boundValue, !isFatValid && styles.boundValueInvalid]}>
+              {minFat}% - {maxFat}%
+            </Text>
+          </View>
+          <View style={styles.boundDivider} />
+          <View style={styles.boundItem}>
+            <Text style={styles.boundLabel}>SNF Range</Text>
+            <Text style={[styles.boundValue, !isSnfValid && styles.boundValueInvalid]}>
+              {minSnf}% - {maxSnf}%
+            </Text>
+          </View>
+          <View style={styles.boundDivider} />
+          <View style={styles.boundItem}>
+            <Text style={styles.boundLabel}>Max Single Intake</Text>
+            <Text style={styles.boundValue}>500.00 KG</Text>
+          </View>
+        </View>
+      </ClayCard>
+
+      <View style={{ height: 16 }} />
+
+      {validationError && (
+        <ClayAlert
+          type="error"
+          title="Measurement Error"
+          message={validationError}
+          onDismiss={() => setValidationError(null)}
+          style={{ maxWidth: 540 }}
+        />
       )}
 
       {/* Measurement Input Card */}
-      <Card style={styles.card} backgroundColor={colors.surfaceDark}>
-        <Input
+      <ClayCard variant="elevated" style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Text style={typography.titleLarge}>Intake Readings</Text>
+          <Text style={styles.liveReadout}>
+            {isWeightValid ? `${parsedWeight.toFixed(2)} KG` : '-- KG'}
+          </Text>
+        </View>
+
+        <View style={{ height: 16 }} />
+
+        {/* Net Weight Field */}
+        <ClayInput
           label="Net Weight (KG)"
           value={weightText}
           onChangeText={(t) => {
@@ -111,11 +188,14 @@ export const MeasurementScreen: React.FC<MeasurementScreenProps> = ({
           }}
           placeholder="0.00"
           keyboardType="decimal-pad"
+          unitLabel="KG"
+          helperText="Canonical net weight = Gross minus Tare container"
         />
 
-        <View style={{ height: 12 }} />
+        <View style={{ height: 10 }} />
 
-        <Input
+        {/* Fat Percentage Field */}
+        <ClayInput
           label="Fat Percentage (%)"
           value={fatText}
           onChangeText={(t) => {
@@ -124,11 +204,14 @@ export const MeasurementScreen: React.FC<MeasurementScreenProps> = ({
           }}
           placeholder="0.0"
           keyboardType="decimal-pad"
+          unitLabel="FAT %"
+          helperText={`Approved bounds for ${category}: ${minFat}% - ${maxFat}%`}
         />
 
-        <View style={{ height: 12 }} />
+        <View style={{ height: 10 }} />
 
-        <Input
+        {/* SNF Percentage Field */}
+        <ClayInput
           label="SNF Percentage (%)"
           value={snfText}
           onChangeText={(t) => {
@@ -137,26 +220,31 @@ export const MeasurementScreen: React.FC<MeasurementScreenProps> = ({
           }}
           placeholder="0.0"
           keyboardType="decimal-pad"
+          unitLabel="SNF %"
+          helperText={`Approved bounds for ${category}: ${minSnf}% - ${maxSnf}%`}
         />
 
         <View style={{ height: 24 }} />
 
+        {/* Action Buttons Row */}
         <View style={styles.buttonsRow}>
-          <Button
+          <ClayButton
             title="CANCEL"
             onPress={onCancel}
             variant="outline"
             style={{ flex: 1 }}
+            size="lg"
           />
-          <Button
-            title="VALIDATE & REVIEW"
+          <ClayButton
+            title="VALIDATE & REVIEW &rarr;"
             onPress={handleValidateAndReview}
             isLoading={isLoading}
             variant="primary"
             style={{ flex: 1 }}
+            size="lg"
           />
         </View>
-      </Card>
+      </ClayCard>
     </ScrollView>
   );
 };
@@ -164,7 +252,7 @@ export const MeasurementScreen: React.FC<MeasurementScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundDark,
+    backgroundColor: colors.clayBgDark,
   },
   content: {
     padding: 24,
@@ -172,38 +260,89 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexGrow: 1,
   },
-  boundsBanner: {
-    backgroundColor: colors.cardBackground,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     width: '100%',
-    maxWidth: 500,
+    maxWidth: 540,
+    flexWrap: 'wrap',
+    gap: 12,
   },
-  boundsText: {
+  customerHighlight: {
+    color: colors.textPrimary,
+    fontWeight: '700',
+  },
+  hardwareBar: {
+    width: '100%',
+    maxWidth: 540,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  boundsCard: {
+    width: '100%',
+    maxWidth: 540,
+    padding: 14,
+  },
+  boundsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  boundsTitle: {
     color: colors.accentAmber,
-    fontSize: 12,
-    textAlign: 'center',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
-  errorBox: {
-    backgroundColor: 'rgba(229, 57, 53, 0.15)',
-    borderColor: colors.statusError,
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    width: '100%',
-    maxWidth: 500,
-    marginBottom: 16,
+  canonicalUnitBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.clayGreenLight,
+    letterSpacing: 0.5,
   },
-  errorText: {
-    color: colors.statusError,
+  boundsStatsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+  },
+  boundItem: {
+    alignItems: 'center',
+  },
+  boundDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  boundLabel: {
+    fontSize: 11,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  boundValue: {
     fontSize: 13,
-    textAlign: 'center',
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  boundValueInvalid: {
+    color: colors.statusError,
   },
   card: {
     width: '100%',
-    maxWidth: 500,
+    maxWidth: 540,
     padding: 24,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  liveReadout: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.clayGreenLight,
   },
   buttonsRow: {
     flexDirection: 'row',

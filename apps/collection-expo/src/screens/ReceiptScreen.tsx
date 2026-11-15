@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image } from 'react-native';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
-import { Card } from '../components/common/Card';
-import { Button } from '../components/common/Button';
+import { ClayButton } from '../components/clay/ClayButton';
+import { ClayAlert } from '../components/clay/ClayAlert';
+import { ClayReceiptCard } from '../components/clay/ClayReceiptCard';
 import { BluetoothEscPosPrinterService } from '../hardware/BluetoothEscPosPrinterService';
+import { ClayImages } from '../theme/assets';
 
 interface ReceiptScreenProps {
   receiptText: string;
@@ -57,49 +59,81 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={[typography.headlineMedium, { textAlign: 'center' }]}>
-        INTAKE RECEIPT (40-COL THERMAL SLIP)
-      </Text>
-      <View style={{ height: 8 }} />
-      <Text style={[typography.bodyMedium, { textAlign: 'center', color: colors.textSecondary }]}>
-        Hardware Status: {printerStatus}
-      </Text>
+      {/* 3D Success Badge Header */}
+      <View style={styles.successHeader}>
+        <View style={styles.successImageContainer}>
+          <Image
+            source={ClayImages.collectionSuccess}
+            style={styles.successImage}
+            resizeMode="contain"
+          />
+        </View>
+        <Text style={[typography.headlineMedium, { textAlign: 'center', marginTop: 12 }]}>
+          INTAKE COMMITTED &amp; SAVED
+        </Text>
+        <Text style={[typography.bodyMedium, { textAlign: 'center', color: colors.textSecondary, marginTop: 2 }]}>
+          Ledger transaction posted &bull; 40-Column ESC/POS Thermal Slip Ready
+        </Text>
+      </View>
+
       <View style={{ height: 16 }} />
 
-      <Card style={styles.receiptCard} backgroundColor={colors.cardBackground}>
-        {reprintCount > 0 && (
-          <Text style={[typography.monospaceReceipt, { color: '#FFA000', fontWeight: 'bold' }]}>
-            *** REPRINTED {reprintCount} TIME(S) ***{'\n'}
-          </Text>
-        )}
-        <Text style={typography.monospaceReceipt}>{receiptText}</Text>
-      </Card>
+      {/* Print Success / Failure Alert */}
+      {printSuccess === true && (
+        <ClayAlert
+          type="success"
+          title="Print Dispatched"
+          message="Receipt successfully sent to 58mm/80mm Bluetooth ESC/POS thermal printer."
+          onDismiss={() => setPrintSuccess(null)}
+          style={{ maxWidth: 440 }}
+        />
+      )}
+      {printSuccess === false && (
+        <ClayAlert
+          type="error"
+          title="Thermal Printer Warning"
+          message={printerStatus}
+          onDismiss={() => setPrintSuccess(null)}
+          style={{ maxWidth: 440 }}
+        />
+      )}
 
-      <View style={{ height: 16 }} />
+      {/* Tactile Receipt Slip Card */}
+      <ClayReceiptCard
+        receiptText={receiptText}
+        reprintCount={reprintCount}
+        printerStatus={printerStatus}
+      />
+
+      <View style={{ height: 20 }} />
 
       {/* Hardware Print Controls */}
       <View style={styles.buttonGroup}>
-        <Button
+        <ClayButton
           title={isPrinting ? 'SENDING TO THERMAL PRINTER...' : 'PRINT THERMAL RECEIPT (ESC/POS)'}
           onPress={() => handlePrint(false)}
           variant="primary"
           disabled={isPrinting}
-          style={styles.actionBtn}
+          size="lg"
         />
-        <View style={{ height: 10 }} />
-        <Button
+
+        <View style={{ height: 12 }} />
+
+        <ClayButton
           title="REPRINT RECEIPT (SAFE DUPLICATE)"
           onPress={() => handlePrint(true)}
           variant="secondary"
           disabled={isPrinting}
-          style={styles.actionBtn}
+          size="md"
         />
-        <View style={{ height: 10 }} />
-        <Button
-          title="DONE (NEXT CUSTOMER)"
+
+        <View style={{ height: 12 }} />
+
+        <ClayButton
+          title="DONE (NEXT CUSTOMER) &rarr;"
           onPress={onDone}
           variant="outline"
-          style={styles.actionBtn}
+          size="lg"
         />
       </View>
     </ScrollView>
@@ -109,7 +143,7 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundDark,
+    backgroundColor: colors.clayBgDark,
   },
   content: {
     padding: 24,
@@ -117,17 +151,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexGrow: 1,
   },
-  receiptCard: {
-    width: '100%',
-    maxWidth: 420,
-    padding: 20,
+  successHeader: {
+    alignItems: 'center',
+  },
+  successImageContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(76, 175, 80, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successImage: {
+    width: 72,
+    height: 72,
   },
   buttonGroup: {
     width: '100%',
-    maxWidth: 420,
-  },
-  actionBtn: {
-    width: '100%',
-    height: 48,
+    maxWidth: 440,
   },
 });

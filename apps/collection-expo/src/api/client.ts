@@ -9,6 +9,7 @@ import {
   CreateSessionResponseDto,
   CustomerDto,
   CustomerListResponse,
+  FaceIdentificationRequest,
   IdentificationResponseDto,
   LoginResponse,
   ReceiptResponseDto,
@@ -159,6 +160,29 @@ export class CollectionApiClient {
     return res.data;
   }
 
+  async identifyByFace(body: {
+    centerId: string;
+    probeEmbedding?: number[] | null;
+    qualityScore?: number | null;
+    sessionId?: string | null;
+    deviceId?: string;
+  }): Promise<ApiResponse<IdentificationResponseDto>> {
+    const res = await this.request<ApiResponse<IdentificationResponseDto>>(
+      '/api/v1/identification/face',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          centerId: body.centerId,
+          deviceId: body.deviceId || 'COUNTER_TERMINAL',
+          sessionId: body.sessionId || null,
+          probeEmbedding: body.probeEmbedding || null,
+          qualityScore: body.qualityScore || null,
+        }),
+      }
+    );
+    return res.data;
+  }
+
   async identifyByRfid(body: {
     cardUid: string;
     centerId: string;
@@ -197,6 +221,23 @@ export class CollectionApiClient {
           deviceId: body.deviceId || 'COUNTER_TERMINAL',
         }),
       }
+    );
+    return res.data;
+  }
+
+  async getActiveRateVersion(params: {
+    centerId: string;
+    milkCategory: string;
+    businessDate?: string;
+  }): Promise<ApiResponse<any>> {
+    const q = new URLSearchParams();
+    q.append('centerId', params.centerId);
+    q.append('milkCategory', params.milkCategory);
+    if (params.businessDate) q.append('businessDate', params.businessDate);
+
+    const res = await this.request<ApiResponse<any>>(
+      `/api/v1/rates/active?${q.toString()}`,
+      { method: 'GET' }
     );
     return res.data;
   }

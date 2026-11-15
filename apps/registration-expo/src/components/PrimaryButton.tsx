@@ -1,21 +1,29 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   TouchableOpacity,
   Text,
   ActivityIndicator,
   StyleSheet,
   View,
+  ViewStyle,
+  TextStyle,
+  Platform,
 } from 'react-native';
 import { colors } from '../theme/colors';
+import { clayColors, clayRadius, clayStyles } from '../theme/claymorphism';
 
-interface PrimaryButtonProps {
+export type ButtonVariant = 'primary' | 'secondary' | 'outlined' | 'destructive';
+
+export interface PrimaryButtonProps {
   text: string;
   onClick: () => void;
   enabled?: boolean;
   isLoading?: boolean;
-  leadingIcon?: string;
+  leadingIcon?: string | React.ReactNode;
   containerColor?: string;
   textColor?: string;
+  variant?: ButtonVariant;
+  style?: ViewStyle;
 }
 
 export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
@@ -24,28 +32,61 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
   enabled = true,
   isLoading = false,
   leadingIcon,
-  containerColor = colors.primary,
-  textColor = colors.onPrimary,
+  containerColor,
+  textColor,
+  variant = 'primary',
+  style,
 }) => {
+  const [isPressed, setIsPressed] = useState(false);
   const isDisabled = !enabled || isLoading;
+
+  // Determine styling based on variant
+  let baseButtonStyle: ViewStyle = clayStyles.buttonPrimary;
+  let defaultTextColor: string = clayColors.onPrimary;
+
+  if (variant === 'secondary') {
+    baseButtonStyle = clayStyles.buttonSecondary;
+    defaultTextColor = clayColors.primary;
+  } else if (variant === 'outlined') {
+    baseButtonStyle = clayStyles.buttonOutlined;
+    defaultTextColor = clayColors.primary;
+  } else if (variant === 'destructive') {
+    baseButtonStyle = clayStyles.buttonDestructive;
+    defaultTextColor = clayColors.onError;
+  }
+
+  // Override colors if explicitly passed
+  const customBackground = containerColor ? { backgroundColor: containerColor } : {};
+  const finalTextColor = textColor || defaultTextColor;
 
   return (
     <TouchableOpacity
-      activeOpacity={0.8}
+      activeOpacity={0.88}
       disabled={isDisabled}
-      style={[
-        styles.button,
-        { backgroundColor: containerColor },
-        isDisabled && styles.buttonDisabled,
-      ]}
       onPress={onClick}
+      onPressIn={() => setIsPressed(true)}
+      onPressOut={() => setIsPressed(false)}
+      style={[
+        styles.baseButton,
+        baseButtonStyle,
+        customBackground,
+        isPressed && !isDisabled && styles.buttonPressed,
+        isDisabled && styles.buttonDisabled,
+        style,
+      ]}
     >
       {isLoading ? (
-        <ActivityIndicator size="small" color={textColor} />
+        <ActivityIndicator size="small" color={finalTextColor} />
       ) : (
         <View style={styles.contentRow}>
-          {leadingIcon ? <Text style={[styles.icon, { color: textColor }]}>{leadingIcon}</Text> : null}
-          <Text style={[styles.text, { color: textColor }]}>{text}</Text>
+          {leadingIcon ? (
+            typeof leadingIcon === 'string' ? (
+              <Text style={[styles.iconText, { color: finalTextColor }]}>{leadingIcon}</Text>
+            ) : (
+              <View style={styles.iconNode}>{leadingIcon}</View>
+            )
+          ) : null}
+          <Text style={[styles.text, { color: finalTextColor }]}>{text}</Text>
         </View>
       )}
     </TouchableOpacity>
@@ -53,29 +94,39 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
 };
 
 const styles = StyleSheet.create({
-  button: {
+  baseButton: {
     height: 52,
-    borderRadius: 12,
+    borderRadius: clayRadius.lg,
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
+  },
+  buttonPressed: {
+    transform: [{ scale: 0.985 }, { translateY: 2 }],
+    borderBottomWidth: 1.5,
   },
   buttonDisabled: {
-    opacity: 0.5,
+    opacity: 0.55,
+    borderBottomWidth: 1,
+    elevation: 0,
+    shadowOpacity: 0,
   },
   contentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  icon: {
+  iconText: {
     fontSize: 18,
     marginRight: 8,
   },
+  iconNode: {
+    marginRight: 8,
+  },
   text: {
-    fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: 0.2,
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 });

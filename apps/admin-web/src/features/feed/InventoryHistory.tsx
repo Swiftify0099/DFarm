@@ -29,11 +29,11 @@ export const InventoryHistory: React.FC = () => {
   }, [movementType]);
 
   return (
-    <div className="inventory-history p-6 bg-white rounded-lg shadow">
-      <div className="flex justify-between items-center mb-6">
+    <div className="inventory-history clay-card rounded-3xl p-6 sm:p-8 bg-white shadow-clay-card border border-white/80 space-y-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Append-Only Stock Movement Ledger</h2>
-          <p className="text-sm text-gray-500">
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight">Append-Only Stock Movement Ledger</h2>
+          <p className="text-sm text-slate-500 font-medium">
             Immutable audit trail of receipts, counter sales, returns, transfers, and write-offs
           </p>
         </div>
@@ -41,7 +41,7 @@ export const InventoryHistory: React.FC = () => {
           <select
             value={movementType}
             onChange={(e) => setMovementType(e.target.value)}
-            className="border rounded px-3 py-1.5 text-xs font-medium"
+            className="clay-inset bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
           >
             <option value="">All Movement Types</option>
             <option value="PURCHASE_RECEIPT">PURCHASE_RECEIPT</option>
@@ -54,70 +54,73 @@ export const InventoryHistory: React.FC = () => {
           </select>
           <button
             onClick={loadMovements}
-            className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded text-xs border font-medium"
+            className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-xl text-xs border border-slate-300 font-bold shadow-sm active:scale-95 transition-all"
           >
-            Refresh
+            🔄 Refresh
           </button>
         </div>
       </div>
 
       {error && (
-        <div className="bg-red-50 text-red-700 p-4 rounded-md mb-4 text-sm border border-red-200">
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-sm font-semibold shadow-sm">
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="text-center py-12 text-gray-500 text-sm">Loading movement ledger...</div>
+        <div className="text-center py-16 text-slate-400 text-sm font-semibold space-y-2">
+          <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <div>Loading movement ledger...</div>
+        </div>
       ) : movements.length === 0 ? (
-        <div className="text-center py-12 bg-gray-50 rounded text-gray-500 text-sm">
+        <div className="text-center py-16 clay-inset rounded-2xl bg-slate-50/80 text-slate-500 text-sm font-semibold">
           No stock movements recorded yet.
         </div>
       ) : (
-        <div className="overflow-x-auto border border-gray-200 rounded-lg">
-          <table className="min-w-full divide-y divide-gray-200 text-xs text-left">
-            <thead className="bg-gray-50 text-gray-600 font-semibold uppercase tracking-wider">
+        <div className="overflow-x-auto rounded-2xl border border-slate-200/80 shadow-sm">
+          <table className="min-w-full divide-y divide-slate-200 text-xs text-left">
+            <thead className="bg-[#F8FAFC] text-slate-600 font-extrabold uppercase tracking-wider">
               <tr>
-                <th className="px-4 py-3">Timestamp</th>
-                <th className="px-4 py-3">Center</th>
-                <th className="px-4 py-3">Product</th>
-                <th className="px-4 py-3">Movement Type</th>
-                <th className="px-4 py-3">Delta</th>
-                <th className="px-4 py-3">Balance After</th>
-                <th className="px-4 py-3">Actor</th>
-                <th className="px-4 py-3">Reference / Notes</th>
+                <th className="px-4 py-3.5">Timestamp</th>
+                <th className="px-4 py-3.5">Center</th>
+                <th className="px-4 py-3.5">Product</th>
+                <th className="px-4 py-3.5">Movement Type</th>
+                <th className="px-4 py-3.5">Delta</th>
+                <th className="px-4 py-3.5">Balance After</th>
+                <th className="px-4 py-3.5">Actor</th>
+                <th className="px-4 py-3.5">Reference / Notes</th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody className="bg-white divide-y divide-slate-100">
               {movements.map((m: any) => {
                 const isPositive = m.direction === 'IN';
                 return (
-                  <tr key={m.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                  <tr key={m.id} className="hover:bg-slate-50/80 transition-colors">
+                    <td className="px-4 py-3.5 text-slate-500 font-medium whitespace-nowrap">
                       {new Date(m.movementTimestamp).toLocaleString()}
                     </td>
-                    <td className="px-4 py-3 font-medium text-gray-800">{m.centerName}</td>
-                    <td className="px-4 py-3">
-                      <div className="font-semibold text-gray-900">{m.productName}</div>
-                      <div className="font-mono text-[10px] text-gray-400">{m.productCode}</div>
+                    <td className="px-4 py-3.5 font-bold text-slate-800">{m.centerName}</td>
+                    <td className="px-4 py-3.5">
+                      <div className="font-extrabold text-slate-900">{m.productName}</div>
+                      <div className="font-mono text-[10px] text-slate-400 font-bold">{m.productCode}</div>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="font-mono font-bold text-[11px] text-gray-700">
+                    <td className="px-4 py-3.5">
+                      <span className="font-mono font-bold text-[11px] bg-slate-100 px-2 py-0.5 rounded-md text-slate-700">
                         {m.movementType}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-mono font-bold">
+                    <td className="px-4 py-3.5 font-mono font-extrabold text-xs">
                       <span className={isPositive ? 'text-emerald-700' : 'text-rose-700'}>
                         {isPositive ? '+' : '-'}{Number(m.quantity).toFixed(3)} {m.baseUnit}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-mono font-bold text-gray-900">
+                    <td className="px-4 py-3.5 font-mono font-black text-slate-900">
                       {Number(m.balanceAfter).toFixed(3)} {m.baseUnit}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{m.actorName || m.actorId.slice(0, 8)}</td>
-                    <td className="px-4 py-3 text-gray-500 text-[11px]">
-                      <div>{m.referenceTransactionType}: <span className="font-mono">{m.referenceId?.slice(0, 8)}...</span></div>
-                      {m.notes && <div className="italic text-gray-400">{m.notes}</div>}
+                    <td className="px-4 py-3.5 text-slate-600 font-medium">{m.actorName || m.actorId.slice(0, 8)}</td>
+                    <td className="px-4 py-3.5 text-slate-500 text-[11px]">
+                      <div>{m.referenceTransactionType}: <span className="font-mono font-bold">{m.referenceId?.slice(0, 8)}...</span></div>
+                      {m.notes && <div className="italic text-slate-400">{m.notes}</div>}
                     </td>
                   </tr>
                 );
