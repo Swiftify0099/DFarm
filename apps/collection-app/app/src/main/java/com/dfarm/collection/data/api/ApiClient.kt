@@ -25,9 +25,9 @@ object ApiClient {
                 Build.PRODUCT.contains("sdk")
     }
 
-    // Default: Android Emulator loopback (10.0.2.2) or USB-reverse loopback (127.0.0.1) pointing to host machine port 3000
+    // Default: Android Emulator loopback (10.0.2.2) or USB-reverse loopback (127.0.0.1) pointing to host machine port 4000
     val DEFAULT_BASE_URL: String
-        get() = if (isEmulator()) "http://10.0.2.2:3000/" else "http://127.0.0.1:3000/"
+        get() = if (isEmulator()) "http://10.0.2.2:4000/" else "http://127.0.0.1:4000/"
 
     fun setBaseUrl(url: String) {
         val formatted = if (url.endsWith("/")) url else "$url/"

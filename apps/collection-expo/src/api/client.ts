@@ -24,15 +24,20 @@ let customBaseUrl: string | null = null;
 
 export function getDefaultBaseUrl(): string {
   if (customBaseUrl) return customBaseUrl;
+  const envUrl = (globalThis as any).process?.env?.['EXPO_PUBLIC_API_URL'];
+  if (envUrl) {
+    const clean = envUrl.replace(/\/api\/v1\/?$/, '');
+    return clean.endsWith('/') ? clean.slice(0, -1) : clean;
+  }
   // Android emulator loopback vs web/localhost
   const proc = (globalThis as any).process;
   const isAndroid =
     (typeof proc !== 'undefined' && proc.env?.EXPO_PLATFORM === 'android') ||
     (typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent));
   if (isAndroid) {
-    return 'http://10.0.2.2:3000';
+    return 'http://10.0.2.2:4000';
   }
-  return 'http://127.0.0.1:3000';
+  return 'http://127.0.0.1:4000';
 }
 
 export function setApiBaseUrl(url: string) {
