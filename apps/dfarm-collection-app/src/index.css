@@ -1,0 +1,154 @@
+@import "tailwindcss";
+
+@theme {
+  --color-dfarm-cream: #FFF5EE;
+  --color-dfarm-orange: #FF6A00;
+  --color-dfarm-orange-hover: #E55F00;
+  --color-dfarm-secondary: #F58A38;
+  --color-dfarm-peach: #FFE9DC;
+  --color-dfarm-peach-light: #FFF0E8;
+  --color-dfarm-text: #211B18;
+  --color-dfarm-text-muted: #817A75;
+  --color-dfarm-border: #F1E7E0;
+  --color-dfarm-surface: #FFFFFF;
+  --color-dfarm-surface-alt: #FCF8F5;
+  --color-dfarm-success: #10B981;
+  --color-dfarm-success-bg: #ECFDF5;
+  --color-dfarm-warning: #F59E0B;
+  --color-dfarm-warning-bg: #FFFBEB;
+  --color-dfarm-danger: #EF4444;
+  --color-dfarm-danger-bg: #FEF2F2;
+
+  --shadow-clay-card: 0 10px 25px -5px rgba(245, 138, 56, 0.08), 0 8px 10px -6px rgba(33, 27, 24, 0.04), inset 0 2px 4px 0 rgba(255, 255, 255, 0.95), inset 0 -2px 4px 0 rgba(245, 138, 56, 0.05);
+  --shadow-clay-gauge: inset 0 3px 6px 0 rgba(33, 27, 24, 0.08), 0 1px 2px 0 rgba(255, 255, 255, 0.9);
+  --shadow-clay-btn: 0 6px 18px -2px rgba(255, 106, 0, 0.38), inset 0 2px 3px 0 rgba(255, 255, 255, 0.45), inset 0 -2px 4px 0 rgba(0, 0, 0, 0.12);
+  --shadow-clay-btn-secondary: 0 4px 12px -2px rgba(33, 27, 24, 0.08), inset 0 1px 2px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 2px 0 rgba(241, 231, 224, 0.5);
+  --shadow-clay-input: inset 0 2px 4px 0 rgba(33, 27, 24, 0.05), 0 1px 2px 0 rgba(255, 255, 255, 0.8);
+}
+
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: #211B18;
+  background-color: #FFF5EE;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: #FFF5EE;
+  color: #211B18;
+  overflow-x: hidden;
+}
+
+/* Claymorphic Utility Classes */
+.clay-card {
+  background: #FFFFFF;
+  border: 1px solid #F1E7E0;
+  box-shadow: 0 10px 25px -5px rgba(245, 138, 56, 0.08), 0 8px 10px -6px rgba(33, 27, 24, 0.04), inset 0 2px 4px 0 rgba(255, 255, 255, 0.95), inset 0 -2px 4px 0 rgba(245, 138, 56, 0.05);
+  border-radius: 1rem;
+}
+
+.clay-card-interactive {
+  background: #FFFFFF;
+  border: 1px solid #F1E7E0;
+  box-shadow: 0 8px 20px -4px rgba(245, 138, 56, 0.08), inset 0 2px 3px 0 rgba(255, 255, 255, 0.95);
+  border-radius: 1rem;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.clay-card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px -6px rgba(245, 138, 56, 0.14), inset 0 2px 4px 0 rgba(255, 255, 255, 1);
+  border-color: #FFE9DC;
+}
+
+.clay-gauge {
+  background: #FCF8F5;
+  border: 1px solid #F1E7E0;
+  box-shadow: inset 0 3px 6px 0 rgba(33, 27, 24, 0.08), 0 1px 2px 0 rgba(255, 255, 255, 0.9);
+  border-radius: 1rem;
+}
+
+.clay-btn-primary {
+  background: linear-gradient(135deg, #FF6A00 0%, #F58A38 100%);
+  color: #FFFFFF;
+  font-weight: 700;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 6px 18px -2px rgba(255, 106, 0, 0.38), inset 0 2px 3px 0 rgba(255, 255, 255, 0.45), inset 0 -2px 4px 0 rgba(0, 0, 0, 0.12);
+  transition: all 0.18s ease;
+}
+
+.clay-btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px -2px rgba(255, 106, 0, 0.48), inset 0 2px 3px 0 rgba(255, 255, 255, 0.55);
+}
+
+.clay-btn-primary:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 8px -1px rgba(255, 106, 0, 0.3), inset 0 2px 4px 0 rgba(0, 0, 0, 0.2);
+}
+
+.clay-btn-secondary {
+  background: #FFFFFF;
+  color: #211B18;
+  font-weight: 600;
+  border-radius: 0.75rem;
+  border: 1px solid #F1E7E0;
+  box-shadow: 0 3px 8px -1px rgba(33, 27, 24, 0.05), inset 0 1px 2px 0 rgba(255, 255, 255, 0.95);
+  transition: all 0.18s ease;
+}
+
+.clay-btn-secondary:hover {
+  background: #FCF8F5;
+  border-color: #FFE9DC;
+  transform: translateY(-1px);
+  box-shadow: 0 5px 12px -2px rgba(33, 27, 24, 0.08);
+}
+
+.clay-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.8), 0 2px 4px rgba(33, 27, 24, 0.04);
+}
+
+.clay-input {
+  background: #FCF8F5;
+  border: 1px solid #F1E7E0;
+  border-radius: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  color: #211B18;
+  box-shadow: inset 0 2px 4px 0 rgba(33, 27, 24, 0.04);
+  transition: all 0.15s ease;
+}
+
+.clay-input:focus {
+  outline: none;
+  background: #FFFFFF;
+  border-color: #FF6A00;
+  box-shadow: 0 0 0 3px rgba(255, 106, 0, 0.15), inset 0 1px 2px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #FFF5EE;
+}
+::-webkit-scrollbar-thumb {
+  background: #E5D8CF;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #D4C3B7;
+}

@@ -3,34 +3,11 @@
   "compilerOptions": {
     "rootDir": "./src",
     "outDir": "./dist",
+    "typeRoots": ["../../apps/dfarm-collection-app/node_modules/@types"],
     "types": ["node"]
   },
   "include": [
-    "src/config/**/*",
-    "src/middleware/**/*",
-    "src/shared/**/*",
-    "src/modules/auth/**/*",
-    "src/modules/customers/**/*",
-    "src/modules/rfid/**/*",
-    "src/modules/identification/**/*",
-    "src/modules/biometrics/**/*",
-    "src/biometric/**/*",
-    "src/modules/health/**/*",
-    "src/modules/ledger/**/*",
-    "src/modules/rates/**/*",
-    "src/modules/collections/**/*",
-    "src/modules/billing/**/*",
-    "src/modules/payments/**/*",
-    "src/modules/feed/**/*",
-    "src/modules/sync/**/*",
-    "src/modules/employees/**/*",
-    "src/modules/notifications/**/*",
-    "src/app.ts",
-    "src/index.ts",
-    "src/jwt.ts",
-    "src/server.ts",
-    "src/security.ts",
-    "src/db.ts"
+    "src/**/*"
   ],
   "exclude": [
     "src/modules/identity/**/*",

@@ -50,7 +50,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   API_BASE_URL: z.string().url().default('http://localhost:4000/api/v1'),
-  CORS_ALLOWED_ORIGINS: z.string().default('http://localhost:3000,http://localhost:5173,http://localhost:4000'),
+  CORS_ALLOWED_ORIGINS: z.string().default('http://localhost:3000,http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:4000,http://127.0.0.1:3000,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175,http://127.0.0.1:4000'),
   SUPABASE_URL: z.string().url('SUPABASE_URL must be a valid URL'),
   SUPABASE_ANON_KEY: z.string().min(10, 'SUPABASE_ANON_KEY must be at least 10 characters'),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(10, 'SUPABASE_SERVICE_ROLE_KEY must be at least 10 characters'),
@@ -67,10 +67,34 @@ const envSchema = z.object({
   WHATSAPP_BUSINESS_ACCOUNT_ID: z.string().optional(),
   WHATSAPP_WEBHOOK_VERIFY_TOKEN: z.string().default('dfarm_whatsapp_verify_token_default'),
   WHATSAPP_APP_SECRET: z.string().default('dfarm_whatsapp_app_secret_placeholder'),
+  // Dove SMS Gateway Configuration (Mobicomm API)
+  DOVE_SMS_API_URL: z.string().url().default('https://mobicomm.dove-sms.com/submitsms.jsp'),
+  DOVE_SMS_USERNAME: z.string().default('Experts'),
+  DOVE_SMS_AUTHKEY: z.string().default('ba9dcdcdfcXX'),
+  DOVE_SMS_SENDER_ID: z.string().default('EXTSKL'),
+  DOVE_SMS_ACCUSAGE: z.string().default('1'),
+  DOVE_SMS_TEMPLATE: z.string().default('Your Verification Code for login is {OTP}. - Expertskill Technology.'),
+  // Hardened Admin OTP Configuration
+  ADMIN_PHONE_NUMBER: z.string().default('+917755995615,+919876543210,7755995615'),
+  ADMIN_OTP_SECRET: z.string().default('dfarm-super-secure-admin-otp-secret-key-32chars!'),
+  ALLOW_TEST_PREVIEW_OTP: z.coerce.boolean().default(false),
   // Firebase Cloud Messaging Configuration
   FCM_PROJECT_ID: z.string().optional(),
   FCM_CLIENT_EMAIL: z.string().optional(),
   FCM_PRIVATE_KEY: z.string().optional(),
+  // Email / SMTP Service Configuration
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_SECURE: z.preprocess((val) => val === 'true' || val === true || val === '1', z.boolean()).default(false),
+  SMTP_USER: z.string().optional(),
+  SMTP_USERNAME: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+  SMTP_FROM: z.string().default('DFarm Platform <noreply@dfarm.in>'),
+  EMAIL_FROM: z.string().optional(),
+  // Public Activation & Web URLs
+  PUBLIC_WEB_URL: z.string().url().default('http://localhost:5173'),
+  PUBLIC_ACTIVATION_URL: z.string().url().default('http://localhost:5173/activate'),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

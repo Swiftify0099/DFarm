@@ -1,1 +1,0 @@
-{"version":3,"file":"StockSummary.d.ts","sourceRoot":"","sources":["../../../src/features/feed/StockSummary.tsx"],"names":[],"mappings":"AAAA,OAAO,KAA8B,MAAM,OAAO,CAAC;AAInD,UAAU,iBAAiB;IACzB,mBAAmB,EAAE,CAAC,SAAS,CAAC,EAAE,MAAM,KAAK,IAAI,CAAC;IAClD,qBAAqB,EAAE,CAAC,SAAS,CAAC,EAAE,MAAM,KAAK,IAAI,CAAC;CACrD;AAED,eAAO,MAAM,YAAY,EAAE,KAAK,CAAC,EAAE,CAAC,iBAAiB,CA4LpD,CAAC"}

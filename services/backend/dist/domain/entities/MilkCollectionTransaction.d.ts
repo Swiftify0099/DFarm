@@ -1,0 +1,68 @@
+export type IdentificationMethod = 'FACE_YUNET_SFACE' | 'RFID_TAG' | 'MANUAL_SEARCH';
+export type SyncStatus = 'SYNCED_CLOUD' | 'PENDING_OFFLINE' | 'SYNC_FAILED';
+export interface MilkCollectionTransactionProps {
+    id: string;
+    transactionCode: string;
+    sessionId: string;
+    dairyId: string;
+    centerId: string;
+    customerId: string;
+    customerCode: string;
+    customerName: string;
+    timestamp: string;
+    date: string;
+    shift: 'MORNING' | 'EVENING';
+    milkCategory: 'COW' | 'BUFFALO';
+    weightLiters: number;
+    fatPercentage: number;
+    snfPercentage: number;
+    clrDensity: number;
+    appliedRatePerLiter: number;
+    rateChartVersion: number;
+    totalAmount: number;
+    identificationMethod: IdentificationMethod;
+    syncStatus: SyncStatus;
+    deviceId: string;
+    operatorName: string;
+    idempotencyKey?: string;
+}
+export declare class MilkCollectionTransaction {
+    private props;
+    constructor(props: MilkCollectionTransactionProps);
+    get id(): string;
+    get transactionCode(): string;
+    get customerId(): string;
+    get customerCode(): string;
+    get customerName(): string;
+    get weightLiters(): number;
+    get totalAmount(): number;
+    get appliedRatePerLiter(): number;
+    get idempotencyKey(): string | undefined;
+    toJSON(): {
+        id: string;
+        transactionCode: string;
+        sessionId: string;
+        dairyId: string;
+        centerId: string;
+        customerId: string;
+        customerCode: string;
+        customerName: string;
+        timestamp: string;
+        date: string;
+        shift: "MORNING" | "EVENING";
+        milkCategory: "COW" | "BUFFALO";
+        weightLiters: number;
+        fatPercentage: number;
+        snfPercentage: number;
+        clrDensity: number;
+        appliedRatePerLiter: number;
+        rateChartVersion: number;
+        totalAmount: number;
+        identificationMethod: IdentificationMethod;
+        syncStatus: SyncStatus;
+        deviceId: string;
+        operatorName: string;
+        idempotencyKey?: string;
+    };
+}
+//# sourceMappingURL=MilkCollectionTransaction.d.ts.map

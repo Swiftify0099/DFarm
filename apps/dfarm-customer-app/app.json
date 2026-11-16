@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "DFarm Customer",
+    "slug": "dfarm-customer-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "primaryColor": "#FF6A00",
+    "icon": "./assets/branding/icon.png",
+    "scheme": "dfarm",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.dfarm.customer"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/branding/adaptive-icon.png",
+        "backgroundColor": "#FFF5EE"
+      },
+      "package": "com.dfarm.customer",
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "USE_BIOMETRIC"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/branding/splash.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFF5EE"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "DFarm requires camera access for secure facial biometric enrollment and diagnostics during milk collection."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "DFarm needs your location to discover and connect with local dairy centers in your village/panchayat."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

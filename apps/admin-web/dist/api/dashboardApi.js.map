@@ -1,1 +1,0 @@
-{"version":3,"file":"dashboardApi.js","sourceRoot":"","sources":["../../src/api/dashboardApi.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,SAAS,EAAE,MAAM,aAAa,CAAC;AA8CxC,MAAM,CAAC,MAAM,YAAY,GAAG;IAC1B,UAAU,EAAE,CAAC,MAA6C,EAAE,EAAE,CAC5D,SAAS,CAAC,GAAG,CAAmB,oBAAoB,EAAE,MAAM,CAAC;CAChE,CAAC"}

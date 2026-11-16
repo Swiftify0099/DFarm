@@ -3,6 +3,7 @@ import { HealthController } from './health.controller.js';
 
 const router = Router();
 
+router.get('/', HealthController.live);
 router.get('/live', HealthController.live);
 router.get('/ready', HealthController.ready);
 

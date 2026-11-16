@@ -1,0 +1,79 @@
+export type ShiftType = 'MORNING' | 'EVENING';
+export type ShiftSessionStatus = 'OPEN' | 'CLOSED';
+export interface KioskShiftSessionProps {
+    id: string;
+    sessionCode: string;
+    organizationId: string;
+    centerId: string;
+    businessDate: string;
+    shift: ShiftType;
+    status: ShiftSessionStatus;
+    openedAt: string;
+    closedAt?: string | null;
+    openingOperatorId: string;
+    openingOperatorName: string;
+    closingOperatorId?: string | null;
+    closingOperatorName?: string | null;
+    deviceIdentifier: string;
+    deviceName: string;
+    totalLiters: number;
+    cowLiters: number;
+    buffaloLiters: number;
+    transactionCount: number;
+    totalAmount: number;
+    averageFat: number;
+    averageSnf: number;
+}
+export declare class KioskShiftSession {
+    private props;
+    constructor(props: KioskShiftSessionProps);
+    get id(): string;
+    get sessionCode(): string;
+    get organizationId(): string;
+    get centerId(): string;
+    get businessDate(): string;
+    get shift(): ShiftType;
+    get status(): ShiftSessionStatus;
+    get isOpen(): boolean;
+    get openedAt(): string;
+    get closedAt(): string | null | undefined;
+    get totals(): {
+        totalLiters: number;
+        cowLiters: number;
+        buffaloLiters: number;
+        transactionCount: number;
+        totalAmount: number;
+        averageFat: number;
+        averageSnf: number;
+    };
+    get deviceIdentifier(): string;
+    get deviceName(): string;
+    get openingOperatorName(): string;
+    recordTransaction(category: 'COW' | 'BUFFALO', weightLiters: number, fat: number, snf: number, amount: number): void;
+    close(operatorId: string, operatorName: string): void;
+    toJSON(): {
+        id: string;
+        sessionCode: string;
+        dairyId: string;
+        centerId: string;
+        date: string;
+        shift: ShiftType;
+        status: ShiftSessionStatus;
+        openedAt: string;
+        closedAt: string | null | undefined;
+        openingOperatorName: string;
+        closingOperatorName: string | null | undefined;
+        deviceId: string;
+        deviceName: string;
+        totals: {
+            totalLiters: number;
+            cowLiters: number;
+            buffaloLiters: number;
+            transactionCount: number;
+            totalAmount: number;
+            averageFat: number;
+            averageSnf: number;
+        };
+    };
+}
+//# sourceMappingURL=KioskShiftSession.d.ts.map
