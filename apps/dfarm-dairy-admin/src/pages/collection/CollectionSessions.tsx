@@ -27,7 +27,7 @@ export const CollectionSessions: React.FC = () => {
   const [notice, setNotice] = useState<{ type: 'success' | 'danger'; message: string } | null>(null)
 
   const { data: sessions = [], isLoading } = useQuery({
-    queryKey: ['collectionSessions'],
+    queryKey: ['collectionSessions', user?.dairyId],
     queryFn: () => api.collections.getSessions(),
   })
 
@@ -36,8 +36,8 @@ export const CollectionSessions: React.FC = () => {
     mutationFn: (sessionId: string) =>
       api.collections.closeSession(sessionId, user?.fullName || 'Dairy Admin'),
     onSuccess: (closedSes) => {
-      queryClient.invalidateQueries({ queryKey: ['collectionSessions'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] })
+      queryClient.invalidateQueries({ queryKey: ['collectionSessions', user?.dairyId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary', user?.dairyId] })
       setShowCloseModal(false)
       setNotice({
         type: 'success',

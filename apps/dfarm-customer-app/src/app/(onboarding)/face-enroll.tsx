@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +14,7 @@ import {
   DFARM_COLORS,
   DFARM_TYPOGRAPHY,
   DFARM_RADIUS,
+  DFARM_SHADOWS,
   ClayCard,
   ClayButton,
   ClayBadge,
@@ -22,6 +24,7 @@ import { yuNetDetector } from '../../face-ai/yunet-detector';
 import { sFaceEmbedder } from '../../face-ai/sface-embedder';
 import { checkAlignmentQuality } from '../../face-ai/preprocessor';
 import { useRegistration } from '../../features/registration/useRegistration';
+import { FaceOvalGuide, CameraPermissionIllustration } from '../../assets/vectors/BiometricAssets';
 
 export default function FaceEnrollScreen() {
   const router = useRouter();
@@ -40,7 +43,7 @@ export default function FaceEnrollScreen() {
   const [modelReady, setModelReady] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [statusMessage, setStatusMessage] = useState('Align your face inside the oval guide');
+  const [statusMessage, setStatusMessage] = useState('Center your face inside the oval reticle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [faceDetected, setFaceDetected] = useState(true);
 
@@ -138,64 +141,72 @@ export default function FaceEnrollScreen() {
     <SafeAreaView style={styles.container}>
       <ClayHeader
         title="Face Biometric Enrollment"
-        subtitle="Step 2 of 2: Front Camera Live Capture"
+        subtitle="बायोमेट्रिक चेहरा नोंदणी (Step 2 of 2)"
         onBack={() => router.back()}
       />
 
-      <View style={styles.content}>
+      {/* Step Progress Tracker */}
+      <View style={styles.progressContainer}>
+        <View style={styles.stepTrack}>
+          <View style={styles.stepActiveBar} />
+        </View>
+        <View style={styles.stepLabelsRow}>
+          <Text style={styles.stepCompletedLabel}>✓ 1. Personal & Animals</Text>
+          <Text style={styles.stepActiveLabel}>2. Live Face Biometrics</Text>
+        </View>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Model Status Pill */}
         <View style={styles.modelStatusRow}>
           <ClayBadge
-            label={modelReady ? 'YuNet + SFace INT8 Ready' : 'Loading Face Engine...'}
+            label={modelReady ? 'OpenCV YuNet + SFace INT8 Active' : 'Loading Face Engine...'}
             variant={modelReady ? 'success' : 'pending'}
           />
         </View>
 
-        {/* Live Camera Viewport Frame */}
-        <View style={styles.cameraViewport}>
-          {permission?.granted ? (
-            <CameraView
-              ref={cameraRef}
-              style={StyleSheet.absoluteFill}
-              facing="front"
-            />
-          ) : (
-            <View style={styles.permissionContainer}>
-              <Text style={styles.permissionTitle}>Camera Permission Required</Text>
-              <Text style={styles.permissionSubtitle}>
-                DFarm needs camera access to capture your face for biometric dairy authentication.
-              </Text>
-              <ClayButton
-                title="Grant Camera Access"
-                onPress={requestPermission}
-                variant="primary"
-                style={styles.permissionBtn}
+        {/* Live Camera Viewport Frame with Tactile Clay Bezel */}
+        <View style={styles.cameraFrameBezel}>
+          <View style={styles.cameraViewport}>
+            {permission?.granted ? (
+              <CameraView
+                ref={cameraRef}
+                style={StyleSheet.absoluteFill}
+                facing="front"
               />
-            </View>
-          )}
-
-          {/* Alignment Oval Guide Overlay */}
-          <View
-            style={[
-              styles.alignmentOval,
-              faceDetected ? styles.alignmentOvalAligned : styles.alignmentOvalSearching,
-            ]}
-          >
-            {faceDetected && (
-              <>
-                <View style={[styles.landmarkDot, { top: '35%', left: '32%' }]} />
-                <View style={[styles.landmarkDot, { top: '35%', right: '32%' }]} />
-                <View style={[styles.landmarkDot, { top: '50%', left: '48%' }]} />
-                <View style={[styles.landmarkDot, { top: '65%', left: '36%' }]} />
-                <View style={[styles.landmarkDot, { top: '65%', right: '36%' }]} />
-              </>
+            ) : (
+              <View style={styles.permissionContainer}>
+                <CameraPermissionIllustration size={80} />
+                <Text style={styles.permissionTitle}>Camera Access Required</Text>
+                <Text style={styles.permissionSubtitle}>
+                  DFarm requires front camera access to capture your facial biometric
+                  template for contactless dairy intake authentication.
+                </Text>
+                <ClayButton
+                  title="Grant Camera Access"
+                  onPress={requestPermission}
+                  variant="primary"
+                  size="md"
+                  style={styles.permissionBtn}
+                />
+              </View>
             )}
-          </View>
 
-          <View style={styles.cameraOverlayInstruction}>
-            <Text style={styles.instructionText}>
-              {statusMessage}
-            </Text>
+            {/* Tactile Face Scanning Reticle Overlay */}
+            {permission?.granted && (
+              <View style={styles.reticleOverlay} pointerEvents="none">
+                <FaceOvalGuide width={230} height={290} isAligned={faceDetected} />
+              </View>
+            )}
+
+            {/* Instruction Banner at Viewport Bottom */}
+            <View style={styles.statusToast}>
+              <View style={styles.statusToastDot} />
+              <Text style={styles.statusToastText}>{statusMessage}</Text>
+            </View>
           </View>
         </View>
 
@@ -206,39 +217,58 @@ export default function FaceEnrollScreen() {
           </View>
         )}
 
-        {/* Guidance Card */}
+        {/* Biometric Guidance & Submission Card */}
         <ClayCard variant="raised" style={styles.guidanceCard}>
-          <View style={styles.tipRow}>
-            <Text style={styles.tipIcon}>💡</Text>
-            <Text style={styles.tipText}>
-              Ensure adequate lighting and remove sunglasses or cap.
-            </Text>
-          </View>
-          <View style={styles.tipRow}>
-            <Text style={styles.tipIcon}>👤</Text>
-            <Text style={styles.tipText}>
-              Only one person must be visible in the camera frame.
-            </Text>
+          <View style={styles.tipsSection}>
+            <View style={styles.tipItem}>
+              <Text style={styles.tipBullet}>•</Text>
+              <Text style={styles.tipText}>
+                Ensure adequate daylight and face the camera directly without head tilt.
+              </Text>
+            </View>
+            <View style={styles.tipItem}>
+              <Text style={styles.tipBullet}>•</Text>
+              <Text style={styles.tipText}>
+                Remove sunglasses, cap, or face covering before capturing.
+              </Text>
+            </View>
+            <View style={styles.tipItem}>
+              <Text style={styles.tipBullet}>•</Text>
+              <Text style={styles.tipText}>
+                Only 1 person must be visible in the camera frame.
+              </Text>
+            </View>
           </View>
 
+          {/* Processing Progress Bar */}
           {isCapturing && (
             <View style={styles.progressSection}>
-              <ActivityIndicator color={DFARM_COLORS.primaryOrange} />
-              <Text style={styles.progressText}>
-                {statusMessage} ({progress}%)
-              </Text>
+              <View style={styles.progressRow}>
+                <ActivityIndicator size="small" color={DFARM_COLORS.primaryOrange} />
+                <Text style={styles.progressText}>
+                  {statusMessage} ({progress}%)
+                </Text>
+              </View>
+              <View style={styles.progressBarTrack}>
+                <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
+              </View>
             </View>
           )}
 
           <ClayButton
-            title={isCapturing ? 'Processing Biometrics...' : 'Capture & Submit Registration'}
+            title={
+              isCapturing
+                ? 'Processing Biometrics...'
+                : 'Capture & Submit Registration'
+            }
             onPress={handleCaptureAndEnroll}
             loading={isCapturing || isRegistering}
-            disabled={!modelReady || isCapturing}
+            disabled={!modelReady || isCapturing || !permission?.granted}
+            variant="primary"
             style={styles.captureBtn}
           />
         </ClayCard>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -248,129 +278,190 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: DFARM_COLORS.primaryCream,
   },
-  content: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  progressContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  stepTrack: {
+    height: 4,
+    backgroundColor: DFARM_COLORS.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginBottom: 6,
+  },
+  stepActiveBar: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: DFARM_COLORS.primaryOrange,
+  },
+  stepLabelsRow: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  stepCompletedLabel: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    color: '#2E7D32',
+    fontWeight: '700',
+  },
+  stepActiveLabel: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryOrange,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    paddingBottom: 28,
   },
   modelStatusRow: {
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
+  },
+  cameraFrameBezel: {
+    borderRadius: DFARM_RADIUS.xl,
+    padding: 6,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: DFARM_COLORS.border,
+    ...DFARM_SHADOWS.clayCard,
+    marginBottom: 16,
   },
   cameraViewport: {
-    height: 380,
-    backgroundColor: '#1A1A1A',
+    width: '100%',
+    height: 340,
     borderRadius: DFARM_RADIUS.lg,
     overflow: 'hidden',
+    backgroundColor: '#1E1A17',
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  permissionContainer: {
-    padding: 24,
+  reticleOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  permissionTitle: {
-    ...DFARM_TYPOGRAPHY.h3,
+  statusToast: {
+    position: 'absolute',
+    bottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(33, 27, 24, 0.78)',
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: DFARM_RADIUS.pill,
+    gap: 8,
+    maxWidth: '90%',
+  },
+  statusToastDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: DFARM_COLORS.primaryOrange,
+  },
+  statusToastText: {
+    ...DFARM_TYPOGRAPHY.bodySm,
     color: '#FFFFFF',
-    marginBottom: 8,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  permissionContainer: {
+    alignItems: 'center',
+    padding: 24,
+    backgroundColor: DFARM_COLORS.surfaceInset,
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+  },
+  permissionTitle: {
+    ...DFARM_TYPOGRAPHY.h2,
+    color: DFARM_COLORS.primaryText,
+    marginTop: 14,
+    marginBottom: 6,
     textAlign: 'center',
   },
   permissionSubtitle: {
     ...DFARM_TYPOGRAPHY.bodySm,
-    color: '#CCCCCC',
+    color: DFARM_COLORS.secondaryText,
     textAlign: 'center',
-    marginBottom: 16,
+    lineHeight: 18,
+    marginBottom: 18,
   },
   permissionBtn: {
-    minWidth: 200,
-  },
-  alignmentOval: {
-    width: 220,
-    height: 290,
-    borderRadius: 110,
-    borderWidth: 3,
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  alignmentOvalSearching: {
-    borderColor: '#EAB308',
-  },
-  alignmentOvalAligned: {
-    borderColor: DFARM_COLORS.success,
-    borderStyle: 'solid',
-  },
-  landmarkDot: {
-    position: 'absolute',
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#4ADE80',
-    shadowColor: '#4ADE80',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 4,
-  },
-  cameraOverlayInstruction: {
-    position: 'absolute',
-    bottom: 12,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  instructionText: {
-    ...DFARM_TYPOGRAPHY.bodySm,
-    color: '#FFFFFF',
-    fontWeight: '600',
+    minWidth: 180,
   },
   errorContainer: {
-    backgroundColor: '#FEE2E2',
+    backgroundColor: '#FFF8F8',
+    borderColor: '#FFCDD2',
     borderWidth: 1,
-    borderColor: '#EF4444',
-    padding: 10,
     borderRadius: DFARM_RADIUS.sm,
-    marginVertical: 4,
+    padding: 12,
+    marginBottom: 14,
   },
   errorText: {
     ...DFARM_TYPOGRAPHY.bodySm,
-    color: '#DC2626',
+    color: DFARM_COLORS.error,
     fontWeight: '600',
   },
   guidanceCard: {
-    padding: 16,
+    padding: 18,
   },
-  tipRow: {
+  tipsSection: {
+    gap: 6,
+    marginBottom: 16,
+  },
+  tipItem: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
+    alignItems: 'flex-start',
+    gap: 8,
   },
-  tipIcon: {
+  tipBullet: {
+    color: DFARM_COLORS.primaryOrange,
     fontSize: 16,
-    marginRight: 8,
+    lineHeight: 18,
+    fontWeight: '800',
   },
   tipText: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
+    lineHeight: 18,
     flex: 1,
   },
   progressSection: {
+    backgroundColor: DFARM_COLORS.surfaceInset,
+    padding: 12,
+    borderRadius: DFARM_RADIUS.sm,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: DFARM_COLORS.border,
+  },
+  progressRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginVertical: 12,
+    gap: 10,
+    marginBottom: 8,
   },
   progressText: {
     ...DFARM_TYPOGRAPHY.bodySm,
-    color: DFARM_COLORS.primaryOrange,
-    marginLeft: 8,
+    color: DFARM_COLORS.primaryText,
     fontWeight: '600',
   },
+  progressBarTrack: {
+    height: 6,
+    backgroundColor: DFARM_COLORS.border,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: DFARM_COLORS.primaryOrange,
+  },
   captureBtn: {
-    marginTop: 8,
+    marginTop: 4,
   },
 });

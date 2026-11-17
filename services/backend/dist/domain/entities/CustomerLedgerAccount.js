@@ -10,6 +10,9 @@ export class CustomerLedgerAccount {
     get customerId() {
         return this.props.customerId;
     }
+    get organizationId() {
+        return this.props.organizationId;
+    }
     get currentBalance() {
         return this.props.currentBalance;
     }

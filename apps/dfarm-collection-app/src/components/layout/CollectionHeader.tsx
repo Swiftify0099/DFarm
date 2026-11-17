@@ -27,8 +27,8 @@ export const CollectionHeader: React.FC = () => {
               DFarm Collection
             </h1>
             <p className="text-xs text-text-secondary font-medium">
-              {operator?.dairyName || 'Gokul Dairy Farmers Cooperative'} •{' '}
-              <span className="font-semibold text-primary-orange">{operator?.dairyCode || 'DF-GOKUL-01'}</span>
+              {operator?.dairyName || 'Authorized Dairy Cooperative'} •{' '}
+              <span className="font-semibold text-primary-orange">{operator?.dairyCode || 'DAIRY'}</span>
             </p>
           </div>
         </div>

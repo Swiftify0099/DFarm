@@ -833,6 +833,112 @@ class MockBackendEngine {
     return updated
   }
 
+  public syncDairiesFromBackend(backendDairies: any[]): void {
+    if (!Array.isArray(backendDairies) || backendDairies.length === 0) return
+    const dairies = this.getDairiesFromStorage()
+    let changed = false
+
+    for (const b of backendDairies) {
+      if (!b || (!b.id && !b.code)) continue
+      const idx = dairies.findIndex((d) => (b.id && d.id === b.id) || (b.code && d.code.toLowerCase() === b.code.toLowerCase()))
+      const bStatus = (b.status || 'active').toLowerCase()
+      const normalizedStatus: 'draft_onboarding' | 'active' | 'suspended' =
+        bStatus === 'suspended' ? 'suspended' : bStatus === 'draft_onboarding' ? 'draft_onboarding' : 'active'
+
+      const bLat = b.location?.latitude ?? b.latitude
+      const bLng = b.location?.longitude ?? b.longitude
+      const bAddr = b.location?.formattedAddress ?? b.formatted_address ?? b.location?.addressLine1 ?? b.address_line1
+
+      if (idx !== -1) {
+        const current = dairies[idx]
+        dairies[idx] = {
+          ...current,
+          id: b.id || current.id,
+          name: b.name || current.name,
+          code: b.code || current.code,
+          status: normalizedStatus,
+          primaryAdminName: b.primaryAdminName || b.primary_admin_name || current.primaryAdminName,
+          primaryAdminMobile: b.primaryAdminMobile || b.primary_admin_mobile || current.primaryAdminMobile,
+          location: {
+            ...current.location,
+            latitude: bLat !== undefined && bLat !== null ? Number(bLat) : current.location?.latitude,
+            longitude: bLng !== undefined && bLng !== null ? Number(bLng) : current.location?.longitude,
+            formattedAddress: bAddr || current.location?.formattedAddress,
+            addressLine1: b.location?.addressLine1 ?? b.address_line1 ?? current.location?.addressLine1,
+            district: b.location?.district ?? b.district ?? current.location?.district,
+            state: b.location?.state ?? b.state ?? current.location?.state,
+            pincode: b.location?.pincode ?? b.pincode ?? current.location?.pincode,
+            villageLocality: b.location?.villageLocality ?? b.village_locality ?? current.location?.villageLocality,
+          },
+        }
+        changed = true
+      } else {
+        const now = new Date().toISOString()
+        const newD: DairyTenant = {
+          id: b.id,
+          code: b.code || `DF-TEN-${Math.floor(1000 + Math.random() * 9000)}`,
+          name: b.name,
+          status: normalizedStatus,
+          primaryAdminId: b.primaryAdminId || b.primary_admin_id || `admin_${b.id}`,
+          primaryAdminName: b.primaryAdminName || b.primary_admin_name || 'Primary Admin',
+          primaryAdminMobile: b.primaryAdminMobile || b.primary_admin_mobile || '9800000000',
+          location: {
+            addressLine1: bAddr || 'Main Road',
+            district: b.location?.district || b.district || 'District',
+            state: b.location?.state || b.state || 'Maharashtra',
+            pincode: b.location?.pincode || b.pincode || '416000',
+            latitude: bLat !== undefined && bLat !== null ? Number(bLat) : undefined,
+            longitude: bLng !== undefined && bLng !== null ? Number(bLng) : undefined,
+            formattedAddress: bAddr,
+            villageLocality: b.location?.villageLocality || b.village_locality,
+          },
+          contact: {
+            businessPhone: b.contact?.businessPhone || b.business_phone || '9800000000',
+            businessEmail: b.contact?.businessEmail || b.business_email,
+          },
+          createdAt: b.createdAt || now,
+          updatedAt: b.updatedAt || now,
+          operationalReadiness: {
+            businessProfileComplete: true,
+            primaryAdminActivated: normalizedStatus === 'active',
+            hardwareSynced: false,
+            collectionStaffTrained: false,
+            readinessScore: normalizedStatus === 'active' ? 100 : 50,
+          },
+          deviceSummary: {
+            registeredDevicesCount: 0,
+            onlineDevicesCount: 0,
+            firmwareVersionsSummary: 'Awaiting pairing',
+          },
+          syncHealth: {
+            status: 'healthy',
+            lastSyncAt: now,
+            pendingSyncEventsCount: 0,
+            averageLatencyMs: 0,
+            errorCountLast24h: 0,
+          },
+          configuration: {
+            timezone: 'Asia/Kolkata',
+            locale: 'en-IN',
+            allowSelfRegistration: false,
+            offlineSyncGracePeriodHours: 48,
+            featureFlags: {
+              automaticFatTestingIntegration: true,
+              smsAlertsEnabled: true,
+              chillingCenterSync: false,
+            },
+          },
+        }
+        dairies.unshift(newD)
+        changed = true
+      }
+    }
+
+    if (changed) {
+      this.saveDairies(dairies)
+    }
+  }
+
   // --- DAIRY ADMIN MANAGEMENT ---
 
   public getAdmins(params?: { search?: string; dairyId?: string; status?: string }): DairyAdminAccount[] {

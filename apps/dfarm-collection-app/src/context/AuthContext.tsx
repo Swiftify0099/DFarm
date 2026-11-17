@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import type { OperatorSession } from '@/types'
 import { authApi, getStoredOperatorAuth, setStoredOperatorAuth, clearStoredOperatorAuth } from '@/api/client'
-import { MockCollectionBackend } from '@/api/mock-backend'
 
 interface AuthContextType {
   operator: OperatorSession | null
@@ -29,26 +28,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [])
 
   const requestOtp = async (mobileNumber: string) => {
-    try {
-      const res = await authApi.requestOtp(mobileNumber)
-      return { success: res.success, previewOtp: res.previewOtp || '123456' }
-    } catch {
-      const res = await MockCollectionBackend.sendOtp(mobileNumber)
-      return { success: res.success, previewOtp: res.previewOtp }
-    }
+    const res = await authApi.requestOtp(mobileNumber)
+    return { success: res.success, previewOtp: res.previewOtp || '' }
   }
 
   const loginWithOtp = async (mobileNumber: string, otp: string) => {
     setIsLoading(true)
     try {
-      try {
-        const session = await authApi.verifyOtp(mobileNumber, otp)
-        setOperator(session)
-      } catch {
-        const session = await MockCollectionBackend.verifyOtp(mobileNumber, otp)
-        setOperator(session)
-        setStoredOperatorAuth(session.sessionToken, session.dairyId, session)
-      }
+      const session = await authApi.verifyOtp(mobileNumber, otp)
+      setOperator(session)
     } finally {
       setIsLoading(false)
     }

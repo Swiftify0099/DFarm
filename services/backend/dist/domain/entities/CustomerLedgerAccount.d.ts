@@ -22,6 +22,7 @@ export declare class CustomerLedgerAccount {
     constructor(props: CustomerLedgerAccountProps);
     get id(): string;
     get customerId(): string;
+    get organizationId(): string;
     get currentBalance(): number;
     get totalMilkEarnings(): number;
     get totalDeductions(): number;

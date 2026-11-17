@@ -16,6 +16,7 @@ export interface ICustomerRepository {
     category?: MilkCategory;
     limit?: number;
     offset?: number;
+    includeSoftDeleted?: boolean;
   }): Promise<Customer[]>;
   save(customer: Customer): Promise<void>;
   listPendingRegistrations(organizationId?: string): Promise<Customer[]>;

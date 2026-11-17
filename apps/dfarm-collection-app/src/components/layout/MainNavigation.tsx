@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { Milk, Users, Clock, Cpu, RefreshCw, Settings } from 'lucide-react'
+import { useAuth } from '@/context/AuthContext'
 
 interface NavItem {
   key: string
@@ -21,6 +22,7 @@ const NAV_ITEMS: NavItem[] = [
 
 export const MainNavigation: React.FC = () => {
   const navigate = useNavigate()
+  const { operator } = useAuth()
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -84,8 +86,10 @@ export const MainNavigation: React.FC = () => {
 
       {/* Terminal Info Footer */}
       <div className="p-3 bg-peach/40 rounded-xl border border-border-subtle text-[11px] text-text-muted space-y-1">
-        <p className="font-semibold text-text-primary">Gokul Kiosk #1</p>
-        <p>Terminal: DF-KIOSK-001</p>
+        <p className="font-semibold text-text-primary">
+          {operator?.dairyName ? `${operator.dairyName} Kiosk` : 'Collection Kiosk'}
+        </p>
+        <p>Terminal: {operator?.dairyCode ? `${operator.dairyCode}-KIOSK` : 'DF-KIOSK-001'}</p>
         <p className="text-[10px] text-text-muted">Build 2026.11-v1.0</p>
       </div>
     </aside>

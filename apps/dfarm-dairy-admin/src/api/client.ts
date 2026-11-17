@@ -73,9 +73,11 @@ export const createHeaders = (customHeaders?: HeadersInit): HeadersInit => {
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  // Tenant Isolation: Explicit tenant scoping header
+  // Tenant Isolation: Explicit tenant scoping headers
   if (dairyId) {
     headers['X-Dairy-Tenant-ID'] = dairyId
+    headers['x-dairy-id'] = dairyId
+    headers['X-Dairy-Id'] = dairyId
   }
 
   if (customHeaders) {
@@ -83,4 +85,29 @@ export const createHeaders = (customHeaders?: HeadersInit): HeadersInit => {
   }
 
   return headers
+}
+
+export const apiRequest = async <T = any>(endpoint: string, options: RequestInit = {}): Promise<T> => {
+  const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:4000/api/v1'
+  const url = `${baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
+  const headers = createHeaders(options.headers)
+
+  const res = await fetch(url, {
+    ...options,
+    headers,
+  })
+
+  if (!res.ok) {
+    let errMessage = `HTTP ${res.status}: ${res.statusText}`
+    try {
+      const data = await res.json()
+      errMessage = data.error || data.message || errMessage
+    } catch {
+      // json parse failed
+    }
+    throw new ApiError(errMessage, 'API_ERROR', res.status)
+  }
+
+  const data = await res.json()
+  return data
 }

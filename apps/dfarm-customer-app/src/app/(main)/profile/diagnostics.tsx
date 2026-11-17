@@ -12,6 +12,7 @@ import {
   DFARM_COLORS,
   DFARM_TYPOGRAPHY,
   DFARM_RADIUS,
+  DFARM_SHADOWS,
   ClayCard,
   ClayBadge,
   ClayButton,
@@ -19,12 +20,11 @@ import {
 } from '../../../design-system';
 import { runFaceDiagnostics } from '../../../face-ai/diagnostics';
 import { FaceDiagnosticsReport } from '../../../types/face';
-import { useProfile } from '../../../features/profile/useProfile';
+import { FaceOvalGuide, CameraPermissionIllustration } from '../../../assets/vectors/BiometricAssets';
 
 export default function FaceDiagnosticsScreen() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
-  const { profile } = useProfile();
   const [isRunning, setIsRunning] = useState(false);
   const [report, setReport] = useState<FaceDiagnosticsReport | null>(null);
   const cameraRef = useRef<any>(null);
@@ -43,11 +43,14 @@ export default function FaceDiagnosticsScreen() {
     <SafeAreaView style={styles.container}>
       <ClayHeader
         title="Test My Face"
-        subtitle="Biometric Sensor & Model Diagnostics"
+        subtitle="बायोमेट्रिक सेन्सर व मॉडेल चाचणी"
         onBack={() => router.back()}
       />
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Warning Card about Identity vs Detection */}
         <ClayCard variant="highlight" style={styles.disclaimerCard}>
           <Text style={styles.disclaimerTitle}>Diagnostics & Verification Mode</Text>
@@ -58,35 +61,37 @@ export default function FaceDiagnosticsScreen() {
           </Text>
         </ClayCard>
 
-        {/* Live Camera Viewport */}
-        <View style={styles.cameraViewport}>
-          {permission?.granted ? (
-            <CameraView
-              ref={cameraRef}
-              style={StyleSheet.absoluteFill}
-              facing="front"
-            />
-          ) : (
-            <View style={styles.permissionBox}>
-              <Text style={styles.permissionTitle}>Camera Permission Required</Text>
-              <Text style={styles.permissionSubtitle}>
-                Allow camera access to test face sensor and real-time inference.
-              </Text>
-              <ClayButton
-                title="Enable Camera"
-                onPress={requestPermission}
-                variant="secondary"
+        {/* Live Camera Viewport with Tactile Clay Bezel */}
+        <View style={styles.cameraFrameBezel}>
+          <View style={styles.cameraViewport}>
+            {permission?.granted ? (
+              <CameraView
+                ref={cameraRef}
+                style={StyleSheet.absoluteFill}
+                facing="front"
               />
-            </View>
-          )}
+            ) : (
+              <View style={styles.permissionBox}>
+                <CameraPermissionIllustration size={72} />
+                <Text style={styles.permissionTitle}>Camera Permission Required</Text>
+                <Text style={styles.permissionSubtitle}>
+                  Allow camera access to test face sensor and real-time inference.
+                </Text>
+                <ClayButton
+                  title="Enable Camera"
+                  onPress={requestPermission}
+                  variant="primary"
+                  size="sm"
+                />
+              </View>
+            )}
 
-          {/* Oval reticle overlay */}
-          <View style={styles.ovalReticle}>
-            <View style={[styles.landmarkPoint, { top: '35%', left: '32%' }]} />
-            <View style={[styles.landmarkPoint, { top: '35%', right: '32%' }]} />
-            <View style={[styles.landmarkPoint, { top: '50%', left: '48%' }]} />
-            <View style={[styles.landmarkPoint, { top: '65%', left: '36%' }]} />
-            <View style={[styles.landmarkPoint, { top: '65%', right: '36%' }]} />
+            {/* Oval reticle overlay */}
+            {permission?.granted && (
+              <View style={styles.reticleOverlay} pointerEvents="none">
+                <FaceOvalGuide width={200} height={250} isAligned={true} />
+              </View>
+            )}
           </View>
         </View>
 
@@ -94,7 +99,7 @@ export default function FaceDiagnosticsScreen() {
         {report ? (
           <ClayCard variant="raised" style={styles.reportCard}>
             <View style={styles.reportHeader}>
-              <Text style={styles.reportTitle}>Diagnostic Results</Text>
+              <Text style={styles.reportTitle}>Diagnostic Telemetry</Text>
               <ClayBadge
                 label={report.status}
                 variant={report.status === 'OPTIMAL' ? 'success' : 'warning'}
@@ -103,91 +108,66 @@ export default function FaceDiagnosticsScreen() {
 
             <View style={styles.telemetryGrid}>
               <View style={styles.telemetryItem}>
-                <Text style={styles.telemetryLabel}>Camera Permission</Text>
-                <Text style={styles.telemetryValue}>
-                  {permission?.granted ? '🟢 Granted' : '🔴 Denied'}
-                </Text>
-              </View>
-
-              <View style={styles.telemetryItem}>
                 <Text style={styles.telemetryLabel}>Camera Sensor</Text>
-                <Text style={styles.telemetryValue}>
-                  🟢 30 FPS (Front)
-                </Text>
+                <ClayBadge
+                  label={permission?.granted ? 'Granted (30 FPS)' : 'Denied'}
+                  variant={permission?.granted ? 'success' : 'error'}
+                />
               </View>
 
               <View style={styles.telemetryItem}>
-                <Text style={styles.telemetryLabel}>OpenCV YuNet Detector</Text>
-                <Text style={styles.telemetryValue}>
-                  🟢 Loaded ({report.yuNetLatencyMs}ms)
-                </Text>
+                <Text style={styles.telemetryLabel}>YuNet Face Detector</Text>
+                <ClayBadge
+                  label={`Loaded (${report.yuNetLatencyMs}ms)`}
+                  variant="success"
+                />
               </View>
 
               <View style={styles.telemetryItem}>
-                <Text style={styles.telemetryLabel}>OpenCV SFace INT8 Embedder</Text>
-                <Text style={styles.telemetryValue}>
-                  🟢 Loaded ({report.sFaceLatencyMs}ms)
-                </Text>
+                <Text style={styles.telemetryLabel}>SFace INT8 Embedder</Text>
+                <ClayBadge
+                  label={`Loaded (${report.sFaceLatencyMs}ms)`}
+                  variant="success"
+                />
               </View>
 
               <View style={styles.telemetryItem}>
-                <Text style={styles.telemetryLabel}>Faces Detected</Text>
-                <Text style={styles.telemetryValue}>
-                  🟢 {report.facesDetectedCount} Face
-                </Text>
+                <Text style={styles.telemetryLabel}>Face Detection</Text>
+                <ClayBadge
+                  label={`${report.facesDetectedCount} Face Detected`}
+                  variant={report.facesDetectedCount === 1 ? 'success' : 'warning'}
+                />
               </View>
 
               <View style={styles.telemetryItem}>
-                <Text style={styles.telemetryLabel}>Face Alignment</Text>
-                <Text style={styles.telemetryValue}>
-                  {report.primaryFaceAligned ? '🟢 Optimal' : '🟡 Sub-optimal'}
-                </Text>
+                <Text style={styles.telemetryLabel}>Landmark Alignment</Text>
+                <ClayBadge
+                  label={report.primaryFaceAligned ? 'Optimal' : 'Tilted'}
+                  variant={report.primaryFaceAligned ? 'success' : 'warning'}
+                />
               </View>
 
               <View style={styles.telemetryItem}>
                 <Text style={styles.telemetryLabel}>128-D Vector Integrity</Text>
-                <Text style={styles.telemetryValue}>
-                  {report.embeddingValid128D ? '🟢 ||v|| = 1.0 (Unit L2)' : '🔴 Invalid'}
-                </Text>
-              </View>
-
-              <View style={styles.telemetryItem}>
-                <Text style={styles.telemetryLabel}>Enrolled Profile Template</Text>
-                <Text style={styles.telemetryValue}>
-                  {profile?.biometricStatus.isEnrolled ? '🟢 Registered (v1.0)' : '🟡 Not Enrolled'}
-                </Text>
-              </View>
-
-              <View style={styles.telemetryItem}>
-                <Text style={styles.telemetryLabel}>Biometric Match Verification</Text>
-                <Text style={styles.telemetryValue}>
-                  {report.status === 'OPTIMAL' ? '🟢 PASS (Score: 0.942 ≥ 0.363)' : '🟡 Inconclusive'}
-                </Text>
+                <ClayBadge
+                  label={report.embeddingValid128D ? 'Unit L2 Valid' : 'Invalid'}
+                  variant={report.embeddingValid128D ? 'success' : 'error'}
+                />
               </View>
             </View>
-
-            <View style={styles.messageBox}>
-              <Text style={styles.messageText}>{report.statusMessage}</Text>
-            </View>
           </ClayCard>
-        ) : (
-          <ClayCard variant="raised" style={styles.idleCard}>
-            <Text style={styles.idleIcon}>🔬</Text>
-            <Text style={styles.idleTitle}>Face Sensor Diagnostic Suite</Text>
-            <Text style={styles.idleDesc}>
-              Tap the button below to execute a real-time hardware and neural
-              network inference pipeline test.
-            </Text>
-          </ClayCard>
-        )}
+        ) : null}
 
-        <ClayButton
-          title={isRunning ? 'Testing Hardware & Models...' : 'Run Diagnostics & Verification'}
-          onPress={handleRunDiagnostics}
-          loading={isRunning}
-          variant="primary"
-          style={styles.runBtn}
-        />
+        {/* Action Button */}
+        <ClayCard variant="raised" style={styles.actionCard}>
+          <ClayButton
+            title={isRunning ? 'Evaluating Sensors...' : 'Run Diagnostics Test'}
+            onPress={handleRunDiagnostics}
+            loading={isRunning}
+            disabled={!permission?.granted || isRunning}
+            variant="primary"
+          />
+        </ClayCard>
       </ScrollView>
     </SafeAreaView>
   );
@@ -201,133 +181,102 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingVertical: 14,
-    paddingBottom: 40,
+    paddingBottom: 28,
+    gap: 16,
   },
   disclaimerCard: {
-    marginBottom: 16,
-    padding: 14,
+    padding: 16,
   },
   disclaimerTitle: {
-    ...DFARM_TYPOGRAPHY.bodyLg,
-    fontWeight: '700',
-    color: DFARM_COLORS.primaryOrange,
-    marginBottom: 4,
+    ...DFARM_TYPOGRAPHY.h3,
+    color: DFARM_COLORS.primaryText,
+    marginBottom: 6,
   },
   disclaimerText: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
     lineHeight: 18,
   },
+  cameraFrameBezel: {
+    borderRadius: DFARM_RADIUS.xl,
+    padding: 6,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: DFARM_COLORS.border,
+    ...DFARM_SHADOWS.clayCard,
+  },
   cameraViewport: {
-    height: 260,
-    backgroundColor: '#1E1E1E',
+    width: '100%',
+    height: 300,
     borderRadius: DFARM_RADIUS.lg,
     overflow: 'hidden',
+    backgroundColor: '#1E1A17',
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+  },
+  reticleOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   permissionBox: {
     alignItems: 'center',
-    padding: 16,
+    padding: 20,
+    gap: 10,
+    backgroundColor: DFARM_COLORS.surfaceInset,
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
   },
   permissionTitle: {
-    ...DFARM_TYPOGRAPHY.bodyLg,
-    color: '#FFFFFF',
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '700',
-    marginBottom: 4,
+    color: DFARM_COLORS.primaryText,
   },
   permissionSubtitle: {
     ...DFARM_TYPOGRAPHY.bodySm,
-    color: '#AAAAAA',
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  ovalReticle: {
-    width: 170,
-    height: 220,
-    borderRadius: 85,
-    borderWidth: 2,
-    borderColor: '#4ADE80',
-    borderStyle: 'dashed',
-    position: 'relative',
-  },
-  landmarkPoint: {
-    position: 'absolute',
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#4ADE80',
-  },
-  idleCard: {
-    padding: 24,
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  idleIcon: {
-    fontSize: 40,
-    marginBottom: 12,
-  },
-  idleTitle: {
-    ...DFARM_TYPOGRAPHY.h3,
-    color: DFARM_COLORS.primaryText,
-    marginBottom: 6,
-  },
-  idleDesc: {
-    ...DFARM_TYPOGRAPHY.bodyMd,
     color: DFARM_COLORS.secondaryText,
     textAlign: 'center',
+    marginBottom: 6,
   },
   reportCard: {
     padding: 18,
-    marginBottom: 20,
   },
   reportHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 12,
   },
   reportTitle: {
     ...DFARM_TYPOGRAPHY.h3,
     color: DFARM_COLORS.primaryText,
   },
   telemetryGrid: {
-    backgroundColor: DFARM_COLORS.surfaceInset,
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: DFARM_COLORS.border,
+    gap: 10,
   },
   telemetryItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: DFARM_COLORS.border,
+    alignItems: 'center',
+    backgroundColor: DFARM_COLORS.surfaceInset,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: DFARM_RADIUS.sm,
+    borderWidth: 1,
+    borderColor: DFARM_COLORS.border,
   },
   telemetryLabel: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
-  },
-  telemetryValue: {
-    ...DFARM_TYPOGRAPHY.bodySm,
-    fontWeight: '700',
-    color: DFARM_COLORS.primaryText,
-  },
-  messageBox: {
-    marginTop: 12,
-    padding: 10,
-    backgroundColor: DFARM_COLORS.peach,
-    borderRadius: 8,
-  },
-  messageText: {
-    ...DFARM_TYPOGRAPHY.bodySm,
     fontWeight: '600',
-    color: DFARM_COLORS.primaryText,
   },
-  runBtn: {
-    marginTop: 8,
+  actionCard: {
+    padding: 16,
   },
 });

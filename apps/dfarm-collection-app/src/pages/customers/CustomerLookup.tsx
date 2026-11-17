@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import type { CustomerIdentity, MilkCategory } from '@/types'
 import { customersApi } from '@/api/client'
-import { MockCollectionBackend } from '@/api/mock-backend'
 import { ClayCard, ClayInput, ClayButton, ClayBadge, ClayTable } from '@/components/ui'
 import { CustomerDetailModal } from './CustomerDetailModal'
 import { Search, Users, ShieldCheck, Radio, Eye } from 'lucide-react'
@@ -22,17 +21,12 @@ export const CustomerLookup: React.FC = () => {
   const loadCustomers = async () => {
     setIsLoading(true)
     try {
-      let list: CustomerIdentity[] = []
-      try {
-        list = await customersApi.list()
-      } catch {
-        list = []
-      }
-      if (!list || list.length === 0) {
-        list = await MockCollectionBackend.getCustomers()
-      }
-      setCustomers(list)
-      setFilteredCustomers(list)
+      const list = await customersApi.list()
+      setCustomers(list || [])
+      setFilteredCustomers(list || [])
+    } catch {
+      setCustomers([])
+      setFilteredCustomers([])
     } finally {
       setIsLoading(false)
     }

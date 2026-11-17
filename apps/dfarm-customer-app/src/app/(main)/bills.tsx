@@ -10,6 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   DFARM_COLORS,
   DFARM_TYPOGRAPHY,
+  DFARM_RADIUS,
   ClayCard,
   ClayBadge,
   ClayHeader,
@@ -19,6 +20,7 @@ import {
 } from '../../design-system';
 import { useBills } from '../../features/bills/useBills';
 import { BillStatement } from '../../types/bills';
+import { NavBillsIcon } from '../../assets/vectors/NavAssets';
 
 export default function BillsScreen() {
   const { bills, isLoadingBills } = useBills();
@@ -28,26 +30,33 @@ export default function BillsScreen() {
     <SafeAreaView style={styles.container}>
       <ClayHeader
         title="Bills & Statements"
-        subtitle="10-Day Billing Cycles & Bank Disbursals"
+        subtitle="१०-दिवसीय देयक चक्र व बँक जमा"
       />
 
       {bills.length === 0 ? (
         <ClayEmptyState
           title="No Bills Generated"
-          description="Bills are generated at the end of every 10-day cycle by your dairy."
+          description="Billing statements are generated at the end of every 10-day cycle by your dairy administration."
         />
       ) : (
         <FlatList
           data={bills}
           keyExtractor={(item) => item.billId}
           contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
-            <Pressable onPress={() => setSelectedBill(item)}>
+            <Pressable
+              onPress={() => setSelectedBill(item)}
+              style={({ pressed }) => pressed && styles.pressed}
+            >
               <ClayCard variant="raised" style={styles.billCard}>
                 <View style={styles.billHeader}>
-                  <View>
-                    <Text style={styles.cycleLabel}>{item.cycleLabel}</Text>
-                    <Text style={styles.billNo}>Bill No: {item.billNumber}</Text>
+                  <View style={styles.billHeaderLeft}>
+                    <NavBillsIcon size={20} color={DFARM_COLORS.primaryOrange} />
+                    <View>
+                      <Text style={styles.cycleLabel}>{item.cycleLabel}</Text>
+                      <Text style={styles.billNo}>Bill #{item.billNumber}</Text>
+                    </View>
                   </View>
                   <ClayBadge
                     label={item.status}
@@ -57,11 +66,11 @@ export default function BillsScreen() {
 
                 <View style={styles.billGrid}>
                   <View style={styles.gridItem}>
-                    <Text style={styles.gridLabel}>Total Liters</Text>
+                    <Text style={styles.gridLabel}>Total Milk</Text>
                     <Text style={styles.gridVal}>{item.totalLiters} L</Text>
                   </View>
                   <View style={styles.gridItem}>
-                    <Text style={styles.gridLabel}>Gross Value</Text>
+                    <Text style={styles.gridLabel}>Gross Earnings</Text>
                     <Text style={styles.gridVal}>
                       ₹{item.grossMilkAmount.toFixed(2)}
                     </Text>
@@ -69,21 +78,21 @@ export default function BillsScreen() {
                   <View style={styles.gridItem}>
                     <Text style={styles.gridLabel}>Deductions</Text>
                     <Text style={styles.gridValDeduct}>
-                      -₹{item.feedDeductions + item.otherDeductions}
+                      -₹{(item.feedDeductions + item.otherDeductions).toFixed(2)}
                     </Text>
                   </View>
                 </View>
 
                 <View style={styles.billFooter}>
                   <View>
-                    <Text style={styles.netLabel}>Net Payout</Text>
+                    <Text style={styles.netLabel}>Net Direct Bank Payout</Text>
                     <Text style={styles.netAmount}>
                       ₹{item.netPayableAmount.toFixed(2)}
                     </Text>
                   </View>
                   {item.disbursedDate && (
                     <Text style={styles.disbursedText}>
-                      Paid on {item.disbursedDate}
+                      ✓ Paid on {item.disbursedDate}
                     </Text>
                   )}
                 </View>
@@ -109,7 +118,7 @@ export default function BillsScreen() {
                   selectedBill.status === 'DISBURSED' ? 'success' : 'pending'
                 }
               />
-              <Text style={styles.billIdText}>{selectedBill.billNumber}</Text>
+              <Text style={styles.billIdText}>Invoice #{selectedBill.billNumber}</Text>
             </View>
 
             <View style={styles.breakdownTable}>
@@ -138,7 +147,7 @@ export default function BillsScreen() {
                 </Text>
               </View>
               <View style={styles.row}>
-                <Text style={styles.rowLabel}>Miscellaneous Charges</Text>
+                <Text style={styles.rowLabel}>Other Deductions / Advances</Text>
                 <Text style={styles.deductVal}>
                   -₹{selectedBill.otherDeductions.toFixed(2)}
                 </Text>
@@ -151,19 +160,21 @@ export default function BillsScreen() {
               </View>
             </View>
 
-            {selectedBill.utrNumber && (
-              <View style={styles.utrBox}>
-                <Text style={styles.utrLabel}>Bank UTR Reference:</Text>
-                <Text style={styles.utrValue}>{selectedBill.utrNumber}</Text>
-                <Text style={styles.utrMode}>Mode: {selectedBill.paymentMode}</Text>
+            {selectedBill.disbursedDate && (
+              <View style={styles.disbursalBox}>
+                <Text style={styles.disbursalTitle}>Bank Settlement Details:</Text>
+                <Text style={styles.disbursalDate}>
+                  Disbursed directly via NEFT/UPI on {selectedBill.disbursedDate}
+                </Text>
               </View>
             )}
 
             <ClayButton
-              title="Download Statement (PDF)"
+              title="Close Statement"
               onPress={() => setSelectedBill(null)}
-              variant="outline"
-              style={styles.downloadBtn}
+              variant="secondary"
+              size="md"
+              style={styles.closeBtn}
             />
           </View>
         </ClayModal>
@@ -178,24 +189,28 @@ const styles = StyleSheet.create({
     backgroundColor: DFARM_COLORS.primaryCream,
   },
   listContent: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 84,
+    padding: 16,
+    gap: 12,
+    paddingBottom: 24,
   },
   billCard: {
-    marginBottom: 14,
     padding: 16,
   },
   billHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 12,
   },
+  billHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   cycleLabel: {
-    ...DFARM_TYPOGRAPHY.h3,
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    fontWeight: '700',
     color: DFARM_COLORS.primaryText,
-    marginBottom: 2,
   },
   billNo: {
     ...DFARM_TYPOGRAPHY.bodySm,
@@ -203,134 +218,140 @@ const styles = StyleSheet.create({
   },
   billGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     backgroundColor: DFARM_COLORS.surfaceInset,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 12,
+    padding: 10,
+    borderRadius: DFARM_RADIUS.sm,
     borderWidth: 1,
     borderColor: DFARM_COLORS.border,
+    marginBottom: 12,
   },
   gridItem: {
     flex: 1,
   },
   gridLabel: {
+    ...DFARM_TYPOGRAPHY.bodySm,
     fontSize: 10,
     color: DFARM_COLORS.secondaryText,
     marginBottom: 2,
   },
   gridVal: {
-    fontSize: 13,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '700',
     color: DFARM_COLORS.primaryText,
   },
   gridValDeduct: {
-    fontSize: 13,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '700',
-    color: DFARM_COLORS.error,
+    color: '#D32F2F',
   },
   billFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
-    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: DFARM_COLORS.border,
+    paddingTop: 8,
   },
   netLabel: {
-    fontSize: 11,
+    ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
   },
   netAmount: {
-    fontSize: 18,
+    ...DFARM_TYPOGRAPHY.h2,
     fontWeight: '800',
     color: DFARM_COLORS.primaryOrange,
+    marginTop: 2,
   },
   disbursedText: {
     ...DFARM_TYPOGRAPHY.bodySm,
-    color: DFARM_COLORS.success,
-    fontWeight: '600',
+    color: '#2E7D32',
+    fontWeight: '700',
   },
   modalContent: {
-    paddingVertical: 6,
+    paddingTop: 4,
+    gap: 14,
   },
   modalStatusRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
   },
   billIdText: {
     ...DFARM_TYPOGRAPHY.bodySm,
+    fontWeight: '700',
     color: DFARM_COLORS.secondaryText,
   },
   breakdownTable: {
     backgroundColor: DFARM_COLORS.surfaceInset,
-    borderRadius: 12,
     padding: 14,
-    borderWidth: 1,
+    borderRadius: DFARM_RADIUS.md,
+    borderWidth: 1.5,
     borderColor: DFARM_COLORS.border,
-    marginBottom: 14,
+    gap: 8,
   },
   row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 6,
+    alignItems: 'center',
+    paddingVertical: 2,
   },
   rowLabel: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
   },
   rowVal: {
-    ...DFARM_TYPOGRAPHY.bodySm,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '600',
     color: DFARM_COLORS.primaryText,
   },
   rowValBold: {
-    ...DFARM_TYPOGRAPHY.bodySm,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '800',
     color: DFARM_COLORS.primaryText,
   },
   deductVal: {
-    ...DFARM_TYPOGRAPHY.bodySm,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '700',
-    color: DFARM_COLORS.error,
+    color: '#D32F2F',
   },
   netRow: {
-    marginTop: 6,
-    paddingTop: 8,
     borderTopWidth: 1.5,
     borderTopColor: DFARM_COLORS.border,
+    paddingTop: 10,
+    marginTop: 4,
   },
   netRowLabel: {
-    ...DFARM_TYPOGRAPHY.bodyLg,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '700',
     color: DFARM_COLORS.primaryText,
   },
   netRowVal: {
     ...DFARM_TYPOGRAPHY.h2,
+    fontWeight: '800',
     color: DFARM_COLORS.primaryOrange,
   },
-  utrBox: {
-    backgroundColor: DFARM_COLORS.peach,
-    borderRadius: 10,
+  disbursalBox: {
+    backgroundColor: '#E8F5E9',
+    borderColor: '#C8E6C9',
+    borderWidth: 1,
     padding: 12,
-    marginBottom: 16,
+    borderRadius: DFARM_RADIUS.sm,
   },
-  utrLabel: {
-    fontSize: 11,
-    color: DFARM_COLORS.secondaryText,
+  disbursalTitle: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    fontWeight: '700',
+    color: '#2E7D32',
+    marginBottom: 2,
   },
-  utrValue: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: DFARM_COLORS.primaryText,
-    marginTop: 2,
+  disbursalDate: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    color: '#2E7D32',
   },
-  utrMode: {
-    fontSize: 11,
-    color: DFARM_COLORS.secondaryText,
-    marginTop: 2,
+  closeBtn: {
+    marginTop: 6,
   },
-  downloadBtn: {
-    marginTop: 4,
+  pressed: {
+    transform: [{ scale: 0.985 }],
+    opacity: 0.9,
   },
 });

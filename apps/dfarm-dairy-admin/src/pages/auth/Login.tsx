@@ -10,7 +10,7 @@ export const Login: React.FC = () => {
   const { sendOtp, loginWithOtp } = useAuth()
 
   const [step, setStep] = useState<'MOBILE' | 'OTP'>('MOBILE')
-  const [mobileNumber, setMobileNumber] = useState('7755995615')
+  const [mobileNumber, setMobileNumber] = useState('')
   const [otpCode, setOtpCode] = useState('')
   const [dispatchedOtpPreview, setDispatchedOtpPreview] = useState<string | null>(null)
   const [countdown, setCountdown] = useState(0)

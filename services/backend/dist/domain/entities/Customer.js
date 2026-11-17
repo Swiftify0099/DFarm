@@ -48,6 +48,9 @@ export class Customer {
     get balanceDue() {
         return this.props.balanceDue || 0.0;
     }
+    get isDeleted() {
+        return Boolean(this.props.isDeleted);
+    }
     get lastDelivery() {
         return this.props.lastDelivery;
     }
@@ -90,6 +93,8 @@ export class Customer {
         return {
             ...this.props,
             customerCode: this.props.farmerCode, // Backward compatibility with frontend
+            isSoftDeleted: Boolean(this.props.isDeleted),
+            faceEnrollmentStatus: this.props.faceTemplateEnrolled ? 'ENROLLED' : 'NOT_ENROLLED',
         };
     }
 }

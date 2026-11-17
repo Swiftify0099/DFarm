@@ -156,8 +156,8 @@ export const authApi = {
       mobileNumber: res.operator.mobileNumber,
       fullName: res.operator.fullName,
       dairyId: res.operator.dairyId,
-      dairyName: 'Gokul Primary Cooperative',
-      dairyCode: 'GOKUL-01',
+      dairyName: (res.operator as any).dairyName || 'DFarm Dairy Cooperative',
+      dairyCode: (res.operator as any).dairyCode || 'DFARM-01',
       role: (res.operator.role as any) || 'COLLECTION_OPERATOR',
       sessionToken: res.token,
     }
@@ -183,11 +183,11 @@ export const customersApi = {
 
     return res.data.map((c: any) => ({
       id: c.id,
-      customerCode: c.farmerCode || c.customerCode || 'C-100',
+      customerCode: c.farmerCode || c.customerCode || '',
       farmerCode: c.farmerCode,
       fullName: c.fullName,
       mobileNumber: c.mobileNumber,
-      village: c.village || 'Gokul Shirgaon',
+      village: c.village || '',
       preferredCategory: (c.permittedCategories?.[0] as MilkCategory) || 'COW',
       permittedCategories: c.permittedCategories || ['COW'],
       dairyId: c.organizationId,
@@ -196,7 +196,7 @@ export const customersApi = {
       rfidCardUid: c.rfidCardUid,
       biometric: {
         templateVersion: 'v1.0',
-        qualityScore: 97.5,
+        qualityScore: c.qualityScore || 95.0,
         modelVersion: 'YuNet-v1.0 + SFace-INT8-v1.0',
         consentVerified: true,
       },
@@ -209,11 +209,11 @@ export const customersApi = {
     const c = res.data
     return {
       id: c.id,
-      customerCode: c.farmerCode || c.customerCode || 'C-100',
+      customerCode: c.farmerCode || c.customerCode || '',
       farmerCode: c.farmerCode,
       fullName: c.fullName,
       mobileNumber: c.mobileNumber,
-      village: c.village || 'Gokul Shirgaon',
+      village: c.village || '',
       preferredCategory: (c.permittedCategories?.[0] as MilkCategory) || 'COW',
       permittedCategories: c.permittedCategories || ['COW'],
       dairyId: c.organizationId,
@@ -222,7 +222,7 @@ export const customersApi = {
       rfidCardUid: c.rfidCardUid,
       biometric: {
         templateVersion: 'v1.0',
-        qualityScore: 97.5,
+        qualityScore: c.qualityScore || 95.0,
         modelVersion: 'YuNet-v1.0 + SFace-INT8-v1.0',
         consentVerified: true,
       },
@@ -279,11 +279,11 @@ export const identityApi = {
       confidenceScore: res.confidenceScore,
       matchedCustomer: {
         id: c.id,
-        customerCode: c.farmerCode || c.customerCode || 'C-100',
+        customerCode: c.farmerCode || c.customerCode || '',
         farmerCode: c.farmerCode,
         fullName: c.fullName,
         mobileNumber: c.mobileNumber,
-        village: c.village || 'Gokul Shirgaon',
+        village: c.village || '',
         preferredCategory: (c.permittedCategories?.[0] as MilkCategory) || 'COW',
         permittedCategories: c.permittedCategories || ['COW'],
         dairyId: c.organizationId,
@@ -292,7 +292,7 @@ export const identityApi = {
         rfidCardUid: c.rfidCardUid,
         biometric: {
           templateVersion: 'v1.0',
-          qualityScore: 97.5,
+          qualityScore: c.qualityScore || 95.0,
           modelVersion: 'YuNet-v1.0 + SFace-INT8-v1.0',
           consentVerified: true,
         },

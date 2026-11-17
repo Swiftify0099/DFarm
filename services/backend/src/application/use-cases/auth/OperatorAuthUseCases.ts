@@ -8,41 +8,19 @@ export class RequestOperatorOtpUseCase {
 
   public async execute(rawPhone: string): Promise<{ success: boolean; message: string; previewOtp?: string }> {
     const phone = new PhoneNumber(rawPhone);
+    const clean10 = phone.e164.replace(/\D/g, '').slice(-10);
 
-    try {
-      // Verify phone belongs to an active staff user with COLLECTION_OPERATOR or admin role
-      const sql = `
-        SELECT id, full_name, user_role, is_active 
-        FROM users 
-        WHERE normalized_mobile_number = $1 AND is_active = TRUE
-        LIMIT 1;
-      `;
-      const res = await db.query(sql, [phone.e164]);
+    const sql = `
+      SELECT id, full_name 
+      FROM users 
+      WHERE (phone_number = $1 OR phone_number LIKE $2)
+        AND status = 'ACTIVE'
+      LIMIT 1;
+    `;
+    const res = await db.query(sql, [phone.e164, `%${clean10}`]);
 
-      if (res.rows.length === 0) {
-        // In dev preview if no user in DB yet, create or allow demo operator for initial bootstrap
-        if (process.env['NODE_ENV'] !== 'production') {
-          const insertBootstrap = `
-            INSERT INTO organizations (id, name, registration_number, state, district)
-            VALUES ('00000000-0000-0000-0000-000000000001', 'DFarm Primary Cooperative', 'REG-1001', 'Maharashtra', 'Kolhapur')
-            ON CONFLICT (id) DO NOTHING;
-
-            INSERT INTO dairy_centers (id, organization_id, center_code, name, status)
-            VALUES ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'C-101', 'Tasgaon Main Center', 'ACTIVE')
-            ON CONFLICT (id) DO NOTHING;
-
-            INSERT INTO users (id, organization_id, normalized_mobile_number, full_name, user_role, is_active)
-            VALUES ('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000001', $1, 'Tasgaon Counter Operator', 'COLLECTION_OPERATOR', TRUE)
-            ON CONFLICT (normalized_mobile_number) DO UPDATE SET is_active = TRUE;
-          `;
-          await db.query(insertBootstrap, [phone.e164]);
-        } else {
-          throw new UnauthorizedError('Mobile number is not registered as an authorized operator.');
-        }
-      }
-    } catch (err: any) {
-      if (process.env['NODE_ENV'] === 'production') throw err;
-      // In dev mode, proceed with OTP generation even if DB is warming up
+    if (res.rows.length === 0) {
+      throw new UnauthorizedError('Mobile number is not registered as an authorized operator.');
     }
 
     return this.otpService.sendOtp(phone.e164, 'OPERATOR_LOGIN');
@@ -63,6 +41,8 @@ export class VerifyOperatorOtpUseCase {
       mobileNumber: string;
       role: string;
       dairyId: string;
+      dairyName?: string;
+      dairyCode?: string;
       centerId: string;
     };
   }> {
@@ -74,45 +54,42 @@ export class VerifyOperatorOtpUseCase {
     }
 
     let row: any;
+    const clean10 = phone.e164.replace(/\D/g, '').slice(-10);
     try {
       const sql = `
         SELECT 
           u.id, 
           u.full_name, 
-          u.normalized_mobile_number, 
-          u.user_role, 
+          u.phone_number AS mobile_number, 
+          u.role AS user_role, 
           u.organization_id,
-          COALESCE(u.primary_center_id, dc.id) AS center_id
+          dc.id AS center_id,
+          o.name AS dairy_name,
+          o.code AS dairy_code
         FROM users u
+        LEFT JOIN organizations o ON o.id = u.organization_id
         LEFT JOIN dairy_centers dc ON dc.organization_id = u.organization_id
-        WHERE u.normalized_mobile_number = $1 AND u.is_active = TRUE
+        WHERE (u.phone_number = $1 OR u.phone_number LIKE $2)
+          AND u.status = 'ACTIVE'
         LIMIT 1;
       `;
-      const res = await db.query(sql, [phone.e164]);
+      const res = await db.query(sql, [phone.e164, `%${clean10}`]);
       if (res.rows.length > 0) {
         row = res.rows[0];
       }
     } catch {
-      // In dev fallback
+      // Query error
     }
 
     if (!row) {
-      const isPankaj = phone.e164.endsWith('7755995615');
-      row = {
-        id: isPankaj ? '00000000-0000-0000-0000-000000000099' : '00000000-0000-0000-0000-000000000003',
-        full_name: isPankaj ? 'Pankaj Popat Yewale' : 'Counter Operator',
-        normalized_mobile_number: phone.e164,
-        user_role: isPankaj ? 'SUPER_ADMIN' : 'COLLECTION_OPERATOR',
-        organization_id: '00000000-0000-0000-0000-000000000001',
-        center_id: '00000000-0000-0000-0000-000000000002',
-      };
+      throw new UnauthorizedError('This mobile number is not registered as an authorized operator.');
     }
 
     const token = this.tokenService.signToken({
       userId: row.id,
       organizationId: row.organization_id,
       centerId: row.center_id,
-      role: row.user_role,
+      role: row.user_role || 'COLLECTION_OPERATOR',
       actorType: 'STAFF',
     });
 
@@ -121,9 +98,11 @@ export class VerifyOperatorOtpUseCase {
       operator: {
         id: row.id,
         fullName: row.full_name,
-        mobileNumber: row.normalized_mobile_number,
-        role: row.user_role,
+        mobileNumber: row.mobile_number || phone.e164,
+        role: row.user_role || 'COLLECTION_OPERATOR',
         dairyId: row.organization_id,
+        dairyName: row.dairy_name || 'Dairy Cooperative',
+        dairyCode: row.dairy_code || 'DAIRY',
         centerId: row.center_id,
       },
     };

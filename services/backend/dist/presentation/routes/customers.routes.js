@@ -1,6 +1,8 @@
 import { Router } from 'express';
+import crypto from 'node:crypto';
 import { GetCustomersUseCase, GetCustomerByIdUseCase, RegisterCustomerUseCase, GetCustomerStatusUseCase, GetPendingCustomerRegistrationsUseCase, ApproveCustomerRegistrationUseCase, RejectCustomerRegistrationUseCase, UpdateCustomerBiometricsUseCase, } from '../../application/use-cases/index.js';
 import { PostgresCustomerRepository, Aes256GcmBiometricEncryptor, } from '../../infrastructure/index.js';
+import { db } from '../../infrastructure/database/PostgresPool.js';
 import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
 const router = Router();
 const customerRepo = new PostgresCustomerRepository();
@@ -18,7 +20,7 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
     try {
         let organizationId = req.user?.organizationId;
         if (!organizationId) {
-            organizationId = req.query['organizationId'] || '00000000-0000-0000-0000-000000000001';
+            organizationId = req.query['organizationId'] || req.headers['x-dairy-id'] || req.headers['x-dairy-tenant-id'];
         }
         else if (req.query['organizationId'] && req.query['organizationId'] !== organizationId && req.user?.role !== 'SUPER_ADMIN') {
             res.status(403).json({
@@ -27,11 +29,19 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
             });
             return;
         }
+        if (!organizationId) {
+            res.status(400).json({
+                success: false,
+                error: 'Dairy context (organizationId) is required.',
+            });
+            return;
+        }
         const centerId = req.query['centerId'] || req.user?.centerId;
         const search = req.query['search'];
         const category = req.query['category'];
-        const limit = req.query['limit'] ? Number(req.query['limit']) : 50;
+        const limit = req.query['limit'] ? Number(req.query['limit']) : 100;
         const offset = req.query['offset'] ? Number(req.query['offset']) : 0;
+        const includeSoftDeleted = req.query['includeSoftDeleted'] === 'true' || req.query['showDeleted'] === 'true';
         const data = await getCustomersUseCase.execute({
             organizationId,
             centerId,
@@ -39,8 +49,9 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
             category,
             limit,
             offset,
+            includeSoftDeleted,
         });
-        res.json({ success: true, data });
+        res.json({ success: true, count: data.length, data });
     }
     catch (err) {
         next(err);
@@ -72,12 +83,40 @@ router.post('/register', optionalAuthenticate, async (req, res, next) => {
             });
             return;
         }
+        const targetOrgId = body.organizationId || body.dairyId || body.selectedDairyId;
+        if (!targetOrgId) {
+            res.status(400).json({
+                success: false,
+                error: 'Dairy selection (organizationId) is required for customer registration.',
+            });
+            return;
+        }
+        // Resolve primary center for this dairy
+        let centerId = body.centerId;
+        if (!centerId) {
+            try {
+                const centerRes = await db.query(`SELECT id FROM dairy_centers WHERE organization_id = $1 LIMIT 1;`, [targetOrgId]);
+                if (centerRes.rows.length > 0) {
+                    centerId = centerRes.rows[0].id;
+                }
+                else {
+                    const newCenterId = crypto.randomUUID();
+                    await db.query(`INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, status)
+             VALUES ($1, $2, 'C-01', 'Main Collection Center', 'Center Road', 'Local', 'District', 'State', '400001', 'ACTIVE')
+             ON CONFLICT DO NOTHING;`, [newCenterId, targetOrgId]);
+                    centerId = newCenterId;
+                }
+            }
+            catch {
+                centerId = '00000000-0000-0000-0000-000000000002';
+            }
+        }
         const categories = body.categories || (body.milkSupplyType ? (body.milkSupplyType === 'BOTH' ? ['COW', 'BUFFALO'] : [body.milkSupplyType]) : (body.category ? [body.category] : ['COW']));
         const data = await registerCustomerUseCase.execute({
             fullName: body.fullName || body.name || 'Registered Producer',
             mobileNumber: phone,
-            organizationId: body.organizationId || body.dairyId || body.selectedDairyId || '00000000-0000-0000-0000-000000000001',
-            centerId: body.centerId || '00000000-0000-0000-0000-000000000002',
+            organizationId: targetOrgId,
+            centerId,
             village: body.village,
             categories,
             bankDetails: body.bankDetails,
@@ -110,7 +149,7 @@ router.post('/register', optionalAuthenticate, async (req, res, next) => {
 // 4. List Pending Customer Registrations (Dairy Admin Approvals Queue)
 router.get('/pending', optionalAuthenticate, async (req, res, next) => {
     try {
-        const orgId = req.user?.organizationId || req.query['organizationId'] || req.query['dairyId'] || undefined;
+        const orgId = req.user?.organizationId || req.query['organizationId'] || req.headers['x-dairy-id'] || req.headers['x-dairy-tenant-id'] || undefined;
         const data = await getPendingRegistrationsUseCase.execute(orgId);
         res.json({ success: true, count: data.length, data });
     }
@@ -124,6 +163,18 @@ router.get('/:id/status', async (req, res, next) => {
         const id = req.params.id;
         const customerId = (Array.isArray(id) ? id[0] : id) || '';
         const data = await getCustomerStatusUseCase.execute(customerId);
+        let assignedDairyName = 'DFarm Dairy Cooperative';
+        if (data.organizationId) {
+            try {
+                const orgRes = await db.query(`SELECT name FROM organizations WHERE id = $1 LIMIT 1;`, [data.organizationId]);
+                if (orgRes.rows.length > 0 && orgRes.rows[0].name) {
+                    assignedDairyName = orgRes.rows[0].name;
+                }
+            }
+            catch {
+                // ignore
+            }
+        }
         res.json({
             success: true,
             data,
@@ -131,7 +182,7 @@ router.get('/:id/status', async (req, res, next) => {
             registrationStatus: data.registrationStatus,
             reason: data.rejectionReason,
             rejectionReason: data.rejectionReason,
-            assignedDairyName: 'Shree Krishna Sahakari Dudh Sanstha',
+            assignedDairyName,
             customerCode: data.farmerCode,
             fullName: data.fullName,
         });
@@ -176,7 +227,32 @@ router.post('/:id/reject', optionalAuthenticate, async (req, res, next) => {
         next(err);
     }
 });
-// 5. Update Biometric Face Enrollment (128-dim vector) - supports both PUT and POST
+// 8. Soft Delete Customer
+router.post('/:id/soft-delete', optionalAuthenticate, async (req, res, next) => {
+    try {
+        const id = req.params.id;
+        const customerId = (Array.isArray(id) ? id[0] : id) || '';
+        const reason = req.body?.reason || 'Soft-deleted by administrator';
+        await db.query(`UPDATE customers SET is_deleted = TRUE, deletion_reason = $1, updated_at = NOW() WHERE id = $2;`, [reason, customerId]);
+        res.json({ success: true, message: 'Customer account marked as soft-deleted in audit records.' });
+    }
+    catch (err) {
+        next(err);
+    }
+});
+// 9. Restore Soft Deleted Customer
+router.post('/:id/restore', optionalAuthenticate, async (req, res, next) => {
+    try {
+        const id = req.params.id;
+        const customerId = (Array.isArray(id) ? id[0] : id) || '';
+        await db.query(`UPDATE customers SET is_deleted = FALSE, deletion_reason = NULL, updated_at = NOW() WHERE id = $1;`, [customerId]);
+        res.json({ success: true, message: 'Customer account successfully restored to active status.' });
+    }
+    catch (err) {
+        next(err);
+    }
+});
+// 10. Update Biometric Face Enrollment (128-dim vector) - supports both PUT and POST
 const handleBiometricsUpdate = async (req, res, next) => {
     try {
         const id = req.params.id;
@@ -198,7 +274,7 @@ const handleBiometricsUpdate = async (req, res, next) => {
 };
 router.put('/:id/biometrics/update', optionalAuthenticate, handleBiometricsUpdate);
 router.post('/:id/biometrics/update', optionalAuthenticate, handleBiometricsUpdate);
-// 6. Get Customer By ID
+// 11. Get Customer By ID
 router.get('/:id', optionalAuthenticate, async (req, res, next) => {
     try {
         const id = req.params.id;

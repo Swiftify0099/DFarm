@@ -20,6 +20,8 @@ export declare class VerifyOperatorOtpUseCase {
             mobileNumber: string;
             role: string;
             dairyId: string;
+            dairyName?: string;
+            dairyCode?: string;
             centerId: string;
         };
     }>;

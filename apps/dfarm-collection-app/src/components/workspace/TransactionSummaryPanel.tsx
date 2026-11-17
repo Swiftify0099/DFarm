@@ -1,9 +1,9 @@
 import React, { useState } from 'react'
-import type { CustomerIdentity, MilkCategory } from '@/types'
+import type { CustomerIdentity, MilkCategory, CollectionTransaction } from '@/types'
 import { useHardware } from '@/context/HardwareContext'
 import { useAuth } from '@/context/AuthContext'
-import { transactionsApi } from '@/api/client'
-import { MockCollectionBackend } from '@/api/mock-backend'
+import { transactionsApi, ratesApi } from '@/api/client'
+import { localDB } from '@/services/local-storage'
 import { ClayCard, ClayBadge } from '@/components/ui'
 import { MilkCategoryToggle } from './MilkCategoryToggle'
 import { SaveTransactionButton } from './SaveTransactionButton'
@@ -33,7 +33,7 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   // Rate Matrix Real-Time Calculation
-  const { ratePerLiter, version } = MockCollectionBackend.calculateRate(
+  const { ratePerLiter, version } = ratesApi.calculateRate(
     measurements.milkCategory,
     measurements.fat,
     measurements.snf
@@ -71,34 +71,54 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
 
     setIsSubmitting(true)
     try {
-      let res: any
-      try {
-        res = await transactionsApi.submit({
-          sessionId: activeSession?.id || 'session-current-001',
-          sessionCode: activeSession?.sessionCode,
+      let res: CollectionTransaction
+      if (isNetworkOnline) {
+        try {
+          res = await transactionsApi.submit({
+            sessionId: activeSession?.id || 'session-current-001',
+            sessionCode: activeSession?.sessionCode,
+            customerId: customer.id,
+            milkCategory: measurements.milkCategory,
+            weightLiters: measurements.weightLiters,
+            fat: measurements.fat,
+            snf: measurements.snf,
+            clrDensity: measurements.clrDensity,
+            identificationMethod: 'FACE_YUNET_SFACE',
+            operatorName: operator?.fullName || 'Operator',
+            isOffline: false,
+          })
+        } catch (apiErr: any) {
+          throw new Error(`Server submission failed: ${apiErr.message || 'Network error'}`)
+        }
+      } else {
+        // Honest offline persistence: store directly in IndexedDB offline queue without fake mock fallback
+        const offlineTxn: CollectionTransaction = {
+          id: `OFFLINE-${crypto.randomUUID()}`,
+          transactionCode: `OFF-${Date.now().toString().slice(-6)}`,
+          sessionId: activeSession?.id || 'offline-session',
+          dairyId: customer.dairyId || operator?.dairyId || '',
           customerId: customer.id,
+          customerCode: customer.customerCode,
+          customerName: customer.fullName,
+          timestamp: new Date().toISOString(),
+          date: new Date().toISOString().split('T')[0],
+          shift: (activeSession?.shift || 'MORNING') as any,
           milkCategory: measurements.milkCategory,
           weightLiters: measurements.weightLiters,
-          fat: measurements.fat,
-          snf: measurements.snf,
-          clrDensity: measurements.clrDensity,
+          fatPercentage: measurements.fat,
+          snfPercentage: measurements.snf,
+          clrDensity: measurements.clrDensity || 28.0,
+          appliedRatePerLiter: ratePerLiter,
+          rateChartVersion: version,
+          totalAmount: totalAmount,
           identificationMethod: 'FACE_YUNET_SFACE',
+          syncStatus: 'PENDING_OFFLINE',
+          deviceId: 'KIOSK_MAIN',
           operatorName: operator?.fullName || 'Operator',
-          isOffline: !isNetworkOnline,
-        })
-      } catch (apiErr: any) {
-        console.warn('Backend submit failed or offline, falling back to local DB/mock:', apiErr)
-        res = await MockCollectionBackend.submitTransaction({
-          customerId: customer.id,
-          milkCategory: measurements.milkCategory,
-          weightLiters: measurements.weightLiters,
-          fat: measurements.fat,
-          snf: measurements.snf,
-          clrDensity: measurements.clrDensity,
-          identificationMethod: 'FACE_YUNET_SFACE',
-          operatorName: operator?.fullName || 'Operator',
-          isOffline: !isNetworkOnline,
-        })
+        }
+        await localDB.queueOfflineTransaction(offlineTxn)
+        await localDB.saveTransaction(offlineTxn)
+        res = offlineTxn
       }
 
       setSuccessMessage(

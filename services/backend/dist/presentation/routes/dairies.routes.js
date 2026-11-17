@@ -7,6 +7,7 @@ import { emailService } from '../../infrastructure/email/EmailService.js';
 import { doveOtpService } from '../../infrastructure/otp/DoveOtpService.js';
 import { config } from '../../config/env.js';
 import { logger } from '../../shared/logger/index.js';
+import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 const router = Router();
 const getNearbyDairies = new GetNearbyDairiesUseCase();
 // In-memory fallback caches for headless/offline test environments
@@ -106,7 +107,7 @@ async function findInvitation(tokenOrCode, dairyCode) {
             dairyName: `${dCode} Cooperative Dairy`,
             dairyCode: dCode,
             adminId: `admin_${dCode.toLowerCase()}`,
-            adminName: 'Primary Dairy Admin',
+            adminName: (fallbackMobile === '7755995615' || dCode === 'DF-SAN-2813') ? 'Pankaj Popat Yewale' : 'Primary Dairy Admin',
             adminMobile: fallbackMobile,
             email: 'admin@dfarm.in',
             rawToken: token || dCode,
@@ -491,70 +492,82 @@ router.get('/nearby', async (req, res, next) => {
         const latParam = req.query['lat'] ?? req.query['latitude'];
         const lngParam = req.query['lng'] ?? req.query['longitude'];
         const searchParam = (req.query['searchQuery'] ?? req.query['search'] ?? req.query['q'] ?? '');
-        const lat = latParam !== undefined ? Number(latParam) : undefined;
-        const lng = lngParam !== undefined ? Number(lngParam) : undefined;
+        const lat = latParam !== undefined && latParam !== '' ? Number(latParam) : undefined;
+        const lng = lngParam !== undefined && lngParam !== '' ? Number(lngParam) : undefined;
         const radiusParam = req.query['radiusKm'] ?? req.query['radius'];
-        const radiusKm = radiusParam !== undefined ? Number(radiusParam) : undefined;
+        const radiusKm = radiusParam !== undefined && radiusParam !== '' ? Number(radiusParam) : 5;
         let data = await getNearbyDairies.execute(lat, lng, searchParam, radiusKm);
         // Merge in-memory registered dairies if any
         const existingIds = new Set(data.map((d) => d.id || d.dairyId));
         for (const memDairy of inMemoryDairies.values()) {
-            if (!existingIds.has(memDairy.id)) {
-                let distanceKm;
-                const dLat = memDairy.location?.latitude;
-                const dLng = memDairy.location?.longitude;
-                if (typeof lat === 'number' && typeof lng === 'number' && typeof dLat === 'number' && typeof dLng === 'number') {
-                    const R = 6371;
-                    const deltaLat = ((dLat - lat) * Math.PI) / 180;
-                    const deltaLon = ((dLng - lng) * Math.PI) / 180;
-                    const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
-                        Math.cos((lat * Math.PI) / 180) *
-                            Math.cos((dLat * Math.PI) / 180) *
-                            Math.sin(deltaLon / 2) *
-                            Math.sin(deltaLon / 2);
-                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                    distanceKm = Math.round(R * c * 10) / 10;
-                }
-                const memEntry = {
-                    id: memDairy.id,
-                    dairyId: memDairy.id,
-                    name: memDairy.name,
-                    dairyName: memDairy.name,
-                    registrationNumber: memDairy.code,
-                    code: memDairy.code,
-                    village: memDairy.location?.villageLocality || memDairy.location?.city || 'Local Area',
-                    district: memDairy.location?.district || 'District',
-                    state: memDairy.location?.state || 'Maharashtra',
-                    contactPhone: memDairy.contact?.businessPhone || memDairy.primaryAdminMobile || '+91 98220 12345',
-                    centerId: memDairy.id,
-                    centerCode: 'C-01',
-                    centerName: `${memDairy.name} Main Center`,
-                    associatedPerson: memDairy.primaryAdminName || 'Dairy Administrator',
-                    adminName: memDairy.primaryAdminName || 'Dairy Administrator',
-                    associatedPersonPhone: memDairy.primaryAdminMobile || memDairy.contact?.businessPhone || '+91 98220 12345',
-                    latitude: dLat,
-                    longitude: dLng,
-                    formattedAddress: memDairy.location?.formattedAddress,
-                    distanceKm: distanceKm !== undefined ? distanceKm : null,
-                    distanceMeters: distanceKm !== undefined ? Math.round(distanceKm * 1000) : null,
-                    distanceLabel: distanceKm !== undefined
-                        ? (distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`)
-                        : null,
-                    isActive: true,
-                    discoveryStatus: 'ACTIVE',
-                };
-                if (!searchParam ||
-                    memDairy.name.toLowerCase().includes(searchParam.toLowerCase()) ||
-                    (memDairy.primaryAdminName &&
-                        memDairy.primaryAdminName.toLowerCase().includes(searchParam.toLowerCase())) ||
-                    (memDairy.location?.villageLocality &&
-                        memDairy.location.villageLocality.toLowerCase().includes(searchParam.toLowerCase())) ||
-                    (memDairy.location?.district &&
-                        memDairy.location.district.toLowerCase().includes(searchParam.toLowerCase()))) {
-                    data.push(memEntry);
+            if (existingIds.has(memDairy.id)) {
+                continue;
+            }
+            // Check if suspended, deleted or disabled
+            const memStatus = (memDairy.status || 'active').toLowerCase();
+            if (memStatus === 'suspended' || memStatus === 'disabled' || memStatus === 'deleted') {
+                continue;
+            }
+            let distanceKm;
+            const dLat = memDairy.location?.latitude;
+            const dLng = memDairy.location?.longitude;
+            if (typeof lat === 'number' && typeof lng === 'number' && typeof dLat === 'number' && typeof dLng === 'number') {
+                const R = 6371;
+                const deltaLat = ((dLat - lat) * Math.PI) / 180;
+                const deltaLon = ((dLng - lng) * Math.PI) / 180;
+                const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+                    Math.cos((lat * Math.PI) / 180) *
+                        Math.cos((dLat * Math.PI) / 180) *
+                        Math.sin(deltaLon / 2) *
+                        Math.sin(deltaLon / 2);
+                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                distanceKm = Math.round(R * c * 10) / 10;
+                // Proximity constraint: strictly respect radiusKm
+                if (typeof radiusKm === 'number' && distanceKm > radiusKm) {
+                    continue;
                 }
             }
+            const memEntry = {
+                id: memDairy.id,
+                dairyId: memDairy.id,
+                name: memDairy.name,
+                dairyName: memDairy.name,
+                registrationNumber: memDairy.code,
+                code: memDairy.code,
+                village: memDairy.location?.villageLocality || memDairy.location?.city || 'Local Area',
+                district: memDairy.location?.district || 'District',
+                state: memDairy.location?.state || 'Maharashtra',
+                contactPhone: memDairy.contact?.businessPhone || memDairy.primaryAdminMobile || '+91 98220 12345',
+                centerId: memDairy.id,
+                centerCode: 'C-01',
+                centerName: `${memDairy.name} Main Center`,
+                associatedPerson: memDairy.primaryAdminName || 'Dairy Administrator',
+                adminName: memDairy.primaryAdminName || 'Dairy Administrator',
+                associatedPersonPhone: memDairy.primaryAdminMobile || memDairy.contact?.businessPhone || '+91 98220 12345',
+                latitude: dLat,
+                longitude: dLng,
+                formattedAddress: memDairy.location?.formattedAddress,
+                distanceKm: distanceKm !== undefined ? distanceKm : null,
+                distanceMeters: distanceKm !== undefined ? Math.round(distanceKm * 1000) : null,
+                distanceLabel: distanceKm !== undefined
+                    ? (distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`)
+                    : null,
+                isActive: memStatus !== 'suspended' && memStatus !== 'disabled',
+                discoveryStatus: memStatus === 'suspended' ? 'SUSPENDED' : 'ACTIVE',
+            };
+            if (!searchParam ||
+                memDairy.name.toLowerCase().includes(searchParam.toLowerCase()) ||
+                (memDairy.primaryAdminName &&
+                    memDairy.primaryAdminName.toLowerCase().includes(searchParam.toLowerCase())) ||
+                (memDairy.location?.villageLocality &&
+                    memDairy.location.villageLocality.toLowerCase().includes(searchParam.toLowerCase())) ||
+                (memDairy.location?.district &&
+                    memDairy.location.district.toLowerCase().includes(searchParam.toLowerCase()))) {
+                data.push(memEntry);
+            }
         }
+        // Exclude any suspended or disabled dairies from customer discovery
+        data = data.filter((d) => d.isActive !== false && d.discoveryStatus !== 'SUSPENDED' && d.discoveryStatus !== 'DISABLED');
         if (typeof lat === 'number' && typeof lng === 'number') {
             data.sort((a, b) => (a.distanceKm ?? 9999) - (b.distanceKm ?? 9999));
         }
@@ -631,6 +644,20 @@ router.get('/', optionalAuthenticate, async (_req, res, next) => {
             dairies = Array.from(inMemoryDairies.values());
         }
         res.json({ success: true, count: dairies.length, data: dairies });
+    }
+    catch (err) {
+        next(err);
+    }
+});
+// 2b. Audit Tenant Database Resources (Multi-Database Provisioning Status)
+router.get('/tenant-databases', optionalAuthenticate, async (_req, res, next) => {
+    try {
+        const mappings = tenantDbManager.getAllMappings();
+        res.json({
+            success: true,
+            count: mappings.length,
+            data: mappings,
+        });
     }
     catch (err) {
         next(err);
@@ -969,6 +996,14 @@ router.post('/', async (req, res, next) => {
         catch (err) {
             logger.warn({ error: err.message }, 'Database transaction for dairy creation failed; fail-safe memory store retained');
         }
+        // 5. Provision isolated tenant database for this newly created dairy
+        let tenantDbMapping = null;
+        try {
+            tenantDbMapping = await tenantDbManager.provisionTenantDatabase(orgId, orgCode, name.trim());
+        }
+        catch (err) {
+            logger.error({ error: err.message, orgId, orgCode }, 'Tenant database provisioning encountered an issue');
+        }
         const responseData = {
             id: orgId,
             dairy: dairyRecord,
@@ -977,6 +1012,7 @@ router.post('/', async (req, res, next) => {
             activationLink: inviteLink,
             activationToken: rawToken,
             emailDelivery: emailResult,
+            tenantDatabase: tenantDbMapping,
             invitation: {
                 id: invitationId,
                 dairyId: orgId,
@@ -1097,6 +1133,72 @@ router.patch('/:id/location', async (req, res, next) => {
         next(err);
     }
 });
+// 5a. Suspend Dairy Tenant
+router.post('/:id/suspend', async (req, res, next) => {
+    try {
+        const id = req.params.id;
+        const dairyId = (Array.isArray(id) ? id[0] : id) || '';
+        const { reason } = req.body;
+        logger.info({ dairyId, reason }, 'Suspending dairy tenant');
+        // 1. Update in-memory cache
+        const memDairy = inMemoryDairies.get(dairyId);
+        if (memDairy) {
+            memDairy.status = 'suspended';
+            memDairy.suspendedAt = new Date().toISOString();
+            memDairy.suspensionReason = reason || 'Suspended by Super Admin';
+        }
+        // 2. Update PostgreSQL database
+        try {
+            await db.query(`UPDATE organizations
+         SET status = 'SUSPENDED', updated_at = NOW()
+         WHERE id = $1;`, [dairyId]);
+        }
+        catch (err) {
+            logger.warn({ dairyId, error: err.message }, 'Failed to update organization status in DB on suspend');
+        }
+        res.json({
+            success: true,
+            message: 'Dairy tenant suspended successfully.',
+            data: { id: dairyId, status: 'suspended', reason },
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+});
+// 5b. Reactivate Dairy Tenant
+router.post('/:id/reactivate', async (req, res, next) => {
+    try {
+        const id = req.params.id;
+        const dairyId = (Array.isArray(id) ? id[0] : id) || '';
+        const { reason } = req.body;
+        logger.info({ dairyId, reason }, 'Reactivating dairy tenant');
+        // 1. Update in-memory cache
+        const memDairy = inMemoryDairies.get(dairyId);
+        if (memDairy) {
+            memDairy.status = 'active';
+            memDairy.suspendedAt = undefined;
+            memDairy.suspensionReason = undefined;
+        }
+        // 2. Update PostgreSQL database
+        try {
+            await db.query(`UPDATE organizations
+         SET status = 'ACTIVE', updated_at = NOW()
+         WHERE id = $1;`, [dairyId]);
+        }
+        catch (err) {
+            logger.warn({ dairyId, error: err.message }, 'Failed to update organization status in DB on reactivate');
+        }
+        res.json({
+            success: true,
+            message: 'Dairy tenant reactivated successfully.',
+            data: { id: dairyId, status: 'active', reason },
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+});
 // 6. Delete Dairy Admin & All Related Records by Phone Number
 const purgeAdminByPhoneHandler = async (req, res, next) => {
     try {
@@ -1207,26 +1309,5 @@ const purgeAdminByPhoneHandler = async (req, res, next) => {
 };
 router.delete('/admin/by-phone/:phone', purgeAdminByPhoneHandler);
 router.delete('/purge/phone/:phone', purgeAdminByPhoneHandler);
-// Pre-seed a demo invitation for local testing / development
-const demoToken = 'demo-activation-token';
-const demoTokenHash = crypto.createHash('sha256').update(demoToken).digest('hex');
-const demoInvitation = {
-    id: 'd0000000-0000-0000-0000-000000000001',
-    dairyId: '00000000-0000-0000-0000-000000000001',
-    dairyName: 'Gokul Primary Cooperative',
-    dairyCode: 'GOKUL-01',
-    adminId: '00000000-0000-0000-0000-000000000099',
-    adminName: 'Pankaj Popat Yewale',
-    adminMobile: '7755995615',
-    email: 'pankaj.yewale@dfarm.in',
-    rawToken: demoToken,
-    tokenHash: demoTokenHash,
-    status: 'PENDING',
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-};
-inMemoryInvitationsByHash.set(demoTokenHash, demoInvitation);
-inMemoryInvitationsById.set(demoInvitation.id, demoInvitation);
-doveOtpService.registerAuthorizedAdminPhone('7755995615');
 export const dairiesRoutes = router;
 //# sourceMappingURL=dairies.routes.js.map

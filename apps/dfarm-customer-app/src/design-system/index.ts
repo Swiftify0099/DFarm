@@ -7,3 +7,6 @@ export * from './ClayBadge';
 export * from './ClayHeader';
 export * from './ClayModal';
 export * from './ClayStateView';
+export * from './DistanceBadge';
+export * from './AnimalSelector';
+export * from './StatusTimeline';

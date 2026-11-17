@@ -12,11 +12,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   DFARM_COLORS,
   DFARM_TYPOGRAPHY,
+  DFARM_RADIUS,
   ClayCard,
   ClayButton,
   ClayInput,
   ClayBadge,
 } from '../../design-system';
+import { DFarmBrandMark } from '../../assets/vectors/DFarmBrandMark';
 import { useAuth } from '../../features/auth/useAuth';
 import { DirectDoveSmsService } from '../../services/smsService';
 
@@ -36,7 +38,7 @@ export default function LoginScreen() {
     }
 
     if (!/^[6-9]\d{9}$/.test(cleaned)) {
-      setError('Number must begin with digits 6, 7, 8, or 9');
+      setError('Mobile number must begin with digits 6, 7, 8, or 9');
       return;
     }
 
@@ -69,6 +71,8 @@ export default function LoginScreen() {
     }
   };
 
+  const isFormValid = mobileNumber.replace(/\D/g, '').length === 10;
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
@@ -84,11 +88,11 @@ export default function LoginScreen() {
         >
           {/* Brand Visual Anchor */}
           <View style={styles.brandContainer}>
-            <View style={styles.logoPill}>
-              <View style={styles.logoDot} />
-              <Text style={styles.logoText}>DFARM</Text>
+            <View style={styles.logoBadgeContainer}>
+              <DFarmBrandMark width={180} height={44} />
             </View>
             <Text style={styles.tagline}>Smart Dairy Transparency</Text>
+            <Text style={styles.subTagline}>पारदर्शक दूध संकलन व थेट बँक जमा</Text>
           </View>
 
           {/* Main Claymorphic Login Card */}
@@ -100,27 +104,28 @@ export default function LoginScreen() {
             <Text style={styles.heading}>Enter Mobile Number</Text>
             <Text style={styles.subtitle}>
               We will send an instant SMS verification code to connect with your
-              dairy.
+              dairy collection center.
             </Text>
 
             <ClayInput
-              label="Mobile Number"
+              label="Mobile Number / मोबाईल नंबर"
               placeholder="98765 43210"
               keyboardType="phone-pad"
               autoComplete="tel"
               textContentType="telephoneNumber"
               returnKeyType="done"
-              onSubmitEditing={mobileNumber.length === 10 ? handleSendOtp : undefined}
+              onSubmitEditing={isFormValid ? handleSendOtp : undefined}
               maxLength={10}
               value={mobileNumber}
               onChangeText={(text) => {
-                setMobileNumber(text);
+                setMobileNumber(text.replace(/[^0-9]/g, ''));
                 if (error) setError(null);
               }}
               error={error || undefined}
               leftElement={
                 <View style={styles.prefixContainer}>
-                  <Text style={styles.prefixText}>🇮🇳 +91</Text>
+                  <Text style={styles.flagIcon}>🇮🇳</Text>
+                  <Text style={styles.prefixText}>+91</Text>
                   <View style={styles.prefixDivider} />
                 </View>
               }
@@ -130,14 +135,17 @@ export default function LoginScreen() {
               title="Get OTP Verification Code"
               onPress={handleSendOtp}
               loading={isRequestingOtp}
-              disabled={mobileNumber.length !== 10}
+              disabled={!isFormValid}
               style={styles.submitBtn}
             />
 
-            <Text style={styles.termsText}>
-              By proceeding, you agree to DFarm's Milk Producer Service Terms &
-              Biometric Data Privacy Policy.
-            </Text>
+            <View style={styles.termsBox}>
+              <Text style={styles.termsText}>
+                By proceeding, you agree to DFarm's{' '}
+                <Text style={styles.termsLink}>Milk Producer Service Terms</Text> &{' '}
+                <Text style={styles.termsLink}>Biometric Data Privacy Policy</Text>.
+              </Text>
+            </View>
           </ClayCard>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -161,40 +169,31 @@ const styles = StyleSheet.create({
   },
   brandContainer: {
     alignItems: 'center',
-    marginBottom: 28,
+    marginBottom: 24,
   },
-  logoPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  logoBadgeContainer: {
     backgroundColor: '#FFFFFF',
-    paddingVertical: 8,
-    paddingHorizontal: 20,
-    borderRadius: 9999,
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    borderRadius: DFARM_RADIUS.pill,
     borderWidth: 1.5,
     borderColor: DFARM_COLORS.border,
     shadowColor: DFARM_COLORS.primaryOrange,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 5 },
     shadowOpacity: 0.15,
-    shadowRadius: 10,
+    shadowRadius: 12,
     elevation: 4,
   },
-  logoDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: DFARM_COLORS.primaryOrange,
-    marginRight: 8,
-  },
-  logoText: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: DFARM_COLORS.primaryText,
-    letterSpacing: 1.5,
-  },
   tagline: {
-    ...DFARM_TYPOGRAPHY.bodyMd,
+    ...DFARM_TYPOGRAPHY.bodyLg,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryText,
+    marginTop: 12,
+  },
+  subTagline: {
+    ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
-    marginTop: 8,
+    marginTop: 2,
   },
   card: {
     paddingVertical: 24,
@@ -211,31 +210,47 @@ const styles = StyleSheet.create({
   subtitle: {
     ...DFARM_TYPOGRAPHY.bodyMd,
     color: DFARM_COLORS.secondaryText,
+    lineHeight: 20,
     marginBottom: 20,
   },
   prefixContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingRight: 8,
+  },
+  flagIcon: {
+    fontSize: 16,
+    marginRight: 4,
   },
   prefixText: {
-    fontSize: 15,
+    ...DFARM_TYPOGRAPHY.bodyLg,
     fontWeight: '700',
     color: DFARM_COLORS.primaryText,
     marginRight: 8,
   },
   prefixDivider: {
-    width: 1,
+    width: 1.5,
     height: 20,
     backgroundColor: DFARM_COLORS.border,
   },
   submitBtn: {
-    marginTop: 8,
+    marginTop: 6,
     marginBottom: 16,
+  },
+  termsBox: {
+    borderTopWidth: 1,
+    borderTopColor: DFARM_COLORS.border,
+    paddingTop: 14,
+    marginTop: 4,
   },
   termsText: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
     textAlign: 'center',
     lineHeight: 16,
+  },
+  termsLink: {
+    color: DFARM_COLORS.primaryOrange,
+    fontWeight: '600',
   },
 });

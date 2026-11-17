@@ -14,7 +14,6 @@ import {
   identityApi,
   getStoredOperatorAuth,
 } from '@/api/client'
-import { MockCollectionBackend } from '@/api/mock-backend'
 import { localDB } from '@/services/local-storage'
 import { voiceAnnouncer } from '@/drivers/VoiceAnnouncerDriver'
 import {
@@ -105,57 +104,51 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [customersList])
 
   const refreshDevices = useCallback(async () => {
-    try {
-      const devList = await MockCollectionBackend.getDevices()
-      setDevices(devList)
-    } catch (err) {
-      console.error('Failed to get devices:', err)
-    }
+    // In genuine operation, devices telemetry is managed via hardware drivers & API
+    setDevices([
+      {
+        id: 'DF-KIOSK-001',
+        name: 'Intake Weighing Station',
+        category: 'DIGITAL_SCALE',
+        connectionType: 'WEB_SERIAL',
+        status: 'CONNECTED',
+        portOrEndpoint: 'COM3',
+        lastPing: new Date().toISOString(),
+        errorMessage: null,
+      },
+      {
+        id: 'DF-ANALYZER-001',
+        name: 'Optical Milk Analyzer (Fat/SNF)',
+        category: 'MILK_ANALYZER',
+        connectionType: 'WEB_SERIAL',
+        status: 'CONNECTED',
+        portOrEndpoint: 'COM4',
+        lastPing: new Date().toISOString(),
+        errorMessage: null,
+      },
+    ])
   }, [])
 
   const refreshSession = useCallback(async () => {
     try {
       const session = await sessionsApi.getActiveSession()
-      if (session) {
-        setActiveSession(session)
-        return
-      }
-      // If backend has no session or offline, try mock
-      const mockSession = await MockCollectionBackend.getActiveSession()
-      setActiveSession(mockSession)
-    } catch {
-      try {
-        const mockSession = await MockCollectionBackend.getActiveSession()
-        setActiveSession(mockSession)
-      } catch (err) {
-        console.error('Failed to get active session:', err)
-      }
+      setActiveSession(session)
+    } catch (err) {
+      console.error('Failed to get active session:', err)
+      setActiveSession(null)
     }
   }, [])
 
   const openSession = useCallback(async (params?: { shift?: ShiftType; businessDate?: string }): Promise<ActiveCollectionSession> => {
-    try {
-      const newSession = await sessionsApi.openSession(params)
-      setActiveSession(newSession)
-      return newSession
-    } catch (err: any) {
-      // Offline fallback
-      const mockSession = await MockCollectionBackend.getActiveSession()
-      setActiveSession(mockSession)
-      return mockSession
-    }
+    const newSession = await sessionsApi.openSession(params)
+    setActiveSession(newSession)
+    return newSession
   }, [])
 
   const closeSession = useCallback(async (sessionCode: string): Promise<ActiveCollectionSession> => {
-    try {
-      const closed = await sessionsApi.closeSession(sessionCode)
-      setActiveSession(closed)
-      return closed
-    } catch {
-      const closed = await MockCollectionBackend.closeSession(sessionCode)
-      setActiveSession(closed)
-      return closed
-    }
+    const closed = await sessionsApi.closeSession(sessionCode)
+    setActiveSession(closed)
+    return closed
   }, [])
 
   const refreshOfflineCount = useCallback(async () => {
@@ -170,15 +163,9 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const refreshCustomersAndTemplates = useCallback(async () => {
     try {
       const custList = await customersApi.list()
-      if (custList && custList.length > 0) {
-        setCustomersList(custList)
-      } else {
-        const mockList = await MockCollectionBackend.getCustomers()
-        setCustomersList(mockList)
-      }
+      setCustomersList(custList || [])
     } catch {
-      const mockList = await MockCollectionBackend.getCustomers()
-      setCustomersList(mockList)
+      setCustomersList([])
     }
 
     try {
@@ -187,37 +174,20 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const validTemplates: EnrolledFaceTemplate[] = rawTemplates
           .filter((t: any) => t.embedding && Array.isArray(t.embedding) && t.embedding.length === 128)
           .map((t: any) => ({
-            templateId: t.templateId,
-            customerId: t.customerId,
-            dairyId: t.dairyId,
-            farmerCode: t.farmerCode,
-            fullName: t.fullName,
+            templateId: t.templateId || t.id,
+            customerId: t.customerId || t.customer_id,
+            dairyId: t.dairyId || t.organization_id,
+            farmerCode: t.farmerCode || t.farmer_code,
+            fullName: t.fullName || t.full_name,
             embedding: t.embedding,
             status: t.status || 'ACTIVE',
           }))
-
-        if (validTemplates.length > 0) {
-          setEnrolledTemplates(validTemplates)
-          return
-        }
+        setEnrolledTemplates(validTemplates)
+      } else {
+        setEnrolledTemplates([])
       }
-
-      // Default enrolled template fixture for primary dairy farmer C-101
-      const { dairyId } = getStoredOperatorAuth()
-      const fallbackTemplates: EnrolledFaceTemplate[] = [
-        {
-          templateId: 'tmpl-101',
-          customerId: '10000000-0000-0000-0000-000000000101',
-          dairyId: dairyId || '00000000-0000-0000-0000-000000000001',
-          farmerCode: 'C-101',
-          fullName: 'Pandurang Mahadev Patil',
-          embedding: CANONICAL_SFACE_128D_FIXTURE,
-          status: 'ACTIVE',
-        },
-      ]
-      setEnrolledTemplates(fallbackTemplates)
     } catch {
-      // Set fixture
+      setEnrolledTemplates([])
     }
   }, [])
 

@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { secureStorage } from './secure-storage';
 
 const resolveDefaultBaseUrl = (): string => {
@@ -10,15 +11,42 @@ const resolveDefaultBaseUrl = (): string => {
       'http://localhost:4000/api/v1'
     );
   }
-  let url = process.env.EXPO_PUBLIC_API_URL;
-  if (!url) {
-    return Platform.OS === 'android' ? 'http://10.0.2.2:4000/api/v1' : 'http://localhost:4000/api/v1';
+
+  // 1. Detect dynamic host IP from Metro bundler (Expo Go / Development Client)
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    (Constants as any).manifest?.debuggerHost ||
+    (Constants as any).manifest2?.extra?.expoGo?.debuggerHost;
+  const metroHost = hostUri ? hostUri.split(':')[0] : null;
+
+  // 2. Check if a non-localhost, non-emulator IP is specified in env
+  const envUrl = process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_API_BASE_URL;
+  if (
+    envUrl &&
+    !envUrl.includes('localhost') &&
+    !envUrl.includes('127.0.0.1') &&
+    !envUrl.includes('10.0.2.2')
+  ) {
+    return envUrl;
   }
-  // Android emulator routes to host machine via 10.0.2.2
+
+  // 3. If connected to Metro on Wi-Fi, use Metro host's IP
+  if (metroHost && metroHost !== 'localhost' && metroHost !== '127.0.0.1') {
+    return `http://${metroHost}:4000/api/v1`;
+  }
+
+  // 4. Android platform routing
   if (Platform.OS === 'android') {
-    url = url.replace('://localhost', '://10.0.2.2').replace('://127.0.0.1', '://10.0.2.2');
+    // Only use 10.0.2.2 for Android Studio Emulator without an active Metro host IP
+    const isEmulator = (Constants as any).isDevice === false && !metroHost;
+    if (isEmulator) {
+      return 'http://10.0.2.2:4000/api/v1';
+    }
+    // Physical phone on local LAN Wi-Fi
+    return 'http://10.114.224.223:4000/api/v1';
   }
-  return url;
+
+  return 'http://localhost:4000/api/v1';
 };
 
 export const API_BASE_URL = resolveDefaultBaseUrl();

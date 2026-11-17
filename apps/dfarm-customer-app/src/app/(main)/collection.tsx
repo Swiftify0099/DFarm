@@ -19,6 +19,9 @@ import {
 } from '../../design-system';
 import { useCollection } from '../../features/collection/useCollection';
 import { MilkCollectionRecord } from '../../types/collection';
+import { CowIcon } from '../../assets/vectors/CowIcon';
+import { BuffaloIcon } from '../../assets/vectors/BuffaloIcon';
+import { ShiftSunIcon, ShiftMoonIcon, ReceiptSealIcon } from '../../assets/vectors/NavAssets';
 
 export default function CollectionHistoryScreen() {
   const [animalFilter, setAnimalFilter] = useState<'ALL' | 'COW' | 'BUFFALO'>('ALL');
@@ -32,34 +35,38 @@ export default function CollectionHistoryScreen() {
     <SafeAreaView style={styles.container}>
       <ClayHeader
         title="Milk Collections"
-        subtitle="Daily Morning & Evening Shift Records"
+        subtitle="दैनिक सकाळ व संध्याकाळ पाळी संकलन"
       />
 
       {/* Filter Tabs */}
       <View style={styles.filterSection}>
         <View style={styles.filterRow}>
-          {(['ALL', 'COW', 'BUFFALO'] as const).map((type) => {
-            const isSelected = animalFilter === type;
+          {(
+            [
+              { id: 'ALL', label: 'All Collections', icon: null },
+              { id: 'COW', label: 'Cow Milk', icon: <CowIcon size={18} /> },
+              { id: 'BUFFALO', label: 'Buffalo Milk', icon: <BuffaloIcon size={18} /> },
+            ] as const
+          ).map((item) => {
+            const isSelected = animalFilter === item.id;
             return (
               <Pressable
-                key={type}
-                onPress={() => setAnimalFilter(type)}
-                style={[
+                key={item.id}
+                onPress={() => setAnimalFilter(item.id)}
+                style={({ pressed }) => [
                   styles.filterPill,
                   isSelected && styles.filterPillActive,
+                  pressed && styles.pressed,
                 ]}
               >
+                {item.icon && <View style={styles.filterIconSlot}>{item.icon}</View>}
                 <Text
                   style={[
                     styles.filterPillText,
                     isSelected && styles.filterPillTextActive,
                   ]}
                 >
-                  {type === 'ALL'
-                    ? 'All Collections'
-                    : type === 'COW'
-                    ? '🐄 Cow Milk'
-                    : '🐃 Buffalo Milk'}
+                  {item.label}
                 </Text>
               </Pressable>
             );
@@ -78,14 +85,20 @@ export default function CollectionHistoryScreen() {
           data={collections}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
-            <Pressable onPress={() => setSelectedRecord(item)}>
+            <Pressable
+              onPress={() => setSelectedRecord(item)}
+              style={({ pressed }) => pressed && styles.pressed}
+            >
               <ClayCard variant="raised" style={styles.recordCard}>
                 <View style={styles.cardTopRow}>
                   <View style={styles.shiftBadgeRow}>
-                    <Text style={styles.shiftIcon}>
-                      {item.shift === 'MORNING' ? '☀️' : '🌙'}
-                    </Text>
+                    {item.shift === 'EVENING' ? (
+                      <ShiftMoonIcon size={16} />
+                    ) : (
+                      <ShiftSunIcon size={16} />
+                    )}
                     <Text style={styles.shiftText}>
                       {item.shift} • {item.collectionTime}
                     </Text>
@@ -95,6 +108,13 @@ export default function CollectionHistoryScreen() {
                   <ClayBadge
                     label={item.animalType}
                     variant={item.animalType === 'BUFFALO' ? 'buffalo' : 'cow'}
+                    icon={
+                      item.animalType === 'BUFFALO' ? (
+                        <BuffaloIcon size={12} />
+                      ) : (
+                        <CowIcon size={12} />
+                      )
+                    }
                   />
                 </View>
 
@@ -124,8 +144,8 @@ export default function CollectionHistoryScreen() {
                 </View>
 
                 <View style={styles.cardFooter}>
-                  <Text style={styles.receiptNo}>Receipt: #{item.receiptNumber}</Text>
-                  <Text style={styles.operatorText}>👤 {item.operatorName}</Text>
+                  <Text style={styles.receiptNo}>Receipt #{item.receiptNumber}</Text>
+                  <Text style={styles.operatorText}>Officer: {item.operatorName}</Text>
                 </View>
               </ClayCard>
             </Pressable>
@@ -143,9 +163,10 @@ export default function CollectionHistoryScreen() {
         >
           <View style={styles.modalContent}>
             <View style={styles.sealRow}>
-              <ClayBadge label="Biometrically Verified" variant="success" />
+              <ReceiptSealIcon size={28} />
+              <ClayBadge label="Biometrically Authenticated" variant="success" />
               <Text style={styles.timestampModal}>
-                {selectedRecord.collectionDate} at {selectedRecord.collectionTime}
+                {selectedRecord.collectionDate} • {selectedRecord.collectionTime}
               </Text>
             </View>
 
@@ -187,7 +208,7 @@ export default function CollectionHistoryScreen() {
                 </Text>
               </View>
               <View style={[styles.tableRow, styles.totalRow]}>
-                <Text style={styles.totalLabel}>Gross Shift Payout</Text>
+                <Text style={styles.totalLabel}>Gross Shift Credit</Text>
                 <Text style={styles.totalVal}>
                   ₹{selectedRecord.totalAmount.toFixed(2)}
                 </Text>
@@ -218,56 +239,57 @@ const styles = StyleSheet.create({
   },
   filterRow: {
     flexDirection: 'row',
+    gap: 8,
   },
   filterPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: 7,
     paddingHorizontal: 14,
     borderRadius: DFARM_RADIUS.pill,
-    backgroundColor: DFARM_COLORS.surfaceInset,
+    backgroundColor: DFARM_COLORS.surfaceWhite,
     borderWidth: 1.5,
     borderColor: DFARM_COLORS.border,
-    marginRight: 8,
   },
   filterPillActive: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: DFARM_COLORS.primaryOrange,
     borderColor: DFARM_COLORS.primaryOrange,
+  },
+  filterIconSlot: {
+    marginRight: 6,
   },
   filterPillText: {
     ...DFARM_TYPOGRAPHY.bodySm,
     fontWeight: '600',
-    color: DFARM_COLORS.secondaryText,
+    color: DFARM_COLORS.primaryText,
   },
   filterPillTextActive: {
-    color: DFARM_COLORS.primaryOrange,
+    color: '#FFFFFF',
     fontWeight: '700',
   },
   listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 84,
+    padding: 16,
+    gap: 12,
+    paddingBottom: 24,
   },
   recordCard: {
-    marginBottom: 12,
-    padding: 14,
+    padding: 16,
   },
   cardTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   shiftBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  shiftIcon: {
-    fontSize: 14,
-    marginRight: 4,
+    gap: 6,
   },
   shiftText: {
     ...DFARM_TYPOGRAPHY.bodySm,
     fontWeight: '700',
     color: DFARM_COLORS.primaryText,
-    marginRight: 4,
   },
   dateText: {
     ...DFARM_TYPOGRAPHY.bodySm,
@@ -275,42 +297,48 @@ const styles = StyleSheet.create({
   },
   metricsGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
+    alignItems: 'center',
+    backgroundColor: DFARM_COLORS.surfaceInset,
+    padding: 10,
+    borderRadius: DFARM_RADIUS.sm,
+    borderWidth: 1,
     borderColor: DFARM_COLORS.border,
+    marginBottom: 10,
   },
   metricCol: {
     flex: 1,
   },
   amountCol: {
+    flex: 1.2,
     alignItems: 'flex-end',
   },
   metricLabel: {
+    ...DFARM_TYPOGRAPHY.bodySm,
     fontSize: 10,
-    fontWeight: '600',
     color: DFARM_COLORS.secondaryText,
     marginBottom: 2,
   },
-  metricVal: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: DFARM_COLORS.primaryText,
-  },
   metricValBold: {
-    fontSize: 14,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '800',
     color: DFARM_COLORS.primaryText,
   },
+  metricVal: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryText,
+  },
   amountBold: {
-    fontSize: 15,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '800',
     color: DFARM_COLORS.primaryOrange,
   },
   cardFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: DFARM_COLORS.border,
     paddingTop: 8,
   },
   receiptNo: {
@@ -322,73 +350,83 @@ const styles = StyleSheet.create({
     color: DFARM_COLORS.secondaryText,
   },
   modalContent: {
-    paddingVertical: 4,
+    paddingTop: 4,
+    gap: 14,
   },
   sealRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    gap: 8,
+    flexWrap: 'wrap',
   },
   timestampModal: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
+    marginLeft: 'auto',
   },
   receiptTable: {
     backgroundColor: DFARM_COLORS.surfaceInset,
-    borderRadius: DFARM_RADIUS.md,
     padding: 14,
-    borderWidth: 1,
+    borderRadius: DFARM_RADIUS.md,
+    borderWidth: 1.5,
     borderColor: DFARM_COLORS.border,
-    marginBottom: 16,
+    gap: 8,
   },
   tableRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 6,
+    alignItems: 'center',
+    paddingVertical: 2,
   },
   tableLabel: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
   },
   tableVal: {
-    ...DFARM_TYPOGRAPHY.bodySm,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '600',
     color: DFARM_COLORS.primaryText,
   },
   tableValBold: {
-    ...DFARM_TYPOGRAPHY.bodySm,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '800',
     color: DFARM_COLORS.primaryText,
   },
   totalRow: {
-    marginTop: 6,
-    paddingTop: 8,
     borderTopWidth: 1.5,
     borderTopColor: DFARM_COLORS.border,
+    paddingTop: 8,
+    marginTop: 4,
   },
   totalLabel: {
-    ...DFARM_TYPOGRAPHY.bodyLg,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '700',
     color: DFARM_COLORS.primaryText,
   },
   totalVal: {
-    ...DFARM_TYPOGRAPHY.h2,
+    ...DFARM_TYPOGRAPHY.h3,
+    fontWeight: '800',
     color: DFARM_COLORS.primaryOrange,
   },
   operatorSignatureBox: {
-    padding: 12,
-    backgroundColor: DFARM_COLORS.peach,
+    backgroundColor: '#FFFFFF',
+    padding: 10,
     borderRadius: DFARM_RADIUS.sm,
+    borderWidth: 1,
+    borderColor: DFARM_COLORS.border,
   },
   opLabel: {
-    fontSize: 11,
+    ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
-    marginBottom: 2,
   },
   opName: {
-    fontSize: 13,
+    ...DFARM_TYPOGRAPHY.bodySm,
     fontWeight: '700',
     color: DFARM_COLORS.primaryText,
+    marginTop: 2,
+  },
+  pressed: {
+    transform: [{ scale: 0.985 }],
+    opacity: 0.9,
   },
 });

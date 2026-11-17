@@ -26,6 +26,8 @@ export interface CustomerProps {
         ifscCode?: string;
         accountHolderName?: string;
     };
+    isDeleted?: boolean;
+    deletionReason?: string;
     rejectionReason?: string;
     createdAt?: string;
     updatedAt?: string;
@@ -46,6 +48,7 @@ export declare class Customer {
     get rfidCardUid(): string | null | undefined;
     get isBiometricEnrolled(): boolean;
     get balanceDue(): number;
+    get isDeleted(): boolean;
     get lastDelivery(): {
         date: string;
         shift: "MORNING" | "EVENING";
@@ -65,6 +68,8 @@ export declare class Customer {
     rejectRegistration(reason: string): void;
     toJSON(): {
         customerCode: string;
+        isSoftDeleted: boolean;
+        faceEnrollmentStatus: string;
         id: string;
         organizationId: string;
         centerId: string;
@@ -89,6 +94,8 @@ export declare class Customer {
             ifscCode?: string;
             accountHolderName?: string;
         };
+        isDeleted?: boolean;
+        deletionReason?: string;
         rejectionReason?: string;
         createdAt?: string;
         updatedAt?: string;

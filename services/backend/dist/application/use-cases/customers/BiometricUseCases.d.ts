@@ -10,6 +10,7 @@ export declare class GetFaceTemplatesUseCase {
         fullName: any;
         modelName: any;
         modelVersion: any;
+        modelVersionId: any;
         dimension: any;
         metric: any;
         threshold: number;
@@ -31,10 +32,10 @@ export declare class UpdateCustomerBiometricsUseCase {
         modelVersion?: string;
     }): Promise<{
         success: boolean;
-        message: string;
+        customerId: string;
         modelVersion: string;
-        dimension: any;
-        keyReference: string;
+        status: string;
+        enrolledAt: string;
     }>;
 }
 //# sourceMappingURL=BiometricUseCases.d.ts.map

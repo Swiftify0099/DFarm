@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +14,7 @@ import {
   DFARM_COLORS,
   DFARM_TYPOGRAPHY,
   DFARM_RADIUS,
+  DFARM_SHADOWS,
   ClayCard,
   ClayBadge,
   ClayButton,
@@ -22,6 +24,11 @@ import { yuNetDetector } from '../../../face-ai/yunet-detector';
 import { sFaceEmbedder } from '../../../face-ai/sface-embedder';
 import { checkAlignmentQuality } from '../../../face-ai/preprocessor';
 import { useProfile } from '../../../features/profile/useProfile';
+import {
+  FaceOvalGuide,
+  BiometricSuccessBadge,
+  CameraPermissionIllustration,
+} from '../../../assets/vectors/BiometricAssets';
 
 export default function UpdateFaceScreen() {
   const router = useRouter();
@@ -30,7 +37,7 @@ export default function UpdateFaceScreen() {
   const [isCapturing, setIsCapturing] = useState(false);
   const [success, setSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState('Center your face and ensure good lighting');
+  const [statusMessage, setStatusMessage] = useState('Center your face inside the oval reticle');
   const cameraRef = useRef<any>(null);
 
   const handleUpdate = async () => {
@@ -84,56 +91,66 @@ export default function UpdateFaceScreen() {
     <SafeAreaView style={styles.container}>
       <ClayHeader
         title="Update Face Biometrics"
-        subtitle="Immutable Versioned Template Update"
+        subtitle="बायोमेट्रिक फोटो अपडेट"
         onBack={() => router.back()}
       />
 
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Version Notice Card */}
         <ClayCard variant="highlight" style={styles.versionCard}>
           <View style={styles.versionHeader}>
-            <Text style={styles.versionTitle}>Active Version</Text>
+            <Text style={styles.versionTitle}>Active Biometric Profile</Text>
             <ClayBadge
-              label={profile?.biometricStatus.version || 'v1.0 (YuNet + SFace INT8)'}
+              label={profile?.biometricStatus?.version || 'v1.0 (YuNet + SFace INT8)'}
               variant="orange"
             />
           </View>
           <Text style={styles.versionDesc}>
-            DFarm preserves full biometric audit history. Capturing a new photo
-            will create an incremented active template. Previous templates are
-            superseded securely and archived with AES-256-GCM encryption.
+            DFarm maintains an encrypted biometric audit trail. Capturing an updated photo
+            generates an active version template. Previous templates are superseded securely with
+            AES-256-GCM encryption.
           </Text>
         </ClayCard>
 
-        {/* Live Camera Viewport */}
-        <View style={styles.cameraBox}>
-          {permission?.granted ? (
-            <CameraView
-              ref={cameraRef}
-              style={StyleSheet.absoluteFill}
-              facing="front"
-            />
-          ) : (
-            <View style={styles.permissionBox}>
-              <Text style={styles.permissionTitle}>Camera Access Required</Text>
-              <Text style={styles.permissionSubtitle}>
-                Enable camera to record updated face biometric enrollment.
-              </Text>
-              <ClayButton
-                title="Enable Camera"
-                onPress={requestPermission}
-                variant="secondary"
+        {/* Live Camera Viewport Frame with Tactile Bezel */}
+        <View style={styles.cameraFrameBezel}>
+          <View style={styles.cameraBox}>
+            {permission?.granted ? (
+              <CameraView
+                ref={cameraRef}
+                style={StyleSheet.absoluteFill}
+                facing="front"
               />
-            </View>
-          )}
+            ) : (
+              <View style={styles.permissionBox}>
+                <CameraPermissionIllustration size={72} />
+                <Text style={styles.permissionTitle}>Camera Access Required</Text>
+                <Text style={styles.permissionSubtitle}>
+                  Enable camera to record updated face biometric enrollment.
+                </Text>
+                <ClayButton
+                  title="Enable Camera"
+                  onPress={requestPermission}
+                  variant="primary"
+                  size="sm"
+                />
+              </View>
+            )}
 
-          <View style={styles.reticle}>
-            <Text style={styles.reticleIcon}>👤</Text>
-          </View>
-          <View style={styles.statusPill}>
-            <Text style={styles.instruction}>
-              {statusMessage}
-            </Text>
+            {/* Reticle Overlay */}
+            {permission?.granted && (
+              <View style={styles.reticleOverlay} pointerEvents="none">
+                <FaceOvalGuide width={200} height={250} isAligned={true} />
+              </View>
+            )}
+
+            <View style={styles.statusToast}>
+              <View style={styles.statusToastDot} />
+              <Text style={styles.instruction}>{statusMessage}</Text>
+            </View>
           </View>
         </View>
 
@@ -147,40 +164,40 @@ export default function UpdateFaceScreen() {
         <ClayCard variant="raised" style={styles.actionCard}>
           {success ? (
             <View style={styles.successBox}>
-              <Text style={styles.successIcon}>✅</Text>
-              <Text style={styles.successTitle}>Biometrics Updated!</Text>
+              <BiometricSuccessBadge size={54} />
+              <Text style={styles.successTitle}>Biometric Template Updated!</Text>
               <Text style={styles.successDesc}>
-                New facial vector v2.0 has been securely registered with your dairy.
+                Your facial vector has been encrypted and synchronized with your dairy society
+                records.
               </Text>
               <ClayButton
                 title="Return to Profile"
                 onPress={() => router.back()}
                 variant="primary"
-                style={styles.doneBtn}
+                style={styles.returnBtn}
               />
             </View>
           ) : (
             <>
               {isCapturing && (
-                <View style={styles.progressRow}>
-                  <ActivityIndicator color={DFARM_COLORS.primaryOrange} />
-                  <Text style={styles.progressText}>
-                    {statusMessage}
-                  </Text>
+                <View style={styles.loadingRow}>
+                  <ActivityIndicator size="small" color={DFARM_COLORS.primaryOrange} />
+                  <Text style={styles.loadingText}>{statusMessage}</Text>
                 </View>
               )}
               <ClayButton
-                title={isCapturing ? 'Processing Biometrics...' : 'Capture & Update Face Template'}
+                title={
+                  isCapturing ? 'Processing Biometrics...' : 'Capture & Update Template'
+                }
                 onPress={handleUpdate}
                 loading={isCapturing || isUpdatingFace}
-                disabled={isCapturing}
+                disabled={isCapturing || !permission?.granted}
                 variant="primary"
-                style={styles.updateBtn}
               />
             </>
           )}
         </ClayCard>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -190,25 +207,23 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: DFARM_COLORS.primaryCream,
   },
-  content: {
-    flex: 1,
+  scrollContent: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingBottom: 28,
+    gap: 16,
   },
   versionCard: {
-    padding: 14,
-    marginBottom: 8,
+    padding: 16,
   },
   versionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   versionTitle: {
-    ...DFARM_TYPOGRAPHY.bodyLg,
-    fontWeight: '700',
+    ...DFARM_TYPOGRAPHY.h3,
     color: DFARM_COLORS.primaryText,
   },
   versionDesc: {
@@ -216,109 +231,121 @@ const styles = StyleSheet.create({
     color: DFARM_COLORS.secondaryText,
     lineHeight: 18,
   },
+  cameraFrameBezel: {
+    borderRadius: DFARM_RADIUS.xl,
+    padding: 6,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: DFARM_COLORS.border,
+    ...DFARM_SHADOWS.clayCard,
+  },
   cameraBox: {
+    width: '100%',
     height: 300,
-    backgroundColor: '#1A1A1A',
     borderRadius: DFARM_RADIUS.lg,
     overflow: 'hidden',
+    backgroundColor: '#1E1A17',
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  permissionBox: {
-    alignItems: 'center',
-    padding: 16,
-  },
-  permissionTitle: {
-    ...DFARM_TYPOGRAPHY.bodyLg,
-    color: '#FFFFFF',
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  permissionSubtitle: {
-    ...DFARM_TYPOGRAPHY.bodySm,
-    color: '#AAAAAA',
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  reticle: {
-    width: 170,
-    height: 220,
-    borderRadius: 85,
-    borderWidth: 2,
-    borderColor: '#4ADE80',
-    borderStyle: 'dashed',
+  reticleOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  reticleIcon: {
-    fontSize: 48,
-    opacity: 0.35,
-  },
-  statusPill: {
+  statusToast: {
     position: 'absolute',
     bottom: 12,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(33, 27, 24, 0.78)',
     paddingVertical: 6,
-    borderRadius: 16,
+    paddingHorizontal: 14,
+    borderRadius: DFARM_RADIUS.pill,
+    gap: 8,
+    maxWidth: '90%',
+  },
+  statusToastDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: DFARM_COLORS.primaryOrange,
   },
   instruction: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: '#FFFFFF',
     fontWeight: '600',
+    textAlign: 'center',
+  },
+  permissionBox: {
+    alignItems: 'center',
+    padding: 20,
+    gap: 8,
+    backgroundColor: DFARM_COLORS.surfaceInset,
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+  },
+  permissionTitle: {
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryText,
+  },
+  permissionSubtitle: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    color: DFARM_COLORS.secondaryText,
+    textAlign: 'center',
+    marginBottom: 6,
   },
   errorBox: {
-    backgroundColor: '#FEE2E2',
+    backgroundColor: '#FFF8F8',
+    borderColor: '#FFCDD2',
     borderWidth: 1,
-    borderColor: '#EF4444',
-    padding: 10,
     borderRadius: DFARM_RADIUS.sm,
-    marginVertical: 4,
+    padding: 12,
   },
   errorText: {
     ...DFARM_TYPOGRAPHY.bodySm,
-    color: '#DC2626',
+    color: DFARM_COLORS.error,
     fontWeight: '600',
   },
   actionCard: {
     padding: 16,
   },
-  progressRow: {
+  loadingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 10,
     marginBottom: 12,
   },
-  progressText: {
+  loadingText: {
     ...DFARM_TYPOGRAPHY.bodySm,
-    color: DFARM_COLORS.primaryOrange,
-    marginLeft: 8,
+    color: DFARM_COLORS.primaryText,
     fontWeight: '600',
-  },
-  updateBtn: {
-    width: '100%',
   },
   successBox: {
     alignItems: 'center',
-    paddingVertical: 8,
-  },
-  successIcon: {
-    fontSize: 40,
-    marginBottom: 6,
+    paddingVertical: 12,
+    gap: 8,
   },
   successTitle: {
-    ...DFARM_TYPOGRAPHY.h3,
-    color: DFARM_COLORS.success,
-    marginBottom: 4,
+    ...DFARM_TYPOGRAPHY.h2,
+    color: DFARM_COLORS.primaryText,
   },
   successDesc: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
     textAlign: 'center',
-    marginBottom: 12,
+    lineHeight: 18,
+    marginBottom: 10,
   },
-  doneBtn: {
-    minWidth: 160,
+  returnBtn: {
+    minWidth: 200,
   },
 });

@@ -3,6 +3,7 @@ import { Customer } from '../../../domain/entities/Customer.js';
 import { CustomerNotFoundError, DomainValidationError } from '../../../domain/errors/index.js';
 import { PhoneNumber, RfidUid } from '../../../domain/value-objects/index.js';
 import { db } from '../../../infrastructure/database/PostgresPool.js';
+import { tenantDbManager } from '../../../infrastructure/database/TenantDatabaseManager.js';
 export class GetCustomersUseCase {
     customerRepo;
     constructor(customerRepo) {
@@ -51,10 +52,11 @@ export class RegisterCustomerUseCase {
         if (existing) {
             throw new DomainValidationError('A customer with this mobile number already exists in this dairy.');
         }
+        const tenantDb = await tenantDbManager.getTenantDb(dto.organizationId);
         // Auto-generate farmer code based on count in center
         let farmerCode = `F-${Math.floor(100 + Math.random() * 900)}`;
         try {
-            const countRes = await db.query(`SELECT COUNT(id) AS cnt FROM customers WHERE primary_center_id = $1`, [dto.centerId]);
+            const countRes = await tenantDb.query(`SELECT COUNT(id) AS cnt FROM customers WHERE primary_center_id = $1`, [dto.centerId]);
             const nextNum = Number(countRes.rows[0]?.cnt || 0) + 1;
             farmerCode = `F-${String(nextNum).padStart(3, '0')}`;
         }
@@ -85,7 +87,7 @@ export class RegisterCustomerUseCase {
                 await db.query(`INSERT INTO customer_milk_categories (customer_id, milk_category, is_authorized, authorized_by)
            VALUES (
              $1, $2, TRUE,
-             (SELECT id FROM users WHERE user_role IN ('DAIRY_ADMIN', 'SUPER_ADMIN') LIMIT 1)
+             (SELECT id FROM users WHERE role IN ('DAIRY_ADMIN', 'SUPER_ADMIN') LIMIT 1)
            )
            ON CONFLICT (customer_id, milk_category) DO NOTHING;`, [customer.id, cat]);
             }
@@ -108,6 +110,7 @@ export class GetCustomerStatusUseCase {
         }
         return {
             id: customer.id,
+            organizationId: customer.organizationId,
             fullName: customer.fullName,
             farmerCode: customer.farmerCode,
             status: customer.status,
@@ -169,11 +172,12 @@ export class ApproveCustomerRegistrationUseCase {
         if (customer.registrationStatus === 'APPROVED') {
             throw new DomainValidationError(`Registration for ${customer.fullName} is already approved.`);
         }
+        const tenantDb = await tenantDbManager.getTenantDb(customer.organizationId);
         // Determine assigned code
         let assignedCode = customCode;
         if (!assignedCode) {
             try {
-                const countRes = await db.query(`SELECT COUNT(id) AS cnt FROM customers WHERE organization_id = $1 AND registration_status = 'APPROVED'`, [customer.organizationId]);
+                const countRes = await tenantDb.query(`SELECT COUNT(id) AS cnt FROM customers WHERE organization_id = $1 AND registration_status = 'APPROVED'`, [customer.organizationId]);
                 const nextNum = 100 + Number(countRes.rows[0]?.cnt || 0) + 1;
                 assignedCode = `C-${nextNum}`;
             }
@@ -183,11 +187,11 @@ export class ApproveCustomerRegistrationUseCase {
         }
         customer.approveRegistration(assignedCode);
         await this.customerRepo.save(customer);
-        // Activate face enrollment in database if present
+        // Activate face enrollment in tenant database if present
         try {
-            await db.query(`UPDATE face_enrollments SET status = 'ACTIVE' WHERE customer_id = $1;`, [customer.id]);
-            await db.query(`INSERT INTO customer_status_history (customer_id, previous_status, new_status, change_reason, changed_by)
-         VALUES ($1, 'PENDING_APPROVAL', 'APPROVED', $2, (SELECT id FROM users WHERE user_role IN ('DAIRY_ADMIN', 'SUPER_ADMIN') LIMIT 1));`, [customer.id, `Registration approved by ${operatorName}`]);
+            await tenantDb.query(`UPDATE face_enrollments SET status = 'ACTIVE' WHERE customer_id = $1;`, [customer.id]);
+            await tenantDb.query(`INSERT INTO customer_status_history (customer_id, previous_status, new_status, change_reason, changed_by)
+         VALUES ($1, 'PENDING_APPROVAL', 'APPROVED', $2, '00000000-0000-0000-0000-000000000099');`, [customer.id, `Registration approved by ${operatorName}`]).catch(() => { });
         }
         catch {
             // Offline fallback
@@ -211,11 +215,12 @@ export class RejectCustomerRegistrationUseCase {
         if (customer.registrationStatus === 'REJECTED') {
             throw new DomainValidationError(`Registration for ${customer.fullName} has already been rejected.`);
         }
+        const tenantDb = await tenantDbManager.getTenantDb(customer.organizationId);
         customer.rejectRegistration(reason.trim());
         await this.customerRepo.save(customer);
         try {
-            await db.query(`INSERT INTO customer_status_history (customer_id, previous_status, new_status, change_reason, changed_by)
-         VALUES ($1, 'PENDING_APPROVAL', 'REJECTED', $2, (SELECT id FROM users WHERE user_role IN ('DAIRY_ADMIN', 'SUPER_ADMIN') LIMIT 1));`, [customer.id, `Rejected by ${operatorName}: ${reason.trim()}`]);
+            await tenantDb.query(`INSERT INTO customer_status_history (customer_id, previous_status, new_status, change_reason, changed_by)
+         VALUES ($1, 'PENDING_APPROVAL', 'REJECTED', $2, '00000000-0000-0000-0000-000000000099');`, [customer.id, `Rejected by ${operatorName}: ${reason.trim()}`]).catch(() => { });
         }
         catch {
             // Offline fallback

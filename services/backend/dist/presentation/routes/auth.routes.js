@@ -4,6 +4,8 @@ import { RequestOperatorOtpUseCase, VerifyOperatorOtpUseCase, RequestCustomerOtp
 import { doveOtpService } from '../../infrastructure/otp/DoveOtpService.js';
 import { HmacJwtTokenService } from '../../infrastructure/security/HmacJwtTokenService.js';
 import { PostgresCustomerRepository } from '../../infrastructure/repositories/PostgresCustomerRepository.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { db } from '../../infrastructure/database/PostgresPool.js';
 const router = Router();
 const otpService = doveOtpService;
 const tokenService = new HmacJwtTokenService();
@@ -95,6 +97,63 @@ router.post('/admin/otp/verify', otpVerifyLimiter, async (req, res, next) => {
         const { mobileNumber, phone, otp } = req.body;
         const result = await verifyAdminOtp.execute(mobileNumber || phone, otp);
         res.json({ success: true, ...result });
+    }
+    catch (err) {
+        next(err);
+    }
+});
+router.get('/admin/me', authenticate, async (req, res, next) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ success: false, error: 'Unauthorized: missing authentication context' });
+            return;
+        }
+        const cleanId = userId.replace('admin:', '');
+        const clean10 = cleanId.replace(/\D/g, '').slice(-10);
+        const queryRes = await db.query(`SELECT 
+         u.id, 
+         u.full_name, 
+         u.phone_number AS mobile_number,
+         u.organization_id, 
+         COALESCE(u.role, u.user_role) AS role, 
+         u.status AS user_status, 
+         o.name AS org_name, 
+         o.code AS org_code, 
+         o.status AS org_status
+       FROM users u
+       LEFT JOIN organizations o ON o.id = u.organization_id
+       WHERE u.id = $1 OR (length($2) = 10 AND u.phone_number LIKE $3)
+       LIMIT 1;`, [cleanId, clean10, `%${clean10}`]);
+        if (queryRes.rows.length === 0) {
+            res.status(401).json({ success: false, error: 'Administrator user record not found' });
+            return;
+        }
+        const row = queryRes.rows[0];
+        if (row.user_status && row.user_status !== 'ACTIVE') {
+            res.status(403).json({ success: false, error: 'Administrator account is suspended or inactive' });
+            return;
+        }
+        if (!row.organization_id || !row.org_name || !row.org_code) {
+            res.status(403).json({ success: false, error: 'No active dairy cooperative assigned to administrator account' });
+            return;
+        }
+        if (row.org_status && row.org_status !== 'ACTIVE') {
+            res.status(403).json({ success: false, error: `Assigned dairy (${row.org_name}) is currently inactive or suspended` });
+            return;
+        }
+        res.json({
+            success: true,
+            user: {
+                id: row.id,
+                fullName: row.full_name,
+                mobileNumber: row.mobile_number,
+                role: row.role || 'PRIMARY_DAIRY_ADMIN',
+                dairyId: row.organization_id,
+                dairyName: row.org_name,
+                dairyCode: row.org_code,
+            },
+        });
     }
     catch (err) {
         next(err);

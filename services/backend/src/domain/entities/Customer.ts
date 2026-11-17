@@ -30,6 +30,8 @@ export interface CustomerProps {
     ifscCode?: string;
     accountHolderName?: string;
   };
+  isDeleted?: boolean;
+  deletionReason?: string;
   rejectionReason?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -98,6 +100,10 @@ export class Customer {
     return this.props.balanceDue || 0.0;
   }
 
+  public get isDeleted(): boolean {
+    return Boolean(this.props.isDeleted);
+  }
+
   public get lastDelivery() {
     return this.props.lastDelivery;
   }
@@ -148,6 +154,8 @@ export class Customer {
     return {
       ...this.props,
       customerCode: this.props.farmerCode, // Backward compatibility with frontend
+      isSoftDeleted: Boolean(this.props.isDeleted),
+      faceEnrollmentStatus: this.props.faceTemplateEnrolled ? 'ENROLLED' : 'NOT_ENROLLED',
     };
   }
 }

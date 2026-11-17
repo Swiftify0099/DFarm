@@ -9,4 +9,11 @@ export * from './bills.routes.js';
 export * from './devices.routes.js';
 export * from './sync.routes.js';
 export * from './dairies.routes.js';
+export * from './dashboard.routes.js';
+export * from './rate-charts.routes.js';
+export * from './feed.routes.js';
+export * from './payments.routes.js';
+export * from './staff.routes.js';
+export * from './audit.routes.js';
+export * from './notifications.routes.js';
 //# sourceMappingURL=index.d.ts.map

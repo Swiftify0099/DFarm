@@ -87,9 +87,11 @@ export class DoveOtpService implements IOtpService {
     const cleanDigits = phone.replace(/\D/g, '').slice(-10);
     try {
       const res = await db.query(
-        `SELECT id, user_role FROM users 
-         WHERE (normalized_mobile_number LIKE $1 OR phone_number LIKE $1) 
-           AND is_active = TRUE LIMIT 1;`,
+        `SELECT id, role FROM users 
+         WHERE phone_number LIKE $1 
+           AND status = 'ACTIVE' 
+           AND role IN ('SUPER_ADMIN', 'DAIRY_OWNER', 'DAIRY_ADMIN', 'CENTER_MANAGER')
+         LIMIT 1;`,
         [`%${cleanDigits}`]
       );
       if (res.rows.length > 0) {
@@ -170,8 +172,8 @@ export class DoveOtpService implements IOtpService {
     this.memoryStorage.set(key, record);
 
     // 6. Real SMS Dispatch via Dove SMS Gateway (Mobicomm API)
-    const smsResult = await doveSmsService.sendLoginOtpSms(mobileNumber, rawOtp);
     const isTestMode = process.env['NODE_ENV'] === 'test' || config.ALLOW_TEST_PREVIEW_OTP;
+    const smsResult = await doveSmsService.sendLoginOtpSms(mobileNumber, rawOtp);
     if (!smsResult.success && !isTestMode) {
       logger.error({ mobile: mobileNumber, response: smsResult.response }, 'Dove SMS gateway returned failure');
       throw new DomainValidationError(`SMS dispatch failed: ${smsResult.response}`);
@@ -183,7 +185,7 @@ export class DoveOtpService implements IOtpService {
     const maskedPhone = cleanDigits.slice(-4).padStart(cleanDigits.length, '*');
     return {
       success: true,
-      message: `OTP sent successfully to ${maskedPhone}`,
+      message: `Verification code sent successfully to ${maskedPhone}`,
       previewOtp,
     };
   }

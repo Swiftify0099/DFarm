@@ -9,6 +9,7 @@ export interface UserCoordinates {
 class LocationService {
   private cachedLocation: UserCoordinates | null = null;
   private cacheTimestamp: number = 0;
+  private pendingPromise: Promise<UserCoordinates | null> | null = null;
   private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes cache
 
   async requestPermission(): Promise<boolean> {
@@ -20,33 +21,57 @@ class LocationService {
     }
   }
 
-  async getCurrentLocation(): Promise<UserCoordinates | null> {
+  getCachedLocation(): UserCoordinates | null {
+    return this.cachedLocation;
+  }
+
+  async getCurrentLocation(forceRefresh = false): Promise<UserCoordinates | null> {
     const now = Date.now();
-    if (this.cachedLocation && now - this.cacheTimestamp < this.CACHE_TTL_MS) {
+    if (!forceRefresh && this.cachedLocation && now - this.cacheTimestamp < this.CACHE_TTL_MS) {
       return this.cachedLocation;
     }
 
-    try {
-      const hasPermission = await this.requestPermission();
-      if (!hasPermission) {
-        return null;
+    if (this.pendingPromise) {
+      return this.pendingPromise;
+    }
+
+    this.pendingPromise = (async () => {
+      try {
+        const hasPermission = await this.requestPermission();
+        if (!hasPermission) {
+          return null;
+        }
+
+        let location: Location.LocationObject | null = null;
+
+        try {
+          location = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+        } catch {
+          // If current position fails (e.g. indoors or timeout), fallback to last known
+          location = await Location.getLastKnownPositionAsync();
+        }
+
+        if (location && location.coords) {
+          this.cachedLocation = {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            accuracy: location.coords.accuracy,
+          };
+          this.cacheTimestamp = Date.now();
+          return this.cachedLocation;
+        }
+
+        return this.cachedLocation || null;
+      } catch {
+        return this.cachedLocation || null;
+      } finally {
+        this.pendingPromise = null;
       }
+    })();
 
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-
-      this.cachedLocation = {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        accuracy: location.coords.accuracy,
-      };
-      this.cacheTimestamp = now;
-
-      return this.cachedLocation;
-    } catch {
-      return null;
-    }
+    return this.pendingPromise;
   }
 
   calculateDistanceKm(

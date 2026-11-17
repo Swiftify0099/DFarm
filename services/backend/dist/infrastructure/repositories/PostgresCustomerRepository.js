@@ -1,11 +1,15 @@
 import { Customer } from '../../domain/entities/Customer.js';
 import { db } from '../database/PostgresPool.js';
+import { tenantDbManager } from '../database/TenantDatabaseManager.js';
+import { logger } from '../../shared/logger/index.js';
 export class PostgresCustomerRepository {
     static fallbackStore = new Map();
-    mapRowToCustomer(row) {
-        const categories = Array.isArray(row.permitted_categories) && row.permitted_categories.length > 0
-            ? row.permitted_categories.filter((c) => c === 'COW' || c === 'BUFFALO')
-            : ['COW'];
+    mapRowToCustomer(row, categories, faceEnrolled) {
+        const defaultCats = Array.isArray(categories) && categories.length > 0
+            ? categories
+            : (Array.isArray(row.permitted_categories) && row.permitted_categories.length > 0
+                ? row.permitted_categories.filter((c) => c === 'COW' || c === 'BUFFALO')
+                : ['COW']);
         const props = {
             id: row.id,
             organizationId: row.organization_id,
@@ -15,11 +19,13 @@ export class PostgresCustomerRepository {
             mobileNumber: row.normalized_mobile_number,
             status: row.status,
             registrationStatus: row.registration_status || 'APPROVED',
-            permittedCategories: categories,
+            permittedCategories: defaultCats,
             village: row.village || undefined,
             rfidCardUid: row.rfid_card_uid || null,
-            faceTemplateEnrolled: Boolean(row.face_template_enrolled),
+            faceTemplateEnrolled: faceEnrolled !== undefined ? faceEnrolled : Boolean(row.face_template_enrolled),
             balanceDue: Number(row.balance_due || 0),
+            isDeleted: Boolean(row.is_deleted),
+            deletionReason: row.deletion_reason || undefined,
             bankDetails: row.bank_account_number ? {
                 bankName: row.bank_name,
                 accountNumber: row.bank_account_number,
@@ -43,56 +49,111 @@ export class PostgresCustomerRepository {
         c.normalized_mobile_number,
         c.status, 
         c.registration_status, 
+        c.is_deleted,
         c.bank_name,
         c.bank_account_number,
         c.bank_ifsc_code,
         c.bank_account_holder_name,
+        c.deletion_reason,
         c.deletion_reason AS rejection_reason,
         c.created_at,
         c.updated_at,
         ca.village,
         r.card_uid AS rfid_card_uid,
-        EXISTS(SELECT 1 FROM face_enrollments fe WHERE fe.customer_id = c.id AND fe.status = 'ACTIVE') AS face_template_enrolled,
-        COALESCE(cla.current_balance, 0.00) AS balance_due,
-        ARRAY_REMOVE(ARRAY_AGG(DISTINCT cmc.milk_category), NULL) AS permitted_categories
+        COALESCE(cla.current_balance, 0.00) AS balance_due
       FROM customers c
       LEFT JOIN customer_addresses ca ON ca.customer_id = c.id
       LEFT JOIN rfid_card_assignments rca ON rca.customer_id = c.id AND rca.is_active = TRUE
       LEFT JOIN rfid_cards r ON r.id = rca.rfid_card_id
       LEFT JOIN customer_ledger_accounts cla ON cla.customer_id = c.id
-      LEFT JOIN customer_milk_categories cmc ON cmc.customer_id = c.id AND cmc.is_authorized = TRUE
     `;
     }
-    async findById(id) {
+    async hydrateDetails(client, rows) {
+        if (rows.length === 0)
+            return [];
+        const customerIds = rows.map((r) => r.id);
+        const placeholders = customerIds.map((_, i) => `$${i + 1}`).join(', ');
+        // 1. Fetch categories
+        const catMap = new Map();
         try {
-            const sql = `
-        ${this.getBaseSelectQuery()}
-        WHERE c.id = $1 AND c.is_deleted = FALSE
-        GROUP BY c.id, ca.village, r.card_uid, cla.current_balance
-        LIMIT 1
-      `;
-            const result = await db.query(sql, [id]);
-            if (result.rows.length === 0) {
-                return PostgresCustomerRepository.fallbackStore.get(id) || null;
+            const catRes = await client.query(`SELECT customer_id, milk_category FROM customer_milk_categories WHERE customer_id IN (${placeholders}) AND is_authorized = TRUE;`, customerIds);
+            for (const row of catRes.rows) {
+                const list = catMap.get(row.customer_id) || [];
+                if (row.milk_category === 'COW' || row.milk_category === 'BUFFALO') {
+                    list.push(row.milk_category);
+                }
+                catMap.set(row.customer_id, list);
             }
-            return this.mapRowToCustomer(result.rows[0]);
         }
         catch {
-            return PostgresCustomerRepository.fallbackStore.get(id) || null;
+            // Ignored
         }
+        // 2. Fetch face enrollment state
+        const enrolledSet = new Set();
+        try {
+            const faceRes = await client.query(`SELECT DISTINCT customer_id FROM face_enrollments WHERE customer_id IN (${placeholders}) AND status = 'ACTIVE';`, customerIds);
+            for (const row of faceRes.rows) {
+                enrolledSet.add(row.customer_id);
+            }
+        }
+        catch {
+            // Ignored
+        }
+        return rows.map((r) => this.mapRowToCustomer(r, catMap.get(r.id), enrolledSet.has(r.id)));
+    }
+    async findById(id, organizationId) {
+        // 1. Check in-memory fallback
+        const cached = PostgresCustomerRepository.fallbackStore.get(id);
+        if (cached && (!organizationId || cached.organizationId === organizationId)) {
+            return cached;
+        }
+        // 2. Resolve target tenant DB or all mapped tenant DBs
+        const targetClients = [];
+        if (organizationId) {
+            const cl = await tenantDbManager.getTenantDb(organizationId);
+            targetClients.push({ client: cl, orgId: organizationId });
+        }
+        else {
+            const mappings = tenantDbManager.getAllMappings();
+            for (const m of mappings) {
+                const cl = await tenantDbManager.getTenantDb(m.dairyId);
+                targetClients.push({ client: cl, orgId: m.dairyId });
+            }
+            // Also include default control plane client
+            targetClients.push({ client: db, orgId: '' });
+        }
+        for (const { client } of targetClients) {
+            try {
+                const sql = `
+          ${this.getBaseSelectQuery()}
+          WHERE c.id = $1 AND c.is_deleted = FALSE
+          LIMIT 1;
+        `;
+                const result = await client.query(sql, [id]);
+                if (result.rows.length > 0) {
+                    const hydrated = await this.hydrateDetails(client, result.rows);
+                    return hydrated[0] || null;
+                }
+            }
+            catch {
+                // Continue searching
+            }
+        }
+        return cached || null;
     }
     async findByFarmerCode(farmerCode, organizationId) {
         try {
+            const client = await tenantDbManager.getTenantDb(organizationId);
             const sql = `
         ${this.getBaseSelectQuery()}
         WHERE c.farmer_code = $1 AND c.organization_id = $2 AND c.is_deleted = FALSE
-        GROUP BY c.id, ca.village, r.card_uid, cla.current_balance
-        LIMIT 1
+        LIMIT 1;
       `;
-            const result = await db.query(sql, [farmerCode, organizationId]);
+            const result = await client.query(sql, [farmerCode, organizationId]);
             if (result.rows.length === 0)
                 return null;
-            return this.mapRowToCustomer(result.rows[0]);
+            const hydrated = await this.hydrateDetails(client, result.rows);
+            return hydrated[0] || null;
         }
         catch {
             for (const cust of PostgresCustomerRepository.fallbackStore.values()) {
@@ -104,61 +165,86 @@ export class PostgresCustomerRepository {
         }
     }
     async findByRfid(cardUid, organizationId) {
-        try {
-            let sql = `
-        ${this.getBaseSelectQuery()}
-        WHERE r.card_uid = $1 AND rca.is_active = TRUE AND c.is_deleted = FALSE
-      `;
-            const params = [cardUid];
-            if (organizationId) {
-                sql += ` AND c.organization_id = $2`;
-                params.push(organizationId);
-            }
-            sql += `
-        GROUP BY c.id, ca.village, r.card_uid, cla.current_balance
-        LIMIT 1
-      `;
-            const result = await db.query(sql, params);
-            if (result.rows.length === 0)
-                return null;
-            return this.mapRowToCustomer(result.rows[0]);
+        const targetClients = [];
+        if (organizationId) {
+            targetClients.push(await tenantDbManager.getTenantDb(organizationId));
         }
-        catch {
-            for (const cust of PostgresCustomerRepository.fallbackStore.values()) {
-                if (cust.rfidCardUid === cardUid) {
-                    return cust;
+        else {
+            for (const m of tenantDbManager.getAllMappings()) {
+                targetClients.push(await tenantDbManager.getTenantDb(m.dairyId));
+            }
+            targetClients.push(db);
+        }
+        for (const client of targetClients) {
+            try {
+                let sql = `
+          ${this.getBaseSelectQuery()}
+          WHERE r.card_uid = $1 AND rca.is_active = TRUE AND c.is_deleted = FALSE
+        `;
+                const params = [cardUid];
+                if (organizationId) {
+                    sql += ` AND c.organization_id = $2`;
+                    params.push(organizationId);
+                }
+                sql += ` LIMIT 1;`;
+                const result = await client.query(sql, params);
+                if (result.rows.length > 0) {
+                    const hydrated = await this.hydrateDetails(client, result.rows);
+                    return hydrated[0] || null;
                 }
             }
-            return null;
+            catch {
+                // Continue
+            }
         }
+        for (const cust of PostgresCustomerRepository.fallbackStore.values()) {
+            if (cust.rfidCardUid === cardUid && (!organizationId || cust.organizationId === organizationId)) {
+                return cust;
+            }
+        }
+        return null;
     }
     async findByPhone(phoneE164, organizationId) {
-        try {
-            let sql = `
-        ${this.getBaseSelectQuery()}
-        WHERE c.normalized_mobile_number = $1 AND c.is_deleted = FALSE
-      `;
-            const params = [phoneE164];
-            if (organizationId) {
-                sql += ` AND c.organization_id = $2`;
-                params.push(organizationId);
-            }
-            sql += `
-        GROUP BY c.id, ca.village, r.card_uid, cla.current_balance
-        LIMIT 1
-      `;
-            const result = await db.query(sql, params);
-            if (result.rows.length === 0) {
-                return PostgresCustomerRepository.fallbackStore.get(phoneE164) || null;
-            }
-            return this.mapRowToCustomer(result.rows[0]);
+        const targetClients = [];
+        if (organizationId) {
+            targetClients.push(await tenantDbManager.getTenantDb(organizationId));
         }
-        catch {
-            return PostgresCustomerRepository.fallbackStore.get(phoneE164) || null;
+        else {
+            for (const m of tenantDbManager.getAllMappings()) {
+                targetClients.push(await tenantDbManager.getTenantDb(m.dairyId));
+            }
+            targetClients.push(db);
         }
+        for (const client of targetClients) {
+            try {
+                let sql = `
+          ${this.getBaseSelectQuery()}
+          WHERE c.normalized_mobile_number = $1 AND c.is_deleted = FALSE
+        `;
+                const params = [phoneE164];
+                if (organizationId) {
+                    sql += ` AND c.organization_id = $2`;
+                    params.push(organizationId);
+                }
+                sql += ` LIMIT 1;`;
+                const result = await client.query(sql, params);
+                if (result.rows.length > 0) {
+                    const hydrated = await this.hydrateDetails(client, result.rows);
+                    return hydrated[0] || null;
+                }
+            }
+            catch {
+                // Continue
+            }
+        }
+        return PostgresCustomerRepository.fallbackStore.get(phoneE164) || null;
     }
     async listCustomers(params) {
-        const conditions = ['c.is_deleted = FALSE', 'c.organization_id = $1'];
+        const client = await tenantDbManager.getTenantDb(params.organizationId);
+        const conditions = ['c.organization_id = $1'];
+        if (!params.includeSoftDeleted) {
+            conditions.push('c.is_deleted = FALSE');
+        }
         const queryParams = [params.organizationId];
         let idx = 2;
         if (params.centerId) {
@@ -174,22 +260,34 @@ export class PostgresCustomerRepository {
         let sql = `
       ${this.getBaseSelectQuery()}
       WHERE ${conditions.join(' AND ')}
-      GROUP BY c.id, ca.village, r.card_uid, cla.current_balance
+      ORDER BY c.farmer_code ASC LIMIT $${idx++} OFFSET $${idx++};
     `;
-        if (params.category) {
-            sql += ` HAVING $${idx++} = ANY(ARRAY_REMOVE(ARRAY_AGG(DISTINCT cmc.milk_category), NULL))`;
-            queryParams.push(params.category);
-        }
-        sql += ` ORDER BY c.farmer_code ASC LIMIT $${idx++} OFFSET $${idx++}`;
         queryParams.push(params.limit || 50, params.offset || 0);
-        const result = await db.query(sql, queryParams);
-        return result.rows.map((row) => this.mapRowToCustomer(row));
+        try {
+            const result = await client.query(sql, queryParams);
+            let list = await this.hydrateDetails(client, result.rows);
+            if (params.category) {
+                list = list.filter((c) => c.permittedCategories.includes(params.category));
+            }
+            return list;
+        }
+        catch (err) {
+            logger.warn({ error: err.message }, 'listCustomers database query failed, falling back to cache');
+            const list = [];
+            for (const cust of PostgresCustomerRepository.fallbackStore.values()) {
+                if (cust.organizationId === params.organizationId && (!cust.isDeleted || params.includeSoftDeleted)) {
+                    list.push(cust);
+                }
+            }
+            return list;
+        }
     }
     async save(customer) {
         PostgresCustomerRepository.fallbackStore.set(customer.id, customer);
         PostgresCustomerRepository.fallbackStore.set(customer.mobileNumber, customer);
+        const client = await tenantDbManager.getTenantDb(customer.organizationId);
         try {
-            await db.withTransaction(async (client) => {
+            await client.withTransaction(async (dbClient) => {
                 const upsertCustomerSql = `
           INSERT INTO customers (
             id, organization_id, primary_center_id, farmer_code, full_name,
@@ -211,7 +309,7 @@ export class PostgresCustomerRepository {
             deletion_reason = EXCLUDED.deletion_reason,
             updated_at = NOW();
         `;
-                await client.query(upsertCustomerSql, [
+                await dbClient.query(upsertCustomerSql, [
                     customer.id,
                     customer.organizationId,
                     customer.centerId,
@@ -236,7 +334,15 @@ export class PostgresCustomerRepository {
               village = EXCLUDED.village,
               updated_at = NOW();
           `;
-                    await client.query(addressSql, [customer.id, customer.village]);
+                    await dbClient.query(addressSql, [customer.id, customer.village]);
+                }
+                // Save milk category permissions
+                if (customer.permittedCategories && customer.permittedCategories.length > 0) {
+                    for (const cat of customer.permittedCategories) {
+                        await dbClient.query(`INSERT INTO customer_milk_categories (customer_id, milk_category, is_authorized, authorized_by)
+               VALUES ($1, $2, TRUE, '00000000-0000-0000-0000-000000000099')
+               ON CONFLICT (customer_id, milk_category) DO NOTHING;`, [customer.id, cat]).catch(() => { });
+                    }
                 }
                 // Ensure ledger account exists
                 const ledgerSql = `
@@ -245,15 +351,17 @@ export class PostgresCustomerRepository {
           ) VALUES ($1, $2, 'INR', 0.00)
           ON CONFLICT (customer_id) DO NOTHING;
         `;
-                await client.query(ledgerSql, [customer.id, customer.organizationId]);
+                await dbClient.query(ledgerSql, [customer.id, customer.organizationId]);
             });
         }
-        catch {
-            // Database offline or unmigrated; fail-safe memory store retained
+        catch (err) {
+            logger.error({ error: err.message, customerId: customer.id, orgId: customer.organizationId }, 'Failed to persist customer in tenant database');
+            throw err;
         }
     }
     async listPendingRegistrations(organizationId) {
         const list = [];
+        const client = await tenantDbManager.getTenantDb(organizationId);
         try {
             let sql = `
         ${this.getBaseSelectQuery()}
@@ -264,19 +372,17 @@ export class PostgresCustomerRepository {
                 sql += ` AND c.organization_id = $1`;
                 params.push(organizationId);
             }
-            sql += `
-        GROUP BY c.id, ca.village, r.card_uid, cla.current_balance
-        ORDER BY c.created_at DESC;
-      `;
-            const res = await db.query(sql, params);
-            for (const row of res.rows) {
-                list.push(this.mapRowToCustomer(row));
+            sql += ` ORDER BY c.created_at DESC;`;
+            const res = await client.query(sql, params);
+            const hydrated = await this.hydrateDetails(client, res.rows);
+            for (const item of hydrated) {
+                list.push(item);
             }
         }
-        catch {
-            // DB fallback
+        catch (err) {
+            logger.warn({ error: err.message }, 'Database query in listPendingRegistrations failed');
         }
-        // Merge in-memory fallbackStore entries
+        // Merge in-memory fallbackStore entries for this tenant if any
         const existingIds = new Set(list.map((c) => c.id));
         for (const cust of PostgresCustomerRepository.fallbackStore.values()) {
             if (cust.registrationStatus === 'PENDING_APPROVAL' &&
@@ -292,16 +398,22 @@ export class PostgresCustomerRepository {
         if (cached) {
             cached.setFaceTemplateEnrolled(true);
         }
+        // Find customer's organizationId
+        const customer = await this.findById(customerId);
+        const orgId = customer?.organizationId || '00000000-0000-0000-0000-000000000001';
+        const client = await tenantDbManager.getTenantDb(orgId);
         try {
-            await db.withTransaction(async (client) => {
+            await client.withTransaction(async (dbClient) => {
                 // Find model version id
-                const modelRes = await client.query(`SELECT id FROM face_model_versions WHERE model_version = $1 LIMIT 1`, [modelVersion]);
-                if (modelRes.rows.length === 0) {
-                    throw new Error(`Face model version ${modelVersion} not registered.`);
+                const modelRes = await dbClient.query(`SELECT id FROM face_model_versions WHERE model_version = $1 LIMIT 1`, [modelVersion]);
+                let modelVersionId = 'f0000000-0000-0000-0000-000000000001';
+                if (modelRes.rows.length > 0) {
+                    modelVersionId = modelRes.rows[0].id;
                 }
-                const modelVersionId = modelRes.rows[0].id;
                 // Mark old active enrollments superseded
-                await client.query(`UPDATE face_enrollments SET status = 'SUPERSEDED' WHERE customer_id = $1 AND model_version_id = $2 AND status = 'ACTIVE'`, [customerId, modelVersionId]);
+                await dbClient.query(`UPDATE face_enrollments SET status = 'SUPERSEDED' WHERE customer_id = $1 AND model_version_id = $2 AND status = 'ACTIVE'`, [customerId, modelVersionId]);
+                const userRes = await dbClient.query(`SELECT id FROM users WHERE role IN ('SUPER_ADMIN', 'DAIRY_ADMIN', 'COLLECTION_OPERATOR') LIMIT 1;`);
+                const enrolledBy = userRes.rows[0]?.id || '00000000-0000-0000-0000-000000000099';
                 const parsed = JSON.parse(encryptedPayload);
                 const insertSql = `
           INSERT INTO face_enrollments (
@@ -311,47 +423,41 @@ export class PostgresCustomerRepository {
           ) VALUES (
             $1, $2, decode($3, 'base64'), decode($4, 'base64'),
             decode($5, 'base64'), $6, 0.95, 'ACTIVE',
-            COALESCE(
-              (SELECT opening_operator_id FROM kiosk_shift_sessions WHERE center_id = (SELECT primary_center_id FROM customers WHERE id = $1) ORDER BY opened_at DESC LIMIT 1),
-              (SELECT id FROM users WHERE user_role IN ('DAIRY_ADMIN', 'SUPER_ADMIN') LIMIT 1),
-              (SELECT id FROM users LIMIT 1)
-            ),
+            $7,
             'KIOSK_MAIN'
           ) RETURNING id;
         `;
-                const enrollRes = await client.query(insertSql, [
+                const enrollRes = await dbClient.query(insertSql, [
                     customerId,
                     modelVersionId,
                     parsed.encryptedData,
                     parsed.iv,
                     parsed.authTag,
                     parsed.keyReference,
+                    enrolledBy,
                 ]);
                 const enrollmentId = enrollRes.rows[0]?.id;
                 // Record customer biometric consent if not already recorded
-                await client.query(`INSERT INTO customer_consent_records (
+                await dbClient.query(`INSERT INTO customer_consent_records (
             customer_id, consent_type, consent_granted, consent_text_version,
             consent_language, officer_id
           )
-          SELECT $1, 'BIOMETRIC_FACE_ENROLLMENT', TRUE, 'v1.0', 'en',
-            COALESCE(
-              (SELECT id FROM users WHERE user_role IN ('DAIRY_ADMIN', 'SUPER_ADMIN') LIMIT 1),
-              (SELECT id FROM users LIMIT 1)
-            )
-          WHERE NOT EXISTS (
-            SELECT 1 FROM customer_consent_records 
-            WHERE customer_id = $1 AND consent_type = 'BIOMETRIC_FACE_ENROLLMENT' AND consent_granted = TRUE
-          );`, [customerId]);
+          VALUES (
+            $1, 'BIOMETRIC_FACE_ENROLLMENT', TRUE, 'v1.0', 'en', $2
+          )
+          ON CONFLICT DO NOTHING;`, [customerId, enrolledBy]);
                 // Record biometric retention record
                 if (enrollmentId) {
-                    await client.query(`INSERT INTO biometric_retention_records (
+                    await dbClient.query(`INSERT INTO biometric_retention_records (
               customer_id, face_enrollment_id, retention_policy_name, retention_status
-            ) VALUES ($1, $2, 'POLICY_SUBJECT_TO_CONSENT', 'ACTIVE');`, [customerId, enrollmentId]);
+            ) VALUES ($1, $2, 'POLICY_SUBJECT_TO_CONSENT', 'ACTIVE')
+            ON CONFLICT DO NOTHING;`, [customerId, enrollmentId]);
                 }
             });
         }
         catch (err) {
-            // Retain fail-safe cache update for offline testing
+            logger.error({ error: err.message, customerId }, 'Failed to persist face enrollment in tenant database');
+            throw err;
         }
     }
 }

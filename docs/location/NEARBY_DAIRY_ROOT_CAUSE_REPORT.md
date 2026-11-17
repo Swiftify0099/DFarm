@@ -124,6 +124,55 @@ Removed manual `refetch()`. `locationState` → `selectedCoords` derivation → 
 
 ---
 
+## Root Cause #6 — Physical Android Device Failed to Connect to `http://10.0.2.2:4000`
+
+**Severity:** 🔴 Critical — Silent complete network failure on physical mobile phones  
+**Affected:** `apps/dfarm-customer-app/src/services/api-client.ts`
+
+### Evidence
+
+On real physical Android devices (as shown in user device screenshot with VoLTE and Wi-Fi), `10.0.2.2` is unreachable because `10.0.2.2` is exclusive to the Android Studio desktop emulator. The app was unable to contact the backend server at all, falling back into network error handling and returning an empty list.
+
+### Fix
+
+Rewrote `resolveDefaultBaseUrl()` in `apps/dfarm-customer-app/src/services/api-client.ts` to dynamically resolve the Metro bundler host IP (`Constants.expoConfig?.hostUri`) or route to LAN Wi-Fi IP `http://10.114.224.223:4000/api/v1`.
+
+---
+
+## Root Cause #7 — Concurrent Native GPS Lock Failure & Lack of Last-Known Position
+
+**Severity:** 🟠 High — Indoor or simultaneous GPS lock errors  
+**Affected:** `apps/dfarm-customer-app/src/services/location-service.ts`
+
+### Evidence
+
+When `useEffect` on screen mount and `useDairyDiscovery` queried `getCurrentLocation()` at the same millisecond, concurrent calls to `Location.getCurrentPositionAsync()` collided on Android FusedLocationProvider. Additionally, if indoor GPS was weak, it immediately threw null without trying `Location.getLastKnownPositionAsync()`.
+
+### Fix
+
+1. Implemented in-flight single promise mutex (`pendingPromise`) in `LocationService` to deduplicate concurrent requests.
+2. Added fallback to `Location.getLastKnownPositionAsync()` when active GPS lock times out indoors.
+3. Disabled TanStack query while location is detecting (`enabled: locationState.kind !== 'detecting'`).
+
+---
+
+## Root Cause #8 — Suspended Dairy Filtering & Proximity Discovery Lifecycle
+
+**Severity:** 🔴 Critical — Compliance with business rules (approved & not suspended only)  
+**Affected:** `services/backend/src/presentation/routes/dairies.routes.ts`, `GetNearbyDairiesUseCase.ts`
+
+### Evidence
+
+Dairies marked as `SUSPENDED` were previously eligible or lacked explicit suspension lifecycle endpoints.
+
+### Fix
+
+1. Added `POST /api/v1/dairies/:id/suspend` and `POST /api/v1/dairies/:id/reactivate`.
+2. Updated DB queries and in-memory cache to strictly filter out `SUSPENDED` and `DISABLED` dairies.
+3. Verified in tests: when Super Admin suspends a dairy, it immediately vanishes from Customer App discovery; when reactivated, it immediately reappears.
+
+---
+
 ## Database Findings
 
 | Component | Status |
@@ -138,26 +187,37 @@ Removed manual `refetch()`. `locationState` → `selectedCoords` derivation → 
 
 ## API Findings
 
-| Endpoint | Status | Issue |
-|----------|--------|-------|
-| `GET /api/v1/dairies/nearby` | ⚠️ Broken | Use case missing → HTTP 500 |
-| `POST /api/v1/dairies` | ✅ Working | Saves coordinates correctly |
-| `PATCH /api/v1/dairies/:id/location` | ✅ Working | Updates coordinates |
-| `GET /api/v1/dairies/:id` | ✅ Working | Returns coordinates |
+| Endpoint | Status | Issue | Resolution |
+|----------|--------|-------|------------|
+| `GET /api/v1/dairies/nearby` | ✅ Repaired | Strict Haversine proximity & active/suspended filter | Returns real distance, excludes suspended |
+| `POST /api/v1/dairies` | ✅ Working | Saves coordinates correctly | Inserts active organization, center & admin |
+| `POST /api/v1/dairies/:id/suspend` | ✅ Added | Super Admin suspend endpoint | Updates DB & in-memory cache, excludes from nearby |
+| `POST /api/v1/dairies/:id/reactivate` | ✅ Added | Super Admin reactivate endpoint | Updates DB & in-memory cache, restores discovery |
+| `PATCH /api/v1/dairies/:id/location` | ✅ Working | Updates coordinates | Coordinates updated across org & centers |
+| `GET /api/v1/dairies/:id` | ✅ Working | Returns coordinates | Includes formatted address & primary admin |
 
 ---
 
 ## Status Filter Findings
 
-**Included in nearby results:** All statuses except SUSPENDED, DELETED, DISABLED  
-**Excluded:** SUSPENDED, DELETED, DISABLED  
-**Result:** Dairies in ACTIVE, INACTIVE, or draft_onboarding states ARE shown to customers.
-
-This is correct per the business requirement: a newly provisioned dairy should be discoverable as soon as it has valid coordinates, regardless of Primary Admin activation status.
+**Discoverable in nearby results:** Only approved / active, non-suspended dairies within the configured radius (default 5 km).  
+**Strictly Excluded:** `SUSPENDED`, `DELETED`, `DISABLED`  
+**Result:** 
+- When Super Admin creates a dairy with Primary Admin: saved as ACTIVE with coordinates and immediately discoverable by nearby customers.
+- When Super Admin clicks "Suspend Dairy": dairy is marked `SUSPENDED` on backend & DB and instantly disappears from customer discovery.
+- When Super Admin clicks "Reactivate Dairy": dairy is restored to `ACTIVE` and instantly reappears in customer discovery.
+- In Customer App: if no dairies exist within 5 km, shows clean empty state with options to expand search, eliminating previous fake fallback list.
 
 ---
 
 ## Files Changed
+
+- [GetNearbyDairiesUseCase.ts](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/services/backend/src/application/use-cases/dairies/GetNearbyDairiesUseCase.ts)
+- [dairies.routes.ts](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/services/backend/src/presentation/routes/dairies.routes.ts)
+- [client.ts (Super Admin)](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/apps/dfarm-super-admin/src/api/client.ts)
+- [mockBackend.ts](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/apps/dfarm-super-admin/src/services/mockBackend.ts)
+- [useDairyDiscovery.ts](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/apps/dfarm-customer-app/src/features/dairy/useDairyDiscovery.ts)
+- [dairy-discovery.tsx](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/apps/dfarm-customer-app/src/app/(onboarding)/dairy-discovery.tsx)
 
 | File | Change Type |
 |------|-------------|

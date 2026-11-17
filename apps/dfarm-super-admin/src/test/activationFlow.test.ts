@@ -4,9 +4,12 @@ import { mockBackend } from '@/services/mockBackend'
 import { storage } from '@/services/storage'
 
 describe('Dairy Admin Two-Factor Activation Flow', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     storage.clear()
     vi.restoreAllMocks()
+    try {
+      await fetch('http://localhost:4000/api/v1/dairies/admin/by-phone/7755995615', { method: 'DELETE' })
+    } catch {}
   })
 
   it('validates activation token and fallback dairy code successfully', async () => {

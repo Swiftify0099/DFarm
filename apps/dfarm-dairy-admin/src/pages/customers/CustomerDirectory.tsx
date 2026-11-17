@@ -43,7 +43,7 @@ export const CustomerDirectory: React.FC = () => {
   const [notice, setNotice] = useState<{ type: 'success' | 'danger'; message: string } | null>(null)
 
   const { data: customers = [], isLoading } = useQuery({
-    queryKey: ['customers', showDeleted],
+    queryKey: ['customers', user?.dairyId, showDeleted],
     queryFn: () => api.customers.getAll(showDeleted),
   })
 
@@ -52,8 +52,8 @@ export const CustomerDirectory: React.FC = () => {
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
       api.customers.softDelete(id, reason, user?.fullName || 'Dairy Admin'),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customers'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] })
+      queryClient.invalidateQueries({ queryKey: ['customers', user?.dairyId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary', user?.dairyId] })
       setShowDeleteModal(false)
       setNotice({ type: 'success', message: 'Customer account marked as soft-deleted in audit records.' })
     },
@@ -66,8 +66,8 @@ export const CustomerDirectory: React.FC = () => {
   const restoreMutation = useMutation({
     mutationFn: (id: string) => api.customers.restore(id, user?.fullName || 'Dairy Admin'),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customers'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] })
+      queryClient.invalidateQueries({ queryKey: ['customers', user?.dairyId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary', user?.dairyId] })
       setShowRestoreModal(false)
       setNotice({ type: 'success', message: 'Customer account successfully restored to active status.' })
     },

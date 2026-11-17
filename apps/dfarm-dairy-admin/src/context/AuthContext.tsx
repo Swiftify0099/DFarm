@@ -26,6 +26,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const storedUser = api.auth.getCurrentUser()
     if (storedUser) {
       setUser(storedUser)
+      // Background verification with backend to ensure tenant binding and session are fresh
+      api.auth.getMe().then((liveUser) => {
+        if (liveUser) {
+          setUser(liveUser)
+        }
+      }).catch(() => {
+        // Ignored, fallback to stored session or prompt re-login on 401
+      })
     }
     setIsLoading(false)
   }, [])

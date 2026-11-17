@@ -138,20 +138,7 @@ export const apiClient = {
       if (res.ok) {
         const body = await res.json()
         if (body.success && Array.isArray(body.data)) {
-          for (const b of body.data) {
-            try {
-              mockBackend.updateDairyLocation(b.id, {
-                latitude: b.location?.latitude ?? b.latitude,
-                longitude: b.location?.longitude ?? b.longitude,
-                formattedAddress: b.location?.formattedAddress ?? b.formatted_address,
-                addressLine1: b.location?.addressLine1 ?? b.address_line1,
-                district: b.location?.district ?? b.district,
-                state: b.location?.state ?? b.state,
-                pincode: b.location?.pincode ?? b.pincode,
-                villageLocality: b.location?.villageLocality ?? b.village_locality,
-              }).catch(() => {})
-            } catch {}
-          }
+          mockBackend.syncDairiesFromBackend(body.data)
         }
       }
     } catch {}
@@ -215,10 +202,35 @@ export const apiClient = {
         if (body.success && body.data) {
           const mockResult = await mockBackend.createDairy(payload, actor)
           mockResult.inviteLink = body.data.activationLink || mockResult.inviteLink
+          if (body.data.id || body.data.dairy?.id) {
+            const realId = body.data.id || body.data.dairy?.id
+            mockResult.dairy.id = realId
+          }
           if (body.data.code) {
             mockResult.dairy.code = body.data.code
             mockResult.admin.dairyCode = body.data.code
           }
+          if (body.data.admin?.id) {
+            mockResult.admin.id = body.data.admin.id
+            mockResult.admin.dairyId = mockResult.dairy.id
+            mockResult.dairy.primaryAdminId = body.data.admin.id
+          }
+
+          // Sync created dairy into mock storage with real backend id
+          mockBackend.syncDairiesFromBackend([
+            {
+              id: mockResult.dairy.id,
+              code: mockResult.dairy.code,
+              name: mockResult.dairy.name,
+              status: mockResult.dairy.status,
+              primaryAdminId: mockResult.admin.id,
+              primaryAdminName: mockResult.admin.fullName,
+              primaryAdminMobile: mockResult.admin.mobile,
+              location: mockResult.dairy.location,
+              contact: mockResult.dairy.contact,
+            },
+          ])
+
           return mockResult
         }
       } else {
@@ -237,11 +249,29 @@ export const apiClient = {
 
   async suspendDairy(payload: SuspendDairyPayload, actor: SuperAdminUser): Promise<DairyTenant> {
     await simulateNetworkDelay(220)
+    try {
+      const rawBaseUrl = (import.meta as any).env?.VITE_API_URL || (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:4000/api/v1'
+      const baseUrl = rawBaseUrl.replace(/\/api\/v1\/?$/, '')
+      await fetch(`${baseUrl}/api/v1/dairies/${encodeURIComponent(payload.dairyId)}/suspend`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: payload.reason, actorId: actor.id }),
+      })
+    } catch {}
     return mockBackend.suspendDairy(payload, actor)
   },
 
   async reactivateDairy(payload: ReactivateDairyPayload, actor: SuperAdminUser): Promise<DairyTenant> {
     await simulateNetworkDelay(220)
+    try {
+      const rawBaseUrl = (import.meta as any).env?.VITE_API_URL || (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:4000/api/v1'
+      const baseUrl = rawBaseUrl.replace(/\/api\/v1\/?$/, '')
+      await fetch(`${baseUrl}/api/v1/dairies/${encodeURIComponent(payload.dairyId)}/reactivate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: payload.reason, actorId: actor.id }),
+      })
+    } catch {}
     return mockBackend.reactivateDairy(payload, actor)
   },
 
@@ -329,7 +359,11 @@ export const apiClient = {
       const body = await res.json().catch(() => null)
       if (res.ok && (body?.success || body?.data)) {
         await mockBackend.activatePrimaryAdmin(token, otp, dairyCode).catch(() => {})
-        return body?.data || body
+        return {
+          success: true,
+          ...(body?.data || {}),
+          dairyCode: body?.data?.dairyCode || dairyCode,
+        }
       }
       if (res.status === 400 && body?.error && !body.error.includes('Route') && !body.error.includes('not found')) {
         throw new Error(body.error)

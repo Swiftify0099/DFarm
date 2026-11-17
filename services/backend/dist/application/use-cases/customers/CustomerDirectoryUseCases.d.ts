@@ -10,8 +10,11 @@ export declare class GetCustomersUseCase {
         category?: MilkCategory;
         limit?: number;
         offset?: number;
+        includeSoftDeleted?: boolean;
     }): Promise<{
         customerCode: string;
+        isSoftDeleted: boolean;
+        faceEnrollmentStatus: string;
         id: string;
         organizationId: string;
         centerId: string;
@@ -36,6 +39,8 @@ export declare class GetCustomersUseCase {
             ifscCode?: string;
             accountHolderName?: string;
         };
+        isDeleted?: boolean;
+        deletionReason?: string;
         rejectionReason?: string;
         createdAt?: string;
         updatedAt?: string;
@@ -46,6 +51,8 @@ export declare class GetCustomerByIdUseCase {
     constructor(customerRepo: ICustomerRepository);
     execute(id: string): Promise<{
         customerCode: string;
+        isSoftDeleted: boolean;
+        faceEnrollmentStatus: string;
         id: string;
         organizationId: string;
         centerId: string;
@@ -70,6 +77,8 @@ export declare class GetCustomerByIdUseCase {
             ifscCode?: string;
             accountHolderName?: string;
         };
+        isDeleted?: boolean;
+        deletionReason?: string;
         rejectionReason?: string;
         createdAt?: string;
         updatedAt?: string;
@@ -80,6 +89,8 @@ export declare class LookupRfidCustomerUseCase {
     constructor(customerRepo: ICustomerRepository);
     execute(rawCardUid: string, organizationId?: string): Promise<{
         customerCode: string;
+        isSoftDeleted: boolean;
+        faceEnrollmentStatus: string;
         id: string;
         organizationId: string;
         centerId: string;
@@ -104,6 +115,8 @@ export declare class LookupRfidCustomerUseCase {
             ifscCode?: string;
             accountHolderName?: string;
         };
+        isDeleted?: boolean;
+        deletionReason?: string;
         rejectionReason?: string;
         createdAt?: string;
         updatedAt?: string;
@@ -128,6 +141,8 @@ export declare class RegisterCustomerUseCase {
     constructor(customerRepo: ICustomerRepository);
     execute(dto: RegisterCustomerDTO): Promise<{
         customerCode: string;
+        isSoftDeleted: boolean;
+        faceEnrollmentStatus: string;
         id: string;
         organizationId: string;
         centerId: string;
@@ -152,6 +167,8 @@ export declare class RegisterCustomerUseCase {
             ifscCode?: string;
             accountHolderName?: string;
         };
+        isDeleted?: boolean;
+        deletionReason?: string;
         rejectionReason?: string;
         createdAt?: string;
         updatedAt?: string;
@@ -162,6 +179,7 @@ export declare class GetCustomerStatusUseCase {
     constructor(customerRepo: ICustomerRepository);
     execute(id: string): Promise<{
         id: string;
+        organizationId: string;
         fullName: string;
         farmerCode: string;
         status: import("../../../domain/entities/Customer.js").CustomerStatus;
@@ -211,6 +229,8 @@ export declare class ApproveCustomerRegistrationUseCase {
     constructor(customerRepo: ICustomerRepository);
     execute(customerId: string, operatorName: string, customCode?: string): Promise<{
         customerCode: string;
+        isSoftDeleted: boolean;
+        faceEnrollmentStatus: string;
         id: string;
         organizationId: string;
         centerId: string;
@@ -235,6 +255,8 @@ export declare class ApproveCustomerRegistrationUseCase {
             ifscCode?: string;
             accountHolderName?: string;
         };
+        isDeleted?: boolean;
+        deletionReason?: string;
         rejectionReason?: string;
         createdAt?: string;
         updatedAt?: string;
