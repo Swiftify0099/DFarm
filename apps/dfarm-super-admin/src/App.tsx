@@ -18,6 +18,12 @@ import { AuditLogsPage } from '@/features/audit/AuditLogsPage'
 import { SupportAccessPage } from '@/features/support/SupportAccessPage'
 import { ReportsPage } from '@/features/reports/ReportsPage'
 import { PlatformAccessPage } from '@/features/platform-access/PlatformAccessPage'
+import { DairyLocationsPage } from '@/features/locations/DairyLocationsPage'
+import { GlobalRatePoliciesPage } from '@/features/rate-policies/GlobalRatePoliciesPage'
+import { GlobalFatSnfPoliciesPage } from '@/features/fat-snf-policies/GlobalFatSnfPoliciesPage'
+import { HardwareInventoryPage } from '@/features/hardware/HardwareInventoryPage'
+import { AmcManagementPage } from '@/features/amc/AmcManagementPage'
+import { PlatformSettingsPage } from '@/features/settings/PlatformSettingsPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -52,12 +58,18 @@ export const App: React.FC = () => {
               <Route path="dairies" element={<DairyListPage />} />
               <Route path="dairies/:dairyId" element={<DairyDetailPage />} />
               <Route path="admins" element={<AdminListPage />} />
+              <Route path="locations" element={<DairyLocationsPage />} />
+              <Route path="policies/rate" element={<GlobalRatePoliciesPage />} />
+              <Route path="policies/fat-snf" element={<GlobalFatSnfPoliciesPage />} />
+              <Route path="hardware" element={<HardwareInventoryPage />} />
+              <Route path="amc" element={<AmcManagementPage />} />
               <Route path="monitoring" element={<MonitoringPage />} />
               <Route path="alerts" element={<AlertsPage />} />
-              <Route path="audit" element={<AuditLogsPage />} />
               <Route path="support-access" element={<SupportAccessPage />} />
               <Route path="reports" element={<ReportsPage />} />
+              <Route path="audit" element={<AuditLogsPage />} />
               <Route path="platform-access" element={<PlatformAccessPage />} />
+              <Route path="settings" element={<PlatformSettingsPage />} />
             </Route>
 
             {/* Fallback */}

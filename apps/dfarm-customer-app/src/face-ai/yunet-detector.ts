@@ -97,6 +97,10 @@ export class YuNetDetector {
   }> {
     const start = Date.now();
 
+    if (!this.isLoaded) {
+      await this.initialize();
+    }
+
     // If real ONNX runtime session is available and frame tensor is provided
     if (this.session && this.ort && frameData?.data) {
       try {

@@ -4,7 +4,9 @@ const KEYS = {
   ACCESS_TOKEN: 'dfarm_access_token',
   REFRESH_TOKEN: 'dfarm_refresh_token',
   CUSTOMER_ID: 'dfarm_customer_id',
+  GLOBAL_CUSTOMER_ID: 'dfarm_global_customer_id',
   DAIRY_ID: 'dfarm_dairy_id',
+  DAIRY_NAME: 'dfarm_dairy_name',
   AUTH_STATUS: 'dfarm_auth_status',
   PHONE_NUMBER: 'dfarm_phone_number',
 } as const;
@@ -14,7 +16,9 @@ export class SecureStorageService {
     accessToken: string;
     refreshToken: string;
     customerId?: string;
+    globalCustomerId?: string;
     dairyId?: string;
+    dairyName?: string;
     status: string;
   }): Promise<void> {
     try {
@@ -25,8 +29,14 @@ export class SecureStorageService {
       if (params.customerId) {
         await SecureStore.setItemAsync(KEYS.CUSTOMER_ID, params.customerId);
       }
+      if (params.globalCustomerId) {
+        await SecureStore.setItemAsync(KEYS.GLOBAL_CUSTOMER_ID, params.globalCustomerId);
+      }
       if (params.dairyId) {
         await SecureStore.setItemAsync(KEYS.DAIRY_ID, params.dairyId);
+      }
+      if (params.dairyName) {
+        await SecureStore.setItemAsync(KEYS.DAIRY_NAME, params.dairyName);
       }
     } catch {
       // Secure store fallback for web/testing
@@ -57,12 +67,34 @@ export class SecureStorageService {
     }
   }
 
+  async getDairyName(): Promise<string | null> {
+    try {
+      return await SecureStore.getItemAsync(KEYS.DAIRY_NAME);
+    } catch {
+      return null;
+    }
+  }
+
   async getCustomerId(): Promise<string | null> {
     try {
       return await SecureStore.getItemAsync(KEYS.CUSTOMER_ID);
     } catch {
       return null;
     }
+  }
+
+  async getGlobalCustomerId(): Promise<string | null> {
+    try {
+      return await SecureStore.getItemAsync(KEYS.GLOBAL_CUSTOMER_ID);
+    } catch {
+      return null;
+    }
+  }
+
+  async saveGlobalCustomerId(id: string): Promise<void> {
+    try {
+      await SecureStore.setItemAsync(KEYS.GLOBAL_CUSTOMER_ID, id);
+    } catch {}
   }
 
   async getAuthStatus(): Promise<string | null> {
@@ -94,7 +126,9 @@ export class SecureStorageService {
       await SecureStore.deleteItemAsync(KEYS.ACCESS_TOKEN);
       await SecureStore.deleteItemAsync(KEYS.REFRESH_TOKEN);
       await SecureStore.deleteItemAsync(KEYS.CUSTOMER_ID);
+      await SecureStore.deleteItemAsync(KEYS.GLOBAL_CUSTOMER_ID);
       await SecureStore.deleteItemAsync(KEYS.DAIRY_ID);
+      await SecureStore.deleteItemAsync(KEYS.DAIRY_NAME);
       await SecureStore.deleteItemAsync(KEYS.AUTH_STATUS);
       await SecureStore.deleteItemAsync(KEYS.PHONE_NUMBER);
     } catch {

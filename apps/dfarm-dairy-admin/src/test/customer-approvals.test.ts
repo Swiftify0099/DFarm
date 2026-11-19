@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MockDairyBackend } from '@/api/mock-server'
+import { MockDairyBackend } from './mocks/mock-server'
 
 describe('Customer Registration Approval & Face Biometrics Workflow', () => {
   it('retrieves pending registration requests with YuNet/SFace metadata', async () => {

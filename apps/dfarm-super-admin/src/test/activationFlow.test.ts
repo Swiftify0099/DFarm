@@ -7,9 +7,10 @@ describe('Dairy Admin Two-Factor Activation Flow', () => {
   beforeEach(async () => {
     storage.clear()
     vi.restoreAllMocks()
-    try {
-      await fetch('http://localhost:4000/api/v1/dairies/admin/by-phone/7755995615', { method: 'DELETE' })
-    } catch {}
+    mockBackend.purgeAdminAndRelatedRecords('7755995615')
+    mockBackend.purgeAdminAndRelatedRecords('7507495615')
+    // Stub fetch to prevent test contamination from local background dev server on port 4000
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.reject(new Error('Network offline in unit test')))
   })
 
   it('validates activation token and fallback dairy code successfully', async () => {

@@ -1,12 +1,13 @@
 import { CustomerNotFoundError } from '../../../domain/errors/index.js';
 import { db } from '../../../infrastructure/database/PostgresPool.js';
+import { tenantDbManager } from '../../../infrastructure/database/TenantDatabaseManager.js';
 export class GetCustomerKhataSummaryUseCase {
     ledgerRepo;
     constructor(ledgerRepo) {
         this.ledgerRepo = ledgerRepo;
     }
-    async execute(customerId) {
-        const account = await this.ledgerRepo.findByCustomer(customerId);
+    async execute(customerId, organizationId) {
+        const account = await this.ledgerRepo.findByCustomer(customerId, organizationId);
         if (!account) {
             throw new CustomerNotFoundError(customerId);
         }
@@ -18,31 +19,39 @@ export class GetCustomerLedgerEntriesUseCase {
     constructor(ledgerRepo) {
         this.ledgerRepo = ledgerRepo;
     }
-    async execute(customerId, limit = 50, offset = 0) {
-        const entries = await this.ledgerRepo.listEntries(customerId, limit, offset);
+    async execute(customerId, limit = 50, offset = 0, organizationId) {
+        const entries = await this.ledgerRepo.listEntries(customerId, limit, offset, organizationId);
         return entries;
     }
 }
 export class GetCustomerBillsUseCase {
-    async execute(customerId, limit = 12) {
+    async execute(customerId, limit = 12, organizationId) {
         const sql = `
       SELECT 
         mb.id,
         mb.bill_number,
-        mb.billing_period_start,
-        mb.billing_period_end,
-        mb.total_liters,
-        mb.gross_amount,
-        mb.deductions_amount,
+        COALESCE(bp.start_date, mb.created_at) as billing_period_start,
+        COALESCE(bp.end_date, mb.created_at) as billing_period_end,
+        mb.total_milk_weight as total_liters,
+        mb.gross_milk_amount as gross_amount,
+        mb.total_debits as deductions_amount,
         mb.net_payable_amount,
-        mb.status,
-        mb.paid_at
+        mb.bill_status as status,
+        mb.approved_at as paid_at
       FROM monthly_bills mb
+      LEFT JOIN billing_periods bp ON bp.id = mb.billing_period_id
       WHERE mb.customer_id = $1
-      ORDER BY mb.billing_period_end DESC
+      ORDER BY mb.created_at DESC
       LIMIT $2;
     `;
-        const result = await db.query(sql, [customerId, limit]);
+        let client = db;
+        if (organizationId) {
+            try {
+                client = await tenantDbManager.getTenantDb(organizationId);
+            }
+            catch { }
+        }
+        const result = await client.query(sql, [customerId, limit]);
         return result.rows.map((row) => ({
             id: row.id,
             billNumber: row.bill_number,

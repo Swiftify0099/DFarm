@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MockDairyBackend } from '@/api/mock-server'
+import { MockDairyBackend } from './mocks/mock-server'
 
 describe('Server-Authoritative Ledger & Billing Settlements', () => {
   it('posts non-destructive adjustments to collection records and logs ledger entry', async () => {

@@ -1,0 +1,2832 @@
+[
+  {
+    "apiId": "API-001",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-002",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-003",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/live",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-004",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/ready",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-005",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-006",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/live",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-007",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/ready",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-008",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/operator/otp/request",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-009",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/operator/otp/verify",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-010",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/request-otp",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-011",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/verify-otp",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-012",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/customer/select-dairy",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-013",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/admin/otp/request",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-014",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/admin/otp/verify",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-015",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/admin/me",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-016",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/refresh-token",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-017",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/logout",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-018",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/sessions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-019",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/sessions/active",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-020",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/sessions/open",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-021",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/sessions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-022",
+    "application": "All Applications",
+    "method": "PATCH",
+    "path": "/sessions/:sessionId/open",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-023",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/sessions/:sessionId/close",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-024",
+    "application": "All Applications",
+    "method": "PATCH",
+    "path": "/sessions/:sessionId/close",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-025",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/sessions/close",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-026",
+    "application": "All Applications",
+    "method": "PATCH",
+    "path": "/sessions/close",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-027",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/transactions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-028",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/intake",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-029",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/transactions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-030",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/transactions/recent",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-031",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/transactions/:id/adjust",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-032",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/quality/readings",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-033",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/transactions/recent",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-034",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/history",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-035",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/summary/monthly",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-036",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/sessions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-037",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/sessions/active",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-038",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/sessions/open",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-039",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/sessions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-040",
+    "application": "All Applications",
+    "method": "PATCH",
+    "path": "/sessions/:sessionId/open",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-041",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/sessions/:sessionId/close",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-042",
+    "application": "All Applications",
+    "method": "PATCH",
+    "path": "/sessions/:sessionId/close",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-043",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/sessions/close",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-044",
+    "application": "All Applications",
+    "method": "PATCH",
+    "path": "/sessions/close",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-045",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/transactions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-046",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/intake",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-047",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/transactions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-048",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/transactions/recent",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-049",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/transactions/:id/adjust",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-050",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/quality/readings",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-051",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/transactions/recent",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-052",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/history",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-053",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/summary/monthly",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-054",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-055",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/me",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-056",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/memberships",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-057",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/switch-dairy",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-058",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/register",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-059",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/pending",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-060",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:id/status",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-061",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/approve",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-062",
+    "application": "All Applications",
+    "method": "PATCH",
+    "path": "/:id/approve",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-063",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/reject",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-064",
+    "application": "All Applications",
+    "method": "PATCH",
+    "path": "/:id/reject",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-065",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/suspend",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-066",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/reactivate",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-067",
+    "application": "All Applications",
+    "method": "PATCH",
+    "path": "/:id",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-068",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/soft-delete",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-069",
+    "application": "All Applications",
+    "method": "DELETE",
+    "path": "/:id",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-070",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/restore",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-071",
+    "application": "All Applications",
+    "method": "PUT",
+    "path": "/:id/biometrics/update",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-072",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/biometrics/update",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-073",
+    "application": "All Applications",
+    "method": "PATCH",
+    "path": "/:id/biometrics",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-074",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/biometrics",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-075",
+    "application": "All Applications",
+    "method": "PUT",
+    "path": "/:id/biometrics",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-076",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:id",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-077",
+    "application": "All Applications",
+    "method": "PUT",
+    "path": "/:id/bank-details",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-078",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-079",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/assign",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-080",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/mark-lost",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-081",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/unassign",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-082",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/lookup",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-083",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/lookup/:uid",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-084",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/face/templates",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-085",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/face/match",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-086",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/face/enrollments",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-087",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/face/enrollments/:id/re-enroll",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-088",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/face/enrollments/:id/revoke",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-089",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/accounts/:customerId",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-090",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/summary",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-091",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/balance",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-092",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/entries",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-093",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/adjustment",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-094",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-095",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/generate",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-096",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/periods",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-097",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/periods",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-098",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/periods/:periodId",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-099",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/periods/:periodId/generate",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-100",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/periods/:periodId/finalize",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-101",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/periods/:periodId/progress",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-102",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/customers/:customerId/statement",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-103",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/scheduler/run",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-104",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:billId/submit-review",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-105",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:billId/approve",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-106",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:billId/finalize",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-107",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:billId/adjust",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-108",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:billId/pdf",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-109",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/active",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-110",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/calculate",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-111",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-112",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-113",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:rateChartId",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-114",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:rateChartId/versions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-115",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:rateChartId/versions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-116",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:rateChartId/versions/:versionId",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-117",
+    "application": "All Applications",
+    "method": "PUT",
+    "path": "/:rateChartId/versions/:versionId/matrix",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-118",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:rateChartId/versions/:versionId/preview",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-119",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:rateChartId/versions/:versionId/submit",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-120",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:rateChartId/versions/:versionId/approve",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-121",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:rateChartId/versions/:versionId/publish",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-122",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/webhook",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-123",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/import",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-124",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-125",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:recordId/resolve",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-126",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/session",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-127",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/session/:sessionId",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-128",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/face",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-129",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/rfid",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-130",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/supervisor-verify",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-131",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/audit",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-132",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-133",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/movements",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-134",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/adjustments",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-135",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/transfers",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-136",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/reports",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-137",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-138",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-139",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/advances",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-140",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/advances/:advanceId/approve",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-141",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:id",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-142",
+    "application": "All Applications",
+    "method": "PUT",
+    "path": "/:id",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-143",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/role",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-144",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/centers",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-145",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/salary-structure",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-146",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:id/salary-structure",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-147",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/advances",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-148",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/shifts",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-149",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/shifts",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-150",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-151",
+    "application": "All Applications",
+    "method": "PUT",
+    "path": "/:id/correct",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-152",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-153",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/reports/summary",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-154",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/leaves",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-155",
+    "application": "All Applications",
+    "method": "PUT",
+    "path": "/leaves/:id/approve",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-156",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/leaves",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-157",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-158",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/calculate",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-159",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/approve",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-160",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/finalize",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-161",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/payments",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-162",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-163",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/payslips/:id",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-164",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:id",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-165",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-166",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/sync",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-167",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/mapping",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-168",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/calibration",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-169",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:id/calibration",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-170",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/telemetry",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-171",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/transactions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-172",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/push",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-173",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/push",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-174",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/pull",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-175",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/acknowledge",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-176",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/status",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-177",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/conflicts",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-178",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/events",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-179",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/invitations/validate",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-180",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/invitations/otp/request",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-181",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/invitations/activate",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-182",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/invitations/resend",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-183",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/nearby",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-184",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-185",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/tenant-databases",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-186",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:id",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-187",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-188",
+    "application": "All Applications",
+    "method": "PATCH",
+    "path": "/:id/location",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-189",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/suspend",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-190",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/reactivate",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-191",
+    "application": "All Applications",
+    "method": "DELETE",
+    "path": "/admin/by-phone/:phone",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-192",
+    "application": "All Applications",
+    "method": "DELETE",
+    "path": "/purge/phone/:phone",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-193",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/metrics",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-194",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/summary",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-195",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-196",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/draft",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-197",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/activate",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-198",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/preview",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-199",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/products",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-200",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/products",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-201",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/stock",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-202",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/sales",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-203",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/sales",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-204",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/movements",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-205",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-206",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-207",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/batches/:batchId/download",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-208",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/payouts",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-209",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/payouts/:payoutId/approve",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-210",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/payouts/:payoutId/submit",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-211",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/payouts/:payoutId/confirm",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-212",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/payouts/:payoutId/fail",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-213",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/payouts/:payoutId/reverse",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-214",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/receipts",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-215",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/receipts/:receiptId/confirm",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-216",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/receipts/:receiptId",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-217",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/batches",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-218",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/batches/:batchId",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-219",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/batches/:batchId/approve",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-220",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/batches/:batchId/submit",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-221",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/batches/:batchId/reconcile",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-222",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/batches/:batchId/export",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-223",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/customers/:customerId",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-224",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/customers/:customerId/summary",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-225",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:paymentId",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-226",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/:paymentId/receipt",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-227",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-228",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-229",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-230",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/:id/read",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-231",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/dashboard/metrics",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-232",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/dashboard/analytics",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-233",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/audit",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-234",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/audit",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-235",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/alerts",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-236",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/alerts/:id/acknowledge",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-237",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/alerts/:id/resolve",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-238",
+    "application": "Platform Infrastructure / Orchestrator",
+    "method": "GET",
+    "path": "/health",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-239",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/hardware",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-240",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/hardware",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-241",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/hardware/:id/assign",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-242",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/hardware/:id/unassign",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-243",
+    "application": "All Applications",
+    "method": "PATCH",
+    "path": "/hardware/:id/status",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-244",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/amc/plans",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-245",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/amc/plans",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-246",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/amc/subscriptions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-247",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/amc/subscriptions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-248",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/amc/subscriptions/:id/verify-payment",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-249",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/admins",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-250",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/users",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-251",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/users",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-252",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/reports/generate",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-253",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/dairies/:id/bank-details",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-254",
+    "application": "All Applications",
+    "method": "PUT",
+    "path": "/dairies/:id/bank-details",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-255",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/support/active",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-256",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/support/sessions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-257",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/support/sessions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-258",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/support/sessions/:id/revoke",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-259",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/policies/rate",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-260",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/policies/rate",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-261",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/policies/rate/:id/versions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-262",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/policies/rate/:id/versions/:vId/publish",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-263",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/policies/fat-snf",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-264",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/policies/fat-snf",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-265",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/policies/fat-snf/:id/versions",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-266",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/policies/fat-snf/:id/versions/:vId/publish",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-267",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/settings",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-268",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/collections",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-269",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/feed",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-270",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/ledger",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-271",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/export",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-272",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-273",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-274",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/login",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-275",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/me",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-276",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/centers",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-277",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/otp/send",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-278",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/otp/verify",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-279",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/login",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-280",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/me",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-281",
+    "application": "All Applications",
+    "method": "GET",
+    "path": "/centers",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-282",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/otp/send",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  },
+  {
+    "apiId": "API-283",
+    "application": "All Applications",
+    "method": "POST",
+    "path": "/otp/verify",
+    "mountPoint": "/",
+    "permission": "PUBLIC",
+    "tenant": "Central",
+    "status": "ROUTE REGISTERED"
+  }
+]

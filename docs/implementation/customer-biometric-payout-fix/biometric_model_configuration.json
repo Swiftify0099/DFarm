@@ -1,0 +1,60 @@
+{
+  "system": "DFarm Biometric Recognition Engine",
+  "version": "1.0.0",
+  "faceDetection": {
+    "modelName": "OpenCV YuNet 2023Mar",
+    "filenameFP32": "face_detection_yunet_2023mar.onnx",
+    "filenameINT8": "face_detection_yunet_2023mar_int8.onnx",
+    "framework": "ONNX",
+    "inputResolution": {
+      "default": [320, 320],
+      "highRes": [640, 480]
+    },
+    "colorFormat": "BGR",
+    "confidenceThreshold": 0.80,
+    "nmsThreshold": 0.30,
+    "landmarks": 5,
+    "landmarkTypes": ["right_eye", "left_eye", "nose_tip", "right_mouth_corner", "left_mouth_corner"]
+  },
+  "faceRecognition": {
+    "modelName": "OpenCV SFace 2021Dec INT8",
+    "filenameINT8": "face_recognition_sface_2021dec_int8.onnx",
+    "filenameFP32": "face_recognition_sface_2021dec.onnx",
+    "framework": "ONNX",
+    "quantization": "INT8 Quantized",
+    "inputResolution": [112, 112],
+    "colorFormat": "BGR",
+    "embeddingDimensions": 128,
+    "normalization": {
+      "method": "L2_NORM",
+      "targetNorm": 1.0,
+      "tolerance": 0.000001
+    },
+    "similarityMetric": "COSINE_SIMILARITY",
+    "thresholds": {
+      "officialOpenCVCosine": 0.363,
+      "officialOpenCVEuclideanL2": 1.128,
+      "kioskStrictProductionCosine": 0.400
+    }
+  },
+  "runtimes": {
+    "browser": {
+      "engine": "onnxruntime-web",
+      "executionProvider": "wasm",
+      "simdSupport": true,
+      "multiThreading": true
+    },
+    "mobile": {
+      "engine": "onnxruntime-react-native",
+      "executionProvider": "cpu / nnapi"
+    },
+    "server": {
+      "engine": "onnxruntime-node",
+      "executionProvider": "CPUExecutionProvider"
+    }
+  },
+  "storageEncryption": {
+    "algorithm": "AES-256-GCM",
+    "vectorSerialization": "FLOAT32_ARRAY_JSON"
+  }
+}

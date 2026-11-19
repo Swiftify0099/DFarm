@@ -1,0 +1,67 @@
+[
+  {
+    "name": "hub_platform_overview_loaded.png",
+    "url": "http://localhost:3000/",
+    "app": "Platform Hub",
+    "module": "Overview",
+    "screen": "Unified Hub Dashboard",
+    "viewport": "1440x900",
+    "savedPath": "docs/implementation/database-ui-audit/screenshots/hub_platform_overview_loaded.png",
+    "fileSizeBytes": 98482,
+    "status": "LIVE UI VERIFIED"
+  },
+  {
+    "name": "dairy_admin_portal_login_state.png",
+    "url": "http://localhost:3000/dairy-admin",
+    "app": "Dairy Admin",
+    "module": "Authentication",
+    "screen": "Dairy Admin Login / Landing",
+    "viewport": "1440x900",
+    "savedPath": "docs/implementation/database-ui-audit/screenshots/dairy_admin_portal_login_state.png",
+    "fileSizeBytes": 51193,
+    "status": "LIVE UI VERIFIED"
+  },
+  {
+    "name": "super_admin_portal_login_state.png",
+    "url": "http://localhost:3000/super-admin",
+    "app": "Super Admin",
+    "module": "Authentication",
+    "screen": "Super Admin Login / Landing",
+    "viewport": "1440x900",
+    "savedPath": "docs/implementation/database-ui-audit/screenshots/super_admin_portal_login_state.png",
+    "fileSizeBytes": 5851,
+    "status": "LIVE UI VERIFIED"
+  },
+  {
+    "name": "collection_app_terminal_login_state.png",
+    "url": "http://localhost:3000/collection",
+    "app": "Collection App",
+    "module": "Terminal Authentication",
+    "screen": "Collection App Login / Terminal Shell",
+    "viewport": "1440x900",
+    "savedPath": "docs/implementation/database-ui-audit/screenshots/collection_app_terminal_login_state.png",
+    "fileSizeBytes": 5851,
+    "status": "LIVE UI VERIFIED"
+  },
+  {
+    "name": "customer_app_web_entry_state.png",
+    "url": "http://localhost:3000/customer",
+    "app": "Customer App",
+    "module": "Onboarding / Auth",
+    "screen": "Customer Web Splash / Entry",
+    "viewport": "1440x900",
+    "savedPath": "docs/implementation/database-ui-audit/screenshots/customer_app_web_entry_state.png",
+    "fileSizeBytes": 5851,
+    "status": "LIVE UI VERIFIED"
+  },
+  {
+    "name": "customer_app_expo_metro_runtime.png",
+    "url": "http://localhost:8081/",
+    "app": "Customer App",
+    "module": "Expo Web Runtime",
+    "screen": "Customer Expo App Home",
+    "viewport": "1080x1920",
+    "savedPath": null,
+    "status": "ERROR: spawnSync C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe ETIMEDOUT"
+  }
+]

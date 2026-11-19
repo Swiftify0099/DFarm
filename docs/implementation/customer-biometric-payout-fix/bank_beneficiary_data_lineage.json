@@ -1,0 +1,52 @@
+{
+  "system": "DFarm Banking & Beneficiary Subsystem",
+  "dataLineage": [
+    {
+      "stage": "CAPTURE",
+      "component": "apps/dfarm-customer-app/src/app/(onboarding)/register.tsx",
+      "fields": ["accountHolderName", "accountNumber", "confirmAccountNumber", "ifscCode", "bankName"],
+      "validations": {
+        "accountNumber": "9 to 18 numeric digits",
+        "confirmAccountNumber": "Strict string equality with accountNumber",
+        "ifscCode": "^[A-Z]{4}0[A-Z0-9]{6}$"
+      },
+      "piiHandling": "Encrypted in transit via TLS 1.3; sensitive entry masked on device"
+    },
+    {
+      "stage": "API_INGESTION",
+      "endpoint": "POST /api/v1/customers/register",
+      "payloadWrapper": "bankDetails",
+      "middleware": ["authenticateOptional", "validateRequest(CustomerRegistrationSchema)"],
+      "loggerSanitization": ["accountNumber REDACTED", "bank_account_number REDACTED"]
+    },
+    {
+      "stage": "REPOSITORY_PERSISTENCE",
+      "component": "services/backend/src/infrastructure/repositories/PostgresCustomerRepository.ts",
+      "targetDatabase": "dfarm_tenant_<code_hash> (Physical Isolation)",
+      "targetTable": "customers",
+      "columnMapping": {
+        "accountHolderName": "recipient_name / full_name",
+        "accountNumber": "bank_account_number",
+        "ifscCode": "bank_ifsc_code",
+        "bankName": "bank_name",
+        "status": "bank_verification_status = 'DETAILS_SUBMITTED'"
+      }
+    },
+    {
+      "stage": "DAIRY_ADMIN_CONSUMPTION",
+      "endpoints": ["GET /api/v1/customers", "GET /api/v1/customers/:id", "GET /api/v1/customers/pending-approvals"],
+      "maskingRule": "XXXX-XXXX- + last 4 digits (e.g. XXXX-XXXX-8901)",
+      "unmaskedAccess": "Strictly prohibited in ordinary UI JSON responses"
+    },
+    {
+      "stage": "FINANCIAL_BATCH_EXPORT",
+      "component": "services/backend/src/modules/payments/serializers/BankFileService.ts",
+      "formats": ["NEFT_STANDARD", "SBI_CMP"],
+      "streamingSecurity": {
+        "cacheControl": "no-store, no-cache, must-revalidate",
+        "integrity": "X-Checksum-SHA256 Header",
+        "tokenExpirySeconds": 300
+      }
+    }
+  ]
+}

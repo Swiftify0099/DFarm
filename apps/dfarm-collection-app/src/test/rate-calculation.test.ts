@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MockCollectionBackend } from '../api/mock-backend'
+import { MockCollectionBackend } from './mocks/mock-backend'
 
 describe('Rate Calculation Matrix Engine', () => {
   it('correctly calculates Cow milk rate using two-axis formula', () => {

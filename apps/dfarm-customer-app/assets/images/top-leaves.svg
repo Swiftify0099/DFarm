@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 110" width="120" height="110" fill="none">
+  <defs>
+    <linearGradient id="topLeafBranch" x1="0" y1="0" x2="80" y2="70" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1B5E20" />
+      <stop offset="100%" stop-color="#388E3C" />
+    </linearGradient>
+    <linearGradient id="topLeafVibrant" x1="10" y1="10" x2="60" y2="70" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2E7D32" />
+      <stop offset="60%" stop-color="#4CAF50" />
+      <stop offset="100%" stop-color="#81C784" />
+    </linearGradient>
+    <linearGradient id="topLeafBright" x1="0" y1="20" x2="50" y2="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#388E3C" />
+      <stop offset="60%" stop-color="#66BB6A" />
+      <stop offset="100%" stop-color="#A5D6A7" />
+    </linearGradient>
+    <linearGradient id="topLeafDeep" x1="0" y1="0" x2="35" y2="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1B5E20" />
+      <stop offset="100%" stop-color="#2E7D32" />
+    </linearGradient>
+  </defs>
+
+  <!-- Main Arching Stem Branch from top-left -->
+  <path
+    d="M-5 -5 Q25 22 75 58"
+    stroke="url(#topLeafBranch)"
+    stroke-width="2.6"
+    stroke-linecap="round"
+  />
+  <path
+    d="M20 18 Q45 28 85 40"
+    stroke="url(#topLeafBranch)"
+    stroke-width="1.8"
+    stroke-linecap="round"
+  />
+  <path
+    d="M48 38 Q50 68 62 95"
+    stroke="url(#topLeafBranch)"
+    stroke-width="1.6"
+    stroke-linecap="round"
+  />
+
+  <!-- Leaf 1: Hanging main center leaf -->
+  <path
+    d="M75 58 C88 68 98 86 92 104 C74 100 62 82 75 58 Z"
+    fill="url(#topLeafBright)"
+  />
+  <path
+    d="M76 64 C81 74 85 86 84 96"
+    stroke="#E8F5E9"
+    stroke-width="1.2"
+    stroke-linecap="round"
+    opacity="0.8"
+  />
+
+  <!-- Leaf 2: Upper right outward leaf -->
+  <path
+    d="M85 40 C98 38 116 46 118 62 C102 65 88 54 85 40 Z"
+    fill="url(#topLeafVibrant)"
+  />
+  <path
+    d="M89 44 C98 48 106 53 112 56"
+    stroke="#E8F5E9"
+    stroke-width="1.2"
+    stroke-linecap="round"
+    opacity="0.75"
+  />
+
+  <!-- Leaf 3: Drooping lower leaf -->
+  <path
+    d="M62 95 C58 105 48 112 40 108 C38 96 48 88 62 95 Z"
+    fill="url(#topLeafBright)"
+  />
+
+  <!-- Leaf 4: Mid branch leaf -->
+  <path
+    d="M42 24 C56 16 72 20 80 32 C68 38 52 35 42 24 Z"
+    fill="url(#topLeafDeep)"
+  />
+  <path
+    d="M48 24 C58 24 66 26 74 30"
+    stroke="#C8E6C9"
+    stroke-width="1.1"
+    stroke-linecap="round"
+    opacity="0.75"
+  />
+
+  <!-- Leaf 5: Topmost near corner small sprout -->
+  <path
+    d="M16 8 C28 2 40 4 44 14 C34 18 24 16 16 8 Z"
+    fill="url(#topLeafVibrant)"
+  />
+</svg>

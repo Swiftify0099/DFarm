@@ -67,6 +67,7 @@ export class HmacJwtTokenService {
             userId: payload.userId,
             organizationId: payload.organizationId,
             centerId: payload.centerId,
+            globalCustomerId: payload.globalCustomerId,
             role: payload.role,
             actorType: payload.actorType,
         };

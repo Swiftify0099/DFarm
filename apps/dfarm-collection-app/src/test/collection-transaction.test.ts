@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MockCollectionBackend, CURRENT_DAIRY_ID } from '../api/mock-backend'
+import { MockCollectionBackend, CURRENT_DAIRY_ID } from './mocks/mock-backend'
 
 describe('Collection Transaction Validation Gate & Journaling', () => {
   it('successfully submits valid milk intake transaction', async () => {

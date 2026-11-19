@@ -28,6 +28,7 @@ export declare class UpdateCustomerBiometricsUseCase {
     constructor(customerRepo: ICustomerRepository, encryptor: IBiometricEncryptor);
     execute(params: {
         customerId: string;
+        organizationId?: string;
         embedding: number[];
         modelVersion?: string;
     }): Promise<{

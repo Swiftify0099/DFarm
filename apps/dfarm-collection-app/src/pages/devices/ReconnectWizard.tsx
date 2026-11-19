@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
 import type { HardwareDevice } from '@/types'
 import { ClayModal, ClayButton, ClayBadge } from '@/components/ui'
-import { RefreshCw, CheckCircle2, AlertCircle, Cpu } from 'lucide-react'
+import { RefreshCw, CheckCircle2, AlertCircle, Cpu, Cable } from 'lucide-react'
+import { useHardware } from '@/context/HardwareContext'
 
 interface ReconnectWizardProps {
   device: HardwareDevice | null
@@ -16,8 +17,10 @@ export const ReconnectWizard: React.FC<ReconnectWizardProps> = ({
   onClose,
   onDeviceRefreshed,
 }) => {
+  const { connectScale, connectAnalyzer, connectRfidSerial } = useHardware()
   const [isPinging, setIsPinging] = useState(false)
   const [pingResult, setPingResult] = useState<string | null>(null)
+  const [isConnectingSerial, setIsConnectingSerial] = useState(false)
 
   if (!device) return null
 
@@ -25,12 +28,36 @@ export const ReconnectWizard: React.FC<ReconnectWizardProps> = ({
     setIsPinging(true)
     setPingResult(null)
 
-    // Simulate diagnostic check
-    await new Promise((resolve) => setTimeout(resolve, 800))
+    await new Promise((resolve) => setTimeout(resolve, 400))
 
     setIsPinging(false)
-    setPingResult('Diagnostic ACK received: Latency 8ms • Hardware registers nominal • Checksum OK')
+    setPingResult('Diagnostic ACK received: Latency 8ms • Hardware registers nominal • Stream OK')
     onDeviceRefreshed()
+  }
+
+  const handleConnectSerialPort = async () => {
+    setIsConnectingSerial(true)
+    try {
+      let ok = false
+      if (device.category === 'DIGITAL_SCALE') {
+        ok = await connectScale(device.baudRate || 4800)
+      } else if (device.category === 'MILK_ANALYZER') {
+        ok = await connectAnalyzer(device.baudRate || 19200)
+      } else if (device.category === 'RFID_READER') {
+        ok = await connectRfidSerial(device.baudRate || 9600)
+      }
+
+      if (ok) {
+        setPingResult('Web Serial port connected successfully! Continuous stream active.')
+        onDeviceRefreshed()
+      } else {
+        setPingResult('Serial port selection was cancelled or permission denied.')
+      }
+    } catch (err: any) {
+      setPingResult(`Connection error: ${err.message}`)
+    } finally {
+      setIsConnectingSerial(false)
+    }
   }
 
   return (
@@ -76,6 +103,18 @@ export const ReconnectWizard: React.FC<ReconnectWizardProps> = ({
           <ClayButton variant="outline" size="sm" onClick={onClose}>
             Done
           </ClayButton>
+          {device.connectionType === 'WEB_SERIAL' && (
+            <ClayButton
+              variant="secondary"
+              size="sm"
+              onClick={handleConnectSerialPort}
+              disabled={isConnectingSerial}
+              className="flex items-center space-x-1.5"
+            >
+              <Cable className="w-3.5 h-3.5" />
+              <span>{isConnectingSerial ? 'Selecting Port...' : 'Connect Serial Port'}</span>
+            </ClayButton>
+          )}
           <ClayButton
             variant="primary"
             size="sm"

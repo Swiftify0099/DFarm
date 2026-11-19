@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS milk_collections (
     rate_chart_version_id UUID NOT NULL REFERENCES rate_chart_versions(id) ON DELETE RESTRICT,
     applied_rate_per_unit NUMERIC(6,2) NOT NULL,
     total_amount NUMERIC(10,2) NOT NULL,
-    transaction_status VARCHAR(20) NOT NULL DEFAULT 'COMPLETED',
+    transaction_status VARCHAR(50) NOT NULL DEFAULT 'COMPLETED',
     client_intake_uuid UUID NOT NULL,
     idempotency_key VARCHAR(128) NOT NULL UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS milk_collections (
     CONSTRAINT chk_collection_amount CHECK (total_amount >= 0.00),
     CONSTRAINT chk_collection_shift CHECK (shift_type IN ('MORNING', 'EVENING')),
     CONSTRAINT chk_collection_category CHECK (milk_category IN ('COW', 'BUFFALO')),
-    CONSTRAINT chk_collection_status CHECK (transaction_status IN ('COMPLETED', 'REVERSED', 'ADJUSTED'))
+    CONSTRAINT chk_collection_status CHECK (transaction_status IN ('COMPLETED', 'REVERSED', 'ADJUSTED', 'RECONCILIATION_REQUIRED'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_milk_collections_cust ON milk_collections(customer_id);

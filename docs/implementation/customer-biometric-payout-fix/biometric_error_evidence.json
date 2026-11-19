@@ -1,0 +1,36 @@
+{
+  "incidentId": "DFARM-ERR-BIOMETRIC-ENROLL-500",
+  "errorObserved": {
+    "clientDisplay": "Registration Error: An unexpected Server error occurred, please contact system support",
+    "httpStatus": 500,
+    "errorCode": "INTERNAL_SERVER_ERROR",
+    "timestamp": "2026-11-18T18:45:00.000Z"
+  },
+  "rootCauseEvidence": {
+    "primaryFailure": "PostgreSQL extended query protocol prepared statement violation in PostgresCustomerRepository.ts:34",
+    "sqlError": "error: cannot insert multiple commands into a prepared statement",
+    "cascadingFailure": "BiometricUseCases.ts: UpdateCustomerBiometricsUseCase called findById() without organizationId parameter",
+    "repositoryException": "Tenant context (organizationId) is required for customer lookup. Cross-dairy search is prohibited.",
+    "affectedEndpoints": [
+      "POST /api/v1/customers/register (swallowed exception, left faceEnrollmentStatus='NOT_ENROLLED')",
+      "POST /api/v1/customers/:id/biometrics (unhandled rejection returned HTTP 500)"
+    ]
+  },
+  "remediationEvidence": {
+    "codeChanges": [
+      {
+        "file": "services/backend/src/infrastructure/repositories/PostgresCustomerRepository.ts",
+        "fix": "Separated CREATE TABLE IF NOT EXISTS customer_tenant_lookup into standalone DDL query; separated parameterized INSERT"
+      },
+      {
+        "file": "services/backend/src/application/use-cases/customers/BiometricUseCases.ts",
+        "fix": "Propagated organizationId parameter into customerRepo.findById()"
+      },
+      {
+        "file": "services/backend/src/presentation/routes/customers.routes.ts",
+        "fix": "Passed targetOrgId in POST /register and handleBiometricsUpdate"
+      }
+    ],
+    "verificationOutcome": "Registration with biometric succeeds with 201 Created and faceEnrollmentStatus='ENROLLED'"
+  }
+}

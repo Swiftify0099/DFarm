@@ -165,6 +165,31 @@ class MockBackendEngine {
     return users
   }
 
+  public createPlatformUser(payload: {
+    mobile: string
+    name?: string
+    fullName?: string
+    email?: string
+    role: 'SUPER_ADMIN' | 'PLATFORM_OPERATOR'
+  }): SuperAdminUser {
+    const list = this.getPlatformUsers()
+    const name = payload.fullName || payload.name || 'Platform Staff'
+    const newUser: SuperAdminUser = {
+      id: 'sa_usr_' + Date.now(),
+      fullName: name,
+      mobile: payload.mobile,
+      email: payload.email || `${payload.mobile}@dfarm.platform`,
+      roleTitle: payload.role === 'SUPER_ADMIN' ? 'Platform Super Administrator' : 'Platform Operations Specialist',
+      permissions: payload.role === 'SUPER_ADMIN' ? (['*'] as any) : (['system:monitor', 'dairies:read', 'hardware:read', 'amc:read'] as any),
+      status: 'active',
+      createdAt: new Date().toISOString(),
+      lastLoginAt: new Date().toISOString(),
+    }
+    list.push(newUser)
+    storage.set(STORAGE_KEYS.SUPER_ADMINS, list)
+    return newUser
+  }
+
   // --- AUTHENTICATION FLOW ---
 
   public async requestOtp(payload: RequestOtpPayload): Promise<RequestOtpResponse> {
@@ -1914,6 +1939,472 @@ class MockBackendEngine {
             matchedDairyIds.has(i.dairyId)
         )
         .map((i) => i.id),
+    }
+  }
+
+  // ============================================================================
+  // Central Hardware Master & Inventory
+  // ============================================================================
+  private initialHardware = [
+    {
+      id: 'hw-001',
+      serialNumber: 'ANALYZER-MA-800-01',
+      deviceCategory: 'ANALYZER',
+      manufacturer: 'Essae-Teraoka',
+      model: 'MA-800 Pro Ultra',
+      status: 'ASSIGNED',
+      assignedDairyId: '00000000-0000-0000-0000-000000000001',
+      assignedDairyName: 'Baramati Milk Union',
+      warrantyUntil: '2028-12-31',
+      notes: 'Precision optical sensor, dual-frequency ultrasonic',
+      createdAt: '2026-01-10T10:00:00Z',
+      updatedAt: '2026-01-10T10:00:00Z',
+    },
+    {
+      id: 'hw-002',
+      serialNumber: 'SCALE-DS-215-02',
+      deviceCategory: 'WEIGHING_SCALE',
+      manufacturer: 'Essae-Teraoka',
+      model: 'DS-215 Digital Platform',
+      status: 'AVAILABLE',
+      warrantyUntil: '2028-06-30',
+      notes: 'Stainless steel IP68 waterproof load cell',
+      createdAt: '2026-01-15T11:00:00Z',
+      updatedAt: '2026-01-15T11:00:00Z',
+    },
+    {
+      id: 'hw-003',
+      serialNumber: 'RFID-RD-100-03',
+      deviceCategory: 'RFID_READER',
+      manufacturer: 'Zebra',
+      model: 'FX9600 Industrial',
+      status: 'AVAILABLE',
+      warrantyUntil: '2027-12-31',
+      notes: 'High sensitivity long-range can tag scanner',
+      createdAt: '2026-02-01T09:00:00Z',
+      updatedAt: '2026-02-01T09:00:00Z',
+    },
+  ]
+
+  getHardware(params?: { status?: string; category?: string; dairyId?: string }): any[] {
+    const list = storage.get('dfarm_hw', this.initialHardware)
+    return list.filter((h: any) => {
+      if (params?.status && params.status !== 'ALL' && h.status !== params.status) return false
+      if (params?.category && params.category !== 'ALL' && h.deviceCategory !== params.category) return false
+      if (params?.dairyId && params.dairyId !== 'ALL' && h.assignedDairyId !== params.dairyId) return false
+      return true
+    })
+  }
+
+  registerHardware(payload: any): any {
+    const list = storage.get('dfarm_hw', this.initialHardware)
+    const newDev = {
+      id: 'hw-' + Date.now(),
+      ...payload,
+      status: payload.status || 'AVAILABLE',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    list.unshift(newDev)
+    storage.set('dfarm_hw', list)
+    return newDev
+  }
+
+  assignHardware(deviceId: string, dairyIdOrPayload: any, notes?: string): any {
+    const list = storage.get('dfarm_hw', this.initialHardware)
+    const found = list.find((h: any) => h.id === deviceId)
+    if (found) {
+      const dairyId = typeof dairyIdOrPayload === 'string' ? dairyIdOrPayload : dairyIdOrPayload?.dairyId
+      const n = typeof dairyIdOrPayload === 'object' && dairyIdOrPayload?.notes ? dairyIdOrPayload.notes : notes
+      found.status = 'ASSIGNED'
+      found.assignedDairyId = dairyId
+      found.notes = n || found.notes
+      storage.set('dfarm_hw', list)
+      return found
+    }
+    throw new Error('Hardware unit not found')
+  }
+
+  unassignHardware(deviceId: string, payloadOrNotes?: any): any {
+    const list = storage.get('dfarm_hw', this.initialHardware)
+    const found = list.find((h: any) => h.id === deviceId)
+    if (found) {
+      const notes = typeof payloadOrNotes === 'string' ? payloadOrNotes : payloadOrNotes?.notes
+      found.status = 'AVAILABLE'
+      found.assignedDairyId = undefined
+      found.notes = notes || found.notes
+      storage.set('dfarm_hw', list)
+      return found
+    }
+    throw new Error('Hardware unit not found')
+  }
+
+  updateHardwareStatus(deviceId: string, statusOrPayload: any, notes?: string): any {
+    const list = storage.get('dfarm_hw', this.initialHardware)
+    const found = list.find((h: any) => h.id === deviceId)
+    if (found) {
+      const status = typeof statusOrPayload === 'string' ? statusOrPayload : statusOrPayload?.status
+      const n = typeof statusOrPayload === 'object' && statusOrPayload?.notes ? statusOrPayload.notes : notes
+      found.status = status
+      found.notes = n || found.notes
+      storage.set('dfarm_hw', list)
+      return found
+    }
+    throw new Error('Hardware unit not found')
+  }
+
+  // ============================================================================
+  // AMC Plans & Subscriptions
+  // ============================================================================
+  private initialAmcPlans = [
+    {
+      id: '00000000-0000-0000-0000-000000000001',
+      name: 'Standard Annual AMC',
+      durationMonths: 12,
+      priceInr: 49999.0,
+      description: 'Comprehensive annual maintenance, cloud backups & priority support',
+      isActive: true,
+      createdAt: '2026-01-01T00:00:00Z',
+    },
+    {
+      id: '00000000-0000-0000-0000-000000000002',
+      name: 'Semi-Annual AMC',
+      durationMonths: 6,
+      priceInr: 27999.0,
+      description: '6-month software and hardware maintenance plan',
+      isActive: true,
+      createdAt: '2026-01-01T00:00:00Z',
+    },
+  ]
+
+  private initialAmcSubs = [
+    {
+      id: 'sub-001',
+      dairyId: '00000000-0000-0000-0000-000000000001',
+      dairyName: 'Baramati Milk Union',
+      dairyCode: 'DF-BAR-1001',
+      planId: '00000000-0000-0000-0000-000000000001',
+      planName: 'Standard Annual AMC',
+      startDate: '2026-01-01',
+      expiryDate: '2027-01-01',
+      status: 'ACTIVE',
+      paymentStatus: 'PAID',
+      razorpayPaymentId: 'pay_amc_live_9812',
+      amountPaid: 49999.0,
+      activatedAt: '2026-01-01T12:00:00Z',
+      createdAt: '2026-01-01T12:00:00Z',
+    },
+  ]
+
+  getAmcPlans(): any[] {
+    return storage.get('dfarm_amc_plans', this.initialAmcPlans)
+  }
+
+  createAmcPlan(payload: any): any {
+    const list = storage.get('dfarm_amc_plans', this.initialAmcPlans)
+    const newPlan = { id: 'plan-' + Date.now(), ...payload, isActive: true, createdAt: new Date().toISOString() }
+    list.push(newPlan)
+    storage.set('dfarm_amc_plans', list)
+    return newPlan
+  }
+
+  getAmcSubscriptions(dairyId?: string): any[] {
+    const list = storage.get('dfarm_amc_subs', this.initialAmcSubs)
+    return dairyId ? list.filter((s: any) => s.dairyId === dairyId) : list
+  }
+
+  createAmcSubscription(payload: any): any {
+    const list = storage.get('dfarm_amc_subs', this.initialAmcSubs)
+    const start = new Date(payload.startDate || Date.now())
+    const expiry = new Date(start)
+    expiry.setFullYear(expiry.getFullYear() + 1)
+    const newSub = {
+      id: 'sub-' + Date.now(),
+      ...payload,
+      startDate: start.toISOString().slice(0, 10),
+      expiryDate: expiry.toISOString().slice(0, 10),
+      status: 'PENDING_PAYMENT',
+      paymentStatus: 'UNPAID',
+      createdAt: new Date().toISOString(),
+    }
+    list.unshift(newSub)
+    storage.set('dfarm_amc_subs', list)
+    return newSub
+  }
+
+  verifyAmcPayment(subscriptionId: string, paymentIdOrPayload: any, signature?: string): any {
+    const list = storage.get('dfarm_amc_subs', this.initialAmcSubs)
+    const found = list.find((s: any) => s.id === subscriptionId)
+    if (found) {
+      const paymentId = typeof paymentIdOrPayload === 'string' ? paymentIdOrPayload : paymentIdOrPayload?.razorpayPaymentId
+      found.status = 'ACTIVE'
+      found.paymentStatus = 'PAID'
+      found.razorpayPaymentId = paymentId || 'pay_test_' + Date.now()
+      found.amountPaid = 49999.0
+      found.activatedAt = new Date().toISOString()
+      storage.set('dfarm_amc_subs', list)
+      return found
+    }
+    throw new Error('Subscription not found')
+  }
+
+  // ============================================================================
+  // Global Rate Policies
+  // ============================================================================
+  private initialRatePolicies = [
+    {
+      id: 'pol-rate-01',
+      policyCode: 'GRP-MAHA-2026',
+      name: 'Maharashtra State Cooperative Baseline Rate Policy',
+      description: 'Official minimum procurement support rates and quality brackets for cow & buffalo milk',
+      policyType: 'STATUTORY_MINIMUM',
+      isActive: true,
+      createdAt: '2026-01-01T00:00:00Z',
+      versions: [
+        {
+          id: 'ver-rate-01',
+          versionNumber: 1,
+          status: 'PUBLISHED',
+          effectiveFrom: '2026-06-01T00:00:00Z',
+          parameters: {
+            cow: { baseFat: 3.5, baseSnf: 8.5, baseRate: 38.0 },
+            buffalo: { baseFat: 6.0, baseSnf: 9.0, baseRate: 58.0 },
+          },
+          cowMinRate: 38.0,
+          buffaloMinRate: 58.0,
+          standardFatCow: 3.5,
+          standardSnfCow: 8.5,
+          standardFatBuffalo: 6.0,
+          standardSnfBuffalo: 9.0,
+          checksum: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+          changeSummary: 'Harmonized statutory baseline procurement revision',
+          publishedAt: '2026-01-01T10:00:00Z',
+          publishedBy: 'Chief Super Administrator',
+        },
+      ],
+    },
+  ]
+
+  getGlobalRatePolicies(): any[] {
+    return storage.get('dfarm_rate_pol', this.initialRatePolicies)
+  }
+
+  createGlobalRatePolicy(payload: any): any {
+    const list = storage.get('dfarm_rate_pol', this.initialRatePolicies)
+    const newPol = {
+      id: 'pol-' + Date.now(),
+      ...payload,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      versions: [],
+    }
+    list.unshift(newPol)
+    storage.set('dfarm_rate_pol', list)
+    return newPol
+  }
+
+  createGlobalRatePolicyVersion(policyId: string, payload: any): any {
+    const list = storage.get('dfarm_rate_pol', this.initialRatePolicies)
+    const pol = list.find((p: any) => p.id === policyId)
+    if (pol) {
+      const vNum = (pol.versions?.length || 0) + 1
+      const newVer = {
+        id: 'ver-' + Date.now(),
+        versionNumber: vNum,
+        status: 'DRAFT',
+        ...payload,
+        checksum: 'checksum_' + Date.now(),
+        createdAt: new Date().toISOString(),
+      }
+      pol.versions = pol.versions || []
+      pol.versions.unshift(newVer)
+      storage.set('dfarm_rate_pol', list)
+      return newVer
+    }
+    throw new Error('Policy not found')
+  }
+
+  publishGlobalRatePolicyVersion(policyId: string, versionIdOrNum: any): any {
+    const list = storage.get('dfarm_rate_pol', this.initialRatePolicies)
+    const pol = list.find((p: any) => p.id === policyId)
+    if (pol) {
+      const ver = (pol.versions || []).find(
+        (v: any) => v.id === versionIdOrNum || String(v.versionNumber) === String(versionIdOrNum)
+      )
+      if (ver) {
+        ver.status = 'PUBLISHED'
+        ver.publishedAt = new Date().toISOString()
+        ver.publishedBy = 'Super Administrator'
+        storage.set('dfarm_rate_pol', list)
+        return ver
+      }
+    }
+    throw new Error('Policy version not found')
+  }
+
+  // ============================================================================
+  // Global FAT/SNF Adjustment Policies
+  // ============================================================================
+  private initialFatSnfPolicies = [
+    {
+      id: 'pol-fatsnf-01',
+      policyCode: 'FATSNF-STD-2026',
+      name: 'Standard Precision Deduction Policy 2026',
+      description: 'Zero guessed values - mathematically defined calibration steps and temperature compensation brackets',
+      isActive: true,
+      createdAt: '2026-01-01T00:00:00Z',
+      versions: [
+        {
+          id: 'ver-fatsnf-01',
+          versionNumber: 1,
+          status: 'PUBLISHED',
+          effectiveFrom: '2026-05-01T00:00:00Z',
+          milkCategory: 'BOTH',
+          roundingPolicy: 'NEAREST_TWO_DECIMALS',
+          fatAdjustments: [
+            { minFat: 3.0, maxFat: 3.49, deductionPerPoint: 0.25, adjustmentPerPoint: -0.25, type: 'DEDUCTION' },
+            { minFat: 3.5, maxFat: 5.0, deductionPerPoint: 0.0, adjustmentPerPoint: 0.0, type: 'INCENTIVE' },
+          ],
+          fatAdjustmentRules: [
+            { minFat: 3.0, maxFat: 3.49, deductionPerPoint: 0.25, adjustmentPerPoint: -0.25, type: 'DEDUCTION' },
+            { minFat: 3.5, maxFat: 5.0, deductionPerPoint: 0.0, adjustmentPerPoint: 0.0, type: 'INCENTIVE' },
+          ],
+          snfAdjustments: [
+            { minSnf: 8.0, maxSnf: 8.49, deductionPerPoint: 0.3, adjustmentPerPoint: -0.3, type: 'DEDUCTION' },
+            { minSnf: 8.5, maxSnf: 10.0, deductionPerPoint: 0.0, adjustmentPerPoint: 0.0, type: 'INCENTIVE' },
+          ],
+          snfAdjustmentRules: [
+            { minSnf: 8.0, maxSnf: 8.49, deductionPerPoint: 0.3, adjustmentPerPoint: -0.3, type: 'DEDUCTION' },
+            { minSnf: 8.5, maxSnf: 10.0, deductionPerPoint: 0.0, adjustmentPerPoint: 0.0, type: 'INCENTIVE' },
+          ],
+          checksum: 'a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e',
+          changeSummary: 'Harmonized temperature and SNF deduction grid',
+          publishedAt: '2026-01-01T10:00:00Z',
+          publishedBy: 'Chief Super Administrator',
+        },
+      ],
+    },
+  ]
+
+  getGlobalFatSnfPolicies(): any[] {
+    return storage.get('dfarm_fatsnf_pol', this.initialFatSnfPolicies)
+  }
+
+  createGlobalFatSnfPolicy(payload: any): any {
+    const list = storage.get('dfarm_fatsnf_pol', this.initialFatSnfPolicies)
+    const newPol = {
+      id: 'pol-fs-' + Date.now(),
+      ...payload,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      versions: [],
+    }
+    list.unshift(newPol)
+    storage.set('dfarm_fatsnf_pol', list)
+    return newPol
+  }
+
+  createGlobalFatSnfPolicyVersion(policyId: string, payload: any): any {
+    const list = storage.get('dfarm_fatsnf_pol', this.initialFatSnfPolicies)
+    const pol = list.find((p: any) => p.id === policyId)
+    if (pol) {
+      const vNum = (pol.versions?.length || 0) + 1
+      const newVer = {
+        id: 'ver-fs-' + Date.now(),
+        versionNumber: vNum,
+        status: 'DRAFT',
+        ...payload,
+        checksum: 'fs_checksum_' + Date.now(),
+        createdAt: new Date().toISOString(),
+      }
+      pol.versions = pol.versions || []
+      pol.versions.unshift(newVer)
+      storage.set('dfarm_fatsnf_pol', list)
+      return newVer
+    }
+    throw new Error('Policy not found')
+  }
+
+  publishGlobalFatSnfPolicyVersion(policyId: string, versionIdOrNum: any): any {
+    const list = storage.get('dfarm_fatsnf_pol', this.initialFatSnfPolicies)
+    const pol = list.find((p: any) => p.id === policyId)
+    if (pol) {
+      const ver = (pol.versions || []).find(
+        (v: any) => v.id === versionIdOrNum || String(v.versionNumber) === String(versionIdOrNum)
+      )
+      if (ver) {
+        ver.status = 'PUBLISHED'
+        ver.publishedAt = new Date().toISOString()
+        ver.publishedBy = 'Super Administrator'
+        storage.set('dfarm_fatsnf_pol', list)
+        return ver
+      }
+    }
+    throw new Error('Policy version not found')
+  }
+
+  // ============================================================================
+  // Platform Settings
+  // ============================================================================
+  getPlatformSettings(): any {
+    return {
+      environment: 'production',
+      platformName: 'DFarm Central Federation',
+      platformVersion: '2.4.0-prod',
+      deploymentRegion: 'ap-south-1 (Mumbai)',
+      timezone: 'Asia/Kolkata (IST)',
+      currency: 'INR (₹)',
+      supportedLanguages: ['en-IN (English)', 'mr-IN (Marathi)', 'hi-IN (Hindi)'],
+      centralDatabase: {
+        databaseName: 'dfarm_central',
+        status: 'CONNECTED',
+        isolationMode: 'DATABASE_PER_TENANT',
+      },
+      databaseCluster: {
+        controlPlane: 'dfarm_central (Managed Pool)',
+        status: 'OPERATIONAL',
+        isolationModel: 'Physical Isolated PostgreSQL Database per Dairy Tenant',
+        tlsMode: 'PREFER',
+        poolSize: 5,
+      },
+      smsGateway: {
+        provider: 'Dove SMS / ExpertSkill (Mobicomm API)',
+        status: 'OPERATIONAL',
+        senderId: 'EXTSKL',
+        template: 'Your Verification Code for login is {OTP}. - Expertskill Technology.',
+        configured: true,
+      },
+      emailService: {
+        provider: 'SMTP Mail Delivery',
+        host: 'smtp.gmail.com:587',
+        from: 'DFarm Platform <noreply@dfarm.in>',
+        status: 'OPERATIONAL',
+        configured: true,
+      },
+      whatsappService: {
+        provider: 'Meta WhatsApp Business Cloud API',
+        status: 'STANDBY / OPTIONAL',
+        configured: false,
+      },
+      fcmNotification: {
+        provider: 'Firebase Cloud Messaging (FCM)',
+        status: 'STANDBY / OPTIONAL',
+        configured: false,
+      },
+      razorpaySaaS: {
+        scope: 'Platform SaaS Subscriptions & AMC Invoicing Only',
+        status: 'OPERATIONAL',
+        configured: true,
+        farmerPayoutBoundary: 'Enforced (Razorpay strictly disallowed for milk procurement payouts)',
+        milkSettlementProhibited: true,
+      },
+      securityPolicies: {
+        rateLimit: '100 requests per 60 seconds',
+        sessionTtl: '24 hours',
+        tokenAlgorithm: 'HMAC-SHA256 with cryptographically verified claims',
+        credentialStorage: 'AES-256-GCM / PBKDF2',
+        leastPrivilege: 'Platform Operator default-deny with immutable audit logging',
+      },
     }
   }
 }

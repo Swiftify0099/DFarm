@@ -5,11 +5,19 @@ import {
   CustomerKhataSummary,
 } from '../../types/ledger';
 
-export function useLedger() {
+export function useLedger(params?: { page?: number; pageSize?: number }) {
+  const boundedParams = {
+    page: 1,
+    pageSize: 30,
+    ...params,
+  };
+
   const ledgerEntriesQuery = useQuery({
-    queryKey: ['ledger', 'entries'],
+    queryKey: ['ledger', 'entries', boundedParams],
     queryFn: async (): Promise<CustomerLedgerEntry[]> => {
-      const response = await apiClient.get<any>('/ledger/entries');
+      const response = await apiClient.get<any>('/ledger/entries', {
+        params: boundedParams,
+      });
       const list = Array.isArray(response.data)
         ? response.data
         : Array.isArray(response.data?.data)

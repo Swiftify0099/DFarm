@@ -75,7 +75,24 @@ export class PostgresLedgerRepository implements ILedgerRepository {
       } catch {}
     }
 
-    // 2. Search all tenant databases
+    // 2. Check control plane / primary database
+    try {
+      const result = await db.query(accountSql, [customerId]);
+      if (result.rows.length > 0) {
+        const row = result.rows[0];
+        return new CustomerLedgerAccount({
+          id: row.id,
+          customerId: row.customer_id,
+          organizationId: row.organization_id,
+          currentBalance: Number(row.current_balance || 0),
+          totalMilkEarnings: Number(row.total_milk_earnings || 0),
+          totalDeductions: Number(row.total_deductions || 0),
+          lastUpdated: row.updated_at?.toISOString?.() || String(row.updated_at),
+        });
+      }
+    } catch {}
+
+    // 3. Search all tenant databases
     for (const tenantDb of tenantDbManager.getAllTenantDbs()) {
       try {
         const result = await tenantDb.query(accountSql, [customerId]);
@@ -119,23 +136,6 @@ export class PostgresLedgerRepository implements ILedgerRepository {
         }
       } catch {}
     }
-
-    // 3. Fallback to control plane DB
-    try {
-      const result = await db.query(accountSql, [customerId]);
-      if (result.rows.length > 0) {
-        const row = result.rows[0];
-        return new CustomerLedgerAccount({
-          id: row.id,
-          customerId: row.customer_id,
-          organizationId: row.organization_id,
-          currentBalance: Number(row.current_balance || 0),
-          totalMilkEarnings: Number(row.total_milk_earnings || 0),
-          totalDeductions: Number(row.total_deductions || 0),
-          lastUpdated: row.updated_at?.toISOString?.() || String(row.updated_at),
-        });
-      }
-    } catch {}
 
     return null;
   }
@@ -218,6 +218,7 @@ export class PostgresLedgerRepository implements ILedgerRepository {
         direction,
         amount,
         balance_after,
+        reference_entity,
         description,
         reference_id
       FROM ledger_transactions
@@ -226,20 +227,30 @@ export class PostgresLedgerRepository implements ILedgerRepository {
       LIMIT $2 OFFSET $3;
     `;
 
+    const mapRow = (row: any): LedgerEntry => ({
+      id: row.id,
+      transactionDate: row.created_at?.toISOString?.() || String(row.created_at),
+      type: (row.direction === 'CREDIT' ? 'MILK_CREDIT' : 'FEED_DEBIT') as 'MILK_CREDIT' | 'FEED_DEBIT',
+      entryType: (row.direction === 'CREDIT' ? 'MILK_CREDIT' : 'DEBIT') as any,
+      direction: row.direction,
+      referenceType: row.reference_entity === 'FEED_SALE' ? 'FEED_PURCHASE' : row.reference_entity,
+      amount: Number(row.amount),
+      description: row.description || (row.direction === 'CREDIT' ? 'Milk Collection Credit' : 'Deduction Debit'),
+      source: row.reference_entity || (row.direction === 'CREDIT' ? 'MILK_COLLECTION' : 'FEED_SALE'),
+      sourceModule: row.reference_entity || (row.direction === 'CREDIT' ? 'MILK_COLLECTION' : 'FEED_SALE'),
+      creditAmount: row.direction === 'CREDIT' ? Number(row.amount) : 0.0,
+      debitAmount: row.direction === 'DEBIT' ? Number(row.amount) : 0.0,
+      runningBalance: Number(row.balance_after),
+      referenceId: row.reference_id,
+    } as any);
+
     if (organizationId) {
       try {
         const client = await this.getDb(organizationId);
         const result = await client.query(sql, [customerId, limit, offset]);
-        return result.rows.map((row: any) => ({
-          id: row.id,
-          transactionDate: row.created_at?.toISOString?.() || String(row.created_at),
-          type: row.direction === 'CREDIT' ? 'MILK_CREDIT' : 'FEED_DEBIT',
-          description: row.description || (row.direction === 'CREDIT' ? 'Milk Collection Credit' : 'Deduction Debit'),
-          creditAmount: row.direction === 'CREDIT' ? Number(row.amount) : 0.0,
-          debitAmount: row.direction === 'DEBIT' ? Number(row.amount) : 0.0,
-          runningBalance: Number(row.balance_after),
-          referenceId: row.reference_id,
-        }));
+        if (result.rows.length > 0) {
+          return result.rows.map(mapRow);
+        }
       } catch {}
     }
 
@@ -247,32 +258,14 @@ export class PostgresLedgerRepository implements ILedgerRepository {
       try {
         const result = await tenantDb.query(sql, [customerId, limit, offset]);
         if (result.rows.length > 0) {
-          return result.rows.map((row: any) => ({
-            id: row.id,
-            transactionDate: row.created_at?.toISOString?.() || String(row.created_at),
-            type: row.direction === 'CREDIT' ? 'MILK_CREDIT' : 'FEED_DEBIT',
-            description: row.description || (row.direction === 'CREDIT' ? 'Milk Collection Credit' : 'Deduction Debit'),
-            creditAmount: row.direction === 'CREDIT' ? Number(row.amount) : 0.0,
-            debitAmount: row.direction === 'DEBIT' ? Number(row.amount) : 0.0,
-            runningBalance: Number(row.balance_after),
-            referenceId: row.reference_id,
-          }));
+          return result.rows.map(mapRow);
         }
       } catch {}
     }
 
     try {
       const result = await db.query(sql, [customerId, limit, offset]);
-      return result.rows.map((row: any) => ({
-        id: row.id,
-        transactionDate: row.created_at?.toISOString?.() || String(row.created_at),
-        type: row.direction === 'CREDIT' ? 'MILK_CREDIT' : 'FEED_DEBIT',
-        description: row.description || (row.direction === 'CREDIT' ? 'Milk Collection Credit' : 'Deduction Debit'),
-        creditAmount: row.direction === 'CREDIT' ? Number(row.amount) : 0.0,
-        debitAmount: row.direction === 'DEBIT' ? Number(row.amount) : 0.0,
-        runningBalance: Number(row.balance_after),
-        referenceId: row.reference_id,
-      }));
+      return result.rows.map(mapRow);
     } catch {
       return [];
     }

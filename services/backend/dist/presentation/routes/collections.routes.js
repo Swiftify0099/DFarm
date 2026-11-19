@@ -100,9 +100,16 @@ router.get('/sessions/active', optionalAuthenticate, async (req, res, next) => {
             centerId,
             organizationId,
             operatorId,
-            operatorName: 'Counter Operator',
+            operatorName: req.user?.fullName || 'Counter Operator',
             deviceIdentifier: deviceId,
         });
+        if (req.user?.organizationId && session.organizationId !== req.user.organizationId) {
+            res.status(404).json({
+                success: false,
+                error: 'Active session not found for caller organization',
+            });
+            return;
+        }
         res.json({
             success: true,
             data: session.toJSON(),
@@ -113,19 +120,19 @@ router.get('/sessions/active', optionalAuthenticate, async (req, res, next) => {
     }
 });
 // 2. Open new shift session
-router.post('/sessions/open', authenticate, async (req, res, next) => {
+const handleOpenSession = async (req, res, next) => {
     try {
-        const centerId = req.user?.centerId || req.body.centerId || '00000000-0000-0000-0000-000000000002';
-        const organizationId = req.user?.organizationId || '00000000-0000-0000-0000-000000000001';
+        const centerId = req.user?.centerId || req.body?.centerId || req.headers['x-center-id'] || '00000000-0000-0000-0000-000000000002';
+        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.body?.organizationId || '00000000-0000-0000-0000-000000000001';
         const operatorId = req.user?.userId || '00000000-0000-0000-0000-000000000003';
-        const deviceId = req.body.deviceId || 'KIOSK_MAIN';
-        const shift = req.body.shift;
-        const businessDate = req.body.businessDate;
+        const deviceId = req.body?.deviceId || 'KIOSK_MAIN';
+        const shift = req.body?.shift || 'MORNING';
+        const businessDate = req.body?.businessDate || new Date().toISOString().split('T')[0];
         const session = await openSessionUseCase.execute({
             centerId,
             organizationId,
             operatorId,
-            operatorName: 'Counter Operator',
+            operatorName: req.body?.operatorName || req.user?.fullName || 'Counter Operator',
             shift,
             businessDate,
             deviceIdentifier: deviceId,
@@ -139,16 +146,19 @@ router.post('/sessions/open', authenticate, async (req, res, next) => {
     catch (err) {
         next(err);
     }
-});
+};
+router.post('/sessions/open', optionalAuthenticate, handleOpenSession);
+router.post('/sessions', optionalAuthenticate, handleOpenSession);
+router.patch('/sessions/:sessionId/open', optionalAuthenticate, handleOpenSession);
 // 3. Close active shift session
-router.post('/sessions/:sessionId/close', optionalAuthenticate, async (req, res, next) => {
+const handleCloseSession = async (req, res, next) => {
     try {
-        const sessionCode = req.params.sessionId || req.body.sessionCode;
+        const sessionCode = req.params.sessionId || req.body?.sessionCode || req.body?.sessionId;
         const operatorId = req.user?.userId || '00000000-0000-0000-0000-000000000003';
         const session = await closeSessionUseCase.execute({
             sessionCode,
             operatorId,
-            operatorName: req.body.operatorName || 'Counter Operator',
+            operatorName: req.body?.operatorName || req.user?.fullName || 'Counter Operator',
         });
         res.json({
             success: true,
@@ -159,31 +169,17 @@ router.post('/sessions/:sessionId/close', optionalAuthenticate, async (req, res,
     catch (err) {
         next(err);
     }
-});
-router.post('/sessions/close', optionalAuthenticate, async (req, res, next) => {
-    try {
-        const sessionCode = req.body.sessionCode || req.body.sessionId;
-        const operatorId = req.user?.userId || '00000000-0000-0000-0000-000000000003';
-        const session = await closeSessionUseCase.execute({
-            sessionCode,
-            operatorId,
-            operatorName: req.body.operatorName || 'Counter Operator',
-        });
-        res.json({
-            success: true,
-            message: `Shift session ${sessionCode} closed successfully.`,
-            data: session.toJSON(),
-        });
-    }
-    catch (err) {
-        next(err);
-    }
-});
+};
+router.post('/sessions/:sessionId/close', optionalAuthenticate, handleCloseSession);
+router.patch('/sessions/:sessionId/close', optionalAuthenticate, handleCloseSession);
+router.post('/sessions/close', optionalAuthenticate, handleCloseSession);
+router.patch('/sessions/close', optionalAuthenticate, handleCloseSession);
 // 4. Atomic Milk Intake Transaction
-router.post('/transactions', authenticate, async (req, res, next) => {
+const handleIntakeTransaction = async (req, res, next) => {
     try {
         const body = req.body;
-        const customer = await customerRepo.findById(body.customerId);
+        const orgId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
+        const customer = await customerRepo.findById(body.customerId, orgId);
         if (!customer) {
             res.status(404).json({ success: false, error: `Customer ${body.customerId} not found` });
             return;
@@ -197,6 +193,7 @@ router.post('/transactions', authenticate, async (req, res, next) => {
             return;
         }
         const result = await processMilkIntakeUseCase.execute({
+            organizationId: orgId,
             sessionId: body.sessionId,
             sessionCode: body.sessionCode,
             customerId: body.customerId,
@@ -222,16 +219,29 @@ router.post('/transactions', authenticate, async (req, res, next) => {
     catch (err) {
         next(err);
     }
-});
-// 4b. All Dairy-Scoped Transactions (Dairy Admin Register)
-router.get('/transactions', optionalAuthenticate, async (req, res, next) => {
+};
+router.post('/transactions', authenticate, handleIntakeTransaction);
+router.post('/intake', authenticate, handleIntakeTransaction);
+// 4b. All Dairy-Scoped Transactions (Dairy Admin & Kiosk Register)
+const handleGetTransactions = async (req, res, next) => {
     try {
         const organizationId = req.user?.organizationId || req.headers['x-dairy-id'] || req.query['organizationId'];
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;
         }
-        const { customerId, date } = req.query;
+        const { date, sessionId } = req.query;
+        let effectiveCustomerId = req.query['customerId'];
+        if (req.user?.role === 'FARMER_CUSTOMER') {
+            if (effectiveCustomerId && effectiveCustomerId !== req.user.userId) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Cross-customer query blocked: customer can only view their own transactions.',
+                });
+                return;
+            }
+            effectiveCustomerId = req.user.userId;
+        }
         let query = `
       SELECT 
         mc.id,
@@ -256,13 +266,34 @@ router.get('/transactions', optionalAuthenticate, async (req, res, next) => {
       WHERE c.organization_id = $1
     `;
         const params = [organizationId];
-        if (customerId) {
-            params.push(customerId);
+        if (effectiveCustomerId) {
+            params.push(effectiveCustomerId);
             query += ` AND mc.customer_id = $${params.length}`;
         }
         if (date) {
             params.push(date);
             query += ` AND mc.business_date = $${params.length}`;
+        }
+        if (sessionId) {
+            params.push(sessionId);
+            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(sessionId));
+            if (isUuid) {
+                query += ` AND (
+          mc.session_id = $${params.length}
+          OR (
+            mc.center_id = (SELECT center_id FROM kiosk_shift_sessions WHERE id = $${params.length} LIMIT 1)
+            AND mc.business_date = (SELECT business_date FROM kiosk_shift_sessions WHERE id = $${params.length} LIMIT 1)
+            AND mc.shift_type = (SELECT shift FROM kiosk_shift_sessions WHERE id = $${params.length} LIMIT 1)
+          )
+        )`;
+            }
+            else {
+                query += ` AND (
+          mc.center_id = (SELECT center_id FROM kiosk_shift_sessions WHERE session_code = $${params.length} LIMIT 1)
+          AND mc.business_date = (SELECT business_date FROM kiosk_shift_sessions WHERE session_code = $${params.length} LIMIT 1)
+          AND mc.shift_type = (SELECT shift FROM kiosk_shift_sessions WHERE session_code = $${params.length} LIMIT 1)
+        )`;
+            }
         }
         query += ` ORDER BY mc.created_at DESC LIMIT 200;`;
         const tenantDb = await tenantDbManager.getTenantDb(organizationId);
@@ -276,6 +307,7 @@ router.get('/transactions', optionalAuthenticate, async (req, res, next) => {
         const txns = result.rows.map((t) => ({
             id: t.id,
             transactionId: t.client_intake_uuid ? `TXN-${String(t.client_intake_uuid).slice(0, 8)}` : `TXN-${t.id.slice(0, 8)}`,
+            transactionCode: t.client_intake_uuid ? `TXN-${String(t.client_intake_uuid).slice(0, 8)}` : `TXN-${t.id.slice(0, 8)}`,
             dairyId: organizationId,
             sessionId: t.session_id,
             customerId: t.customer_id,
@@ -294,6 +326,8 @@ router.get('/transactions', optionalAuthenticate, async (req, res, next) => {
             totalAmount: Number(t.total_amount),
             deviceId: 'KIOSK_MAIN',
             operatorId: '00000000-0000-0000-0000-000000000003',
+            operatorName: 'Counter Operator',
+            identificationMethod: 'FACE_YUNET_SFACE',
             status: t.transaction_status === 'COMPLETED' ? 'CONFIRMED' : t.transaction_status,
             syncState: 'SYNCED',
         }));
@@ -302,7 +336,9 @@ router.get('/transactions', optionalAuthenticate, async (req, res, next) => {
     catch (err) {
         next(err);
     }
-});
+};
+router.get('/transactions', optionalAuthenticate, handleGetTransactions);
+router.get('/transactions/recent', optionalAuthenticate, handleGetTransactions);
 // 4c. Non-Destructive Weight/Amount Adjustment with Ledger Diff
 router.post('/transactions/:id/adjust', optionalAuthenticate, async (req, res, next) => {
     try {
@@ -427,10 +463,24 @@ router.get('/transactions/recent', async (req, res, next) => {
 // 5. Customer Delivery History (Farmer App)
 router.get('/history', authenticate, async (req, res, next) => {
     try {
-        const customerId = req.query['customerId'] || req.user?.userId;
+        let customerId = req.user?.userId;
+        if (req.user?.role === 'FARMER_CUSTOMER') {
+            const queryId = req.query['customerId'];
+            if (queryId && queryId !== req.user.userId) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Cross-customer query blocked: customer can only view their own delivery history.',
+                });
+                return;
+            }
+        }
+        else {
+            customerId = req.query['customerId'] || req.user?.userId;
+        }
         const limit = req.query['limit'] ? Number(req.query['limit']) : 50;
         const offset = req.query['offset'] ? Number(req.query['offset']) : 0;
-        const data = await getHistoryUseCase.execute(customerId, limit, offset);
+        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const data = await getHistoryUseCase.execute(customerId, limit, offset, organizationId);
         res.json({ success: true, data });
     }
     catch (err) {
@@ -440,9 +490,23 @@ router.get('/history', authenticate, async (req, res, next) => {
 // 6. Monthly Milk Summary (Farmer App)
 router.get('/summary/monthly', authenticate, async (req, res, next) => {
     try {
-        const customerId = req.query['customerId'] || req.user?.userId;
+        let customerId = req.user?.userId;
+        if (req.user?.role === 'FARMER_CUSTOMER') {
+            const queryId = req.query['customerId'];
+            if (queryId && queryId !== req.user.userId) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Cross-customer query blocked: customer can only view their own summary.',
+                });
+                return;
+            }
+        }
+        else {
+            customerId = req.query['customerId'] || req.user?.userId;
+        }
         const monthYear = req.query['monthYear'];
-        const data = await getSummaryUseCase.execute(customerId, monthYear);
+        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const data = await getSummaryUseCase.execute(customerId, monthYear, organizationId);
         res.json({ success: true, data });
     }
     catch (err) {

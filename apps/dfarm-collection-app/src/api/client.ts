@@ -231,9 +231,46 @@ export const customersApi = {
   },
 
   getByRfid: async (cardUid: string): Promise<CustomerIdentity | null> => {
-    const customers = await customersApi.list()
-    const target = customers.find((c) => c.rfidCardUid === cardUid)
-    return target || null
+    try {
+      const normalizedUid = cardUid.trim().toUpperCase()
+      const res = await apiRequest<{
+        success: boolean
+        data: {
+          id: string
+          farmerCode?: string
+          customerCode?: string
+          fullName: string
+          status: string
+          defaultMilkType?: string
+          organizationId: string
+          centerId: string
+          canDeliver?: boolean
+        }
+      }>(`/rfid/lookup/${encodeURIComponent(normalizedUid)}`)
+
+      if (!res.data) return null
+      const c = res.data
+      return {
+        id: c.id,
+        customerCode: c.farmerCode || c.customerCode || '',
+        farmerCode: c.farmerCode,
+        fullName: c.fullName,
+        mobileNumber: '', // Minimal privacy projection
+        village: '',
+        preferredCategory: (c.defaultMilkType as MilkCategory) || 'COW',
+        permittedCategories: [(c.defaultMilkType as MilkCategory) || 'COW'],
+        dairyId: c.organizationId,
+        status: (c.status as any) || 'ACTIVE',
+        balanceDue: 0,
+        rfidCardUid: normalizedUid,
+        canDeliver: c.canDeliver !== false,
+      } as CustomerIdentity
+    } catch (err: any) {
+      if (err.message?.includes('404') || err.message?.includes('not found')) {
+        return null
+      }
+      return null
+    }
   },
 }
 
@@ -544,5 +581,44 @@ export const ratesApi = {
       ratePerLiter: Number(Math.max(10.0, rate).toFixed(2)),
       version: 1,
     }
+  },
+}
+
+// ============================================================================
+// 7. Offline Batch Synchronization API
+// ============================================================================
+export const syncApi = {
+  pushBatch: async (batch: {
+    deviceId?: string
+    transactions: Array<{
+      clientIntakeUuid: string
+      sessionCode?: string
+      customerId: string
+      milkCategory: 'COW' | 'BUFFALO'
+      weightLiters: number
+      fatPercentage: number
+      snfPercentage: number
+      clrDensity?: number
+      identificationMethod: 'FACE_YUNET_SFACE' | 'RFID_TAG' | 'MANUAL_SEARCH'
+      idempotencyKey?: string
+    }>
+  }): Promise<{
+    total: number
+    succeeded: number
+    failed: number
+    items: Array<{
+      clientIntakeUuid: string
+      success: boolean
+      error?: string
+      transactionId?: string
+      receiptNumber?: string
+      isIdempotentReplay?: boolean
+    }>
+  }> => {
+    const res = await apiRequest<{ success: boolean; data: any }>('/sync/push', {
+      method: 'POST',
+      body: JSON.stringify(batch),
+    })
+    return res.data
   },
 }

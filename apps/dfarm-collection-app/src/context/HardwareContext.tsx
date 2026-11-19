@@ -15,12 +15,19 @@ import {
   getStoredOperatorAuth,
 } from '@/api/client'
 import { localDB } from '@/services/local-storage'
-import { voiceAnnouncer } from '@/drivers/VoiceAnnouncerDriver'
+import {
+  voiceAnnouncer,
+  rfidReaderDriver,
+  scaleDriver,
+  milkAnalyzerDriver,
+  thermalPrinterDriver,
+} from '@/drivers'
 import {
   DairyFaceMatcher,
   CANONICAL_SFACE_128D_FIXTURE,
   type EnrolledFaceTemplate,
 } from '@/face-ai'
+import type { CollectionTransaction } from '@/types'
 
 interface HardwareContextType {
   devices: HardwareDevice[]
@@ -30,6 +37,9 @@ interface HardwareContextType {
   measurements: MilkMeasurements
   offlineQueueCount: number
   isNetworkOnline: boolean
+  hasIdentityConflict: boolean
+  manualCustomer: CustomerIdentity | null
+  setManualCustomer: (customer: CustomerIdentity | null) => void
   customersList: CustomerIdentity[]
   customersMap: Map<string, CustomerIdentity>
   enrolledTemplates: EnrolledFaceTemplate[]
@@ -47,21 +57,28 @@ interface HardwareContextType {
   updateMeasurements: (updates: Partial<MilkMeasurements>) => void
   tareScale: () => void
   resetIntakeCycle: () => void
+  connectScale: (baudRate?: number) => Promise<boolean>
+  disconnectScale: () => Promise<void>
+  connectAnalyzer: (baudRate?: number) => Promise<boolean>
+  disconnectAnalyzer: () => Promise<void>
+  connectRfidSerial: (baudRate?: number) => Promise<boolean>
+  disconnectRfidSerial: () => Promise<void>
+  printReceipt: (txn: CollectionTransaction, options?: any) => Promise<boolean>
 }
 
 const defaultMeasurements: MilkMeasurements = {
   milkCategory: 'COW',
-  fat: 4.2,
-  snf: 8.7,
-  clrDensity: 29.5,
-  temperatureCelsius: 24.5,
-  weightLiters: 12.5,
-  analyzerConnected: true,
-  scaleConnected: true,
-  scaleStable: true,
-  opticalLactometerOk: true,
-  readingsValid: true,
-  validationErrors: [],
+  fat: 0,
+  snf: 0,
+  clrDensity: 0,
+  temperatureCelsius: 0,
+  weightLiters: 0,
+  analyzerConnected: false,
+  scaleConnected: false,
+  scaleStable: false,
+  opticalLactometerOk: false,
+  readingsValid: false,
+  validationErrors: ['Scale not connected', 'Milk analyzer not connected'],
 }
 
 const defaultFaceState: FaceRecognitionState = {
@@ -85,6 +102,7 @@ const HardwareContext = createContext<HardwareContextType | undefined>(undefined
 export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [devices, setDevices] = useState<HardwareDevice[]>([])
   const [activeSession, setActiveSession] = useState<ActiveCollectionSession | null>(null)
+  const [manualCustomer, setManualCustomer] = useState<CustomerIdentity | null>(null)
   const [faceState, setFaceState] = useState<FaceRecognitionState>(defaultFaceState)
   const [rfidState, setRfidState] = useState<RfidScanState>(defaultRfidState)
   const [measurements, setMeasurements] = useState<MilkMeasurements>(defaultMeasurements)
@@ -102,6 +120,14 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     return map
   }, [customersList])
+
+  const hasIdentityConflict = useMemo(() => {
+    return Boolean(
+      faceState.matchedCustomer &&
+      rfidState.matchedCustomer &&
+      faceState.matchedCustomer.id !== rfidState.matchedCustomer.id
+    )
+  }, [faceState.matchedCustomer, rfidState.matchedCustomer])
 
   const refreshDevices = useCallback(async () => {
     // In genuine operation, devices telemetry is managed via hardware drivers & API
@@ -203,7 +229,81 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
 
+    // Connect hardware event listeners
+    rfidReaderDriver.startKeyboardListener()
+    const unsubRfid = rfidReaderDriver.onScan(async (evt) => {
+      setRfidState({
+        status: 'READING',
+        cardUid: evt.cardUid,
+        matchedCustomer: null,
+      })
+      const target = await customersApi.getByRfid(evt.cardUid)
+      const { dairyId } = getStoredOperatorAuth()
+      if (target && (!target.dairyId || !dairyId || target.dairyId === dairyId)) {
+        setRfidState({
+          status: 'MATCHED',
+          cardUid: evt.cardUid,
+          matchedCustomer: target,
+        })
+        voiceAnnouncer.speakCustomerIdentified(target.fullName)
+        setMeasurements((prev) => ({
+          ...prev,
+          milkCategory: target.preferredCategory,
+        }))
+      } else {
+        setRfidState({
+          status: 'UNASSIGNED_CARD',
+          cardUid: evt.cardUid,
+          matchedCustomer: null,
+        })
+      }
+    })
+
+    const unsubScale = scaleDriver.onReading((reading) => {
+      setMeasurements((prev) => {
+        const merged = {
+          ...prev,
+          weightLiters: reading.weight,
+          scaleStable: reading.isStable,
+          scaleConnected: true,
+        }
+        const errors: string[] = []
+        if (merged.fat < 2.0 || merged.fat > 15.0) errors.push('Fat out of biological bounds (2.0% - 15.0%)')
+        if (merged.snf < 6.0 || merged.snf > 12.0) errors.push('SNF out of biological bounds (6.0% - 12.0%)')
+        if (merged.weightLiters <= 0) errors.push('Milk volume must be greater than 0 L')
+        if (!merged.scaleStable) errors.push('Waiting for scale stabilization')
+        merged.readingsValid = errors.length === 0
+        merged.validationErrors = errors
+        return merged
+      })
+    })
+
+    const unsubAnalyzer = milkAnalyzerDriver.onReading((reading) => {
+      setMeasurements((prev) => {
+        const merged = {
+          ...prev,
+          fat: reading.fat,
+          snf: reading.snf,
+          clrDensity: reading.clrDensity,
+          temperatureCelsius: reading.temperatureCelsius || prev.temperatureCelsius,
+          analyzerConnected: true,
+        }
+        const errors: string[] = []
+        if (merged.fat < 2.0 || merged.fat > 15.0) errors.push('Fat out of biological bounds (2.0% - 15.0%)')
+        if (merged.snf < 6.0 || merged.snf > 12.0) errors.push('SNF out of biological bounds (6.0% - 12.0%)')
+        if (merged.weightLiters <= 0) errors.push('Milk volume must be greater than 0 L')
+        if (!merged.scaleStable) errors.push('Waiting for scale stabilization')
+        merged.readingsValid = errors.length === 0
+        merged.validationErrors = errors
+        return merged
+      })
+    })
+
     return () => {
+      rfidReaderDriver.stopKeyboardListener()
+      unsubRfid()
+      unsubScale()
+      unsubAnalyzer()
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
@@ -367,8 +467,10 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }
 
   const resetIntakeCycle = () => {
+    setManualCustomer(null)
     resetFaceState()
     resetRfidState()
+    milkAnalyzerDriver.clearLastReading()
     voiceAnnouncer.resetAnnouncer()
     setMeasurements((prev) => ({
       ...prev,
@@ -377,6 +479,51 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       readingsValid: false,
       validationErrors: ['Awaiting weight reading'],
     }))
+  }
+
+  // Hardware connection methods
+  const connectScale = async (baudRate = 4800): Promise<boolean> => {
+    const success = await scaleDriver.connect(baudRate)
+    if (success) {
+      setMeasurements((prev) => ({ ...prev, scaleConnected: true }))
+    }
+    return success
+  }
+
+  const disconnectScale = async (): Promise<void> => {
+    await scaleDriver.disconnect()
+    setMeasurements((prev) => ({ ...prev, scaleConnected: false }))
+  }
+
+  const connectAnalyzer = async (baudRate = 19200): Promise<boolean> => {
+    const success = await milkAnalyzerDriver.connect(baudRate)
+    if (success) {
+      setMeasurements((prev) => ({ ...prev, analyzerConnected: true }))
+    }
+    return success
+  }
+
+  const disconnectAnalyzer = async (): Promise<void> => {
+    await milkAnalyzerDriver.disconnect()
+    setMeasurements((prev) => ({ ...prev, analyzerConnected: false }))
+  }
+
+  const connectRfidSerial = async (baudRate = 9600): Promise<boolean> => {
+    return rfidReaderDriver.connectSerial(baudRate)
+  }
+
+  const disconnectRfidSerial = async (): Promise<void> => {
+    await rfidReaderDriver.disconnectSerial()
+  }
+
+  const printReceipt = async (txn: CollectionTransaction, options: any = {}): Promise<boolean> => {
+    const { dairyCode, dairyId } = getStoredOperatorAuth()
+    const mergedOpts = {
+      dairyName: dairyCode ? `DFarm - ${dairyCode}` : 'DFarm Dairy Cooperative',
+      centerName: 'Collection Center',
+      ...options,
+    }
+    return thermalPrinterDriver.printToSerial(txn, mergedOpts)
   }
 
   return (
@@ -389,6 +536,9 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         measurements,
         offlineQueueCount,
         isNetworkOnline,
+        hasIdentityConflict,
+        manualCustomer,
+        setManualCustomer,
         customersList,
         customersMap,
         enrolledTemplates,
@@ -406,6 +556,13 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         updateMeasurements,
         tareScale,
         resetIntakeCycle,
+        connectScale,
+        disconnectScale,
+        connectAnalyzer,
+        disconnectAnalyzer,
+        connectRfidSerial,
+        disconnectRfidSerial,
+        printReceipt,
       }}
     >
       {children}

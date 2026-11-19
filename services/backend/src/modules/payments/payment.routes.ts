@@ -19,7 +19,13 @@ import {
 
 export const paymentRouter = Router();
 
-// All payment routes require valid authentication
+// Ephemeral Token Bank File Download (Pre-authenticated by token, browser stream compatible)
+paymentRouter.get(
+  '/batches/:batchId/download',
+  PaymentController.downloadBatch
+);
+
+// All other payment routes require valid authentication
 paymentRouter.use(authenticate);
 
 // ----------------------------------------------------
@@ -215,6 +221,18 @@ paymentRouter.post(
   ]),
   validateRequest({ body: ReconcileBatchSchema }),
   PaymentController.reconcileBatch
+);
+
+// 14b. Export Batch as Bank File (NEFT / SBI CMP)
+paymentRouter.get(
+  '/batches/:batchId/export',
+  requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.ACCOUNTANT,
+  ]),
+  PaymentController.exportBatch
 );
 
 // ----------------------------------------------------

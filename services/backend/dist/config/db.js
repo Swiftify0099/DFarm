@@ -1,12 +1,11 @@
-import pg from 'pg';
-import { config } from './env.js';
-const { Pool } = pg;
-export const pool = new Pool({
-    connectionString: config.DATABASE_URL,
-    max: 10,
-    idleTimeoutMillis: 30000,
-});
+import { db } from '../infrastructure/database/PostgresPool.js';
+export const pool = {
+    query: (text, params) => db.query(text, params),
+    connect: () => db.getClient(),
+    on: (_event, _listener) => { },
+    end: () => db.close(),
+};
 export async function query(text, params) {
-    return pool.query(text, params);
+    return db.query(text, params);
 }
 //# sourceMappingURL=db.js.map

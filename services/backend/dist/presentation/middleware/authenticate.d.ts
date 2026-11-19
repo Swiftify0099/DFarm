@@ -3,9 +3,11 @@ export interface AuthenticatedUser {
     userId: string;
     organizationId?: string;
     centerId?: string;
+    globalCustomerId?: string;
     role: string;
     actorType: 'STAFF' | 'CUSTOMER';
     fullName?: string;
+    phoneNumber?: string;
 }
 declare global {
     namespace Express {

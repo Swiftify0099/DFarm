@@ -15,6 +15,17 @@
     "apps/dfarm-super-admin"
   ],
   "scripts": {
+    "dev": "node scripts/run-all.js all",
+    "dev:all": "node scripts/run-all.js all",
+    "dev:web": "node scripts/run-all.js web",
+    "dev:dairy-admin": "npm run dev --workspace=apps/dfarm-dairy-admin",
+    "dev:super-admin": "npm run dev --workspace=apps/dfarm-super-admin",
+    "dev:collection": "npm run dev --workspace=apps/dfarm-collection-app",
+    "dev:customer": "npm run start --workspace=apps/dfarm-customer-app",
+    "dev:customer:web": "npm run web --workspace=apps/dfarm-customer-app",
+    "dev:customer:android": "npm run android --workspace=apps/dfarm-customer-app",
+    "dev:backend": "node services/backend/dist/server.js",
+    "dev:hub": "node scripts/dev-server.js",
     "start": "node services/backend/dist/server.js",
     "start:backend": "node services/backend/dist/server.js",
     "start:web": "node scripts/dev-server.js",
@@ -30,6 +41,7 @@
     "test": "npm run --workspaces test",
     "db:validate": "npm run --workspace=packages/database test:validate",
     "db:test": "npm run --workspace=packages/database test",
+    "db:seed-admin": "node scripts/seed-super-admin.js",
     "supabase": "supabase"
   },
   "devDependencies": {

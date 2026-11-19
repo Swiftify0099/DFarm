@@ -73,10 +73,8 @@ export const createHeaders = (customHeaders?: HeadersInit): HeadersInit => {
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  // Tenant Isolation: Explicit tenant scoping headers
+  // Tenant Isolation: Canonical tenant scoping header
   if (dairyId) {
-    headers['X-Dairy-Tenant-ID'] = dairyId
-    headers['x-dairy-id'] = dairyId
     headers['X-Dairy-Id'] = dairyId
   }
 

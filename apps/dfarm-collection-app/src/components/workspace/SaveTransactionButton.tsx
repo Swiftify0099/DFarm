@@ -39,7 +39,7 @@ export const SaveTransactionButton: React.FC<SaveTransactionButtonProps> = ({
         ) : canSubmit ? (
           <>
             <ReceiptPrinterVisual size={24} />
-            <span>CONFIRM & RECORD INTAKE (₹ {totalAmount.toFixed(2)})</span>
+            <span>CONFIRM & RECORD INTAKE [Ctrl+Enter] (₹ {totalAmount.toFixed(2)})</span>
             <CheckCircle2 className="w-5 h-5 ml-1" />
           </>
         ) : (

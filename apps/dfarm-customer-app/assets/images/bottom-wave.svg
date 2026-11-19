@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 90" width="140" height="90" fill="none">
+  <defs>
+    <linearGradient id="waveGradPrimary" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FF6D00" stop-opacity="0.85" />
+      <stop offset="50%" stop-color="#FF9E80" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#FFE0B2" stop-opacity="0.2" />
+    </linearGradient>
+    <linearGradient id="waveGradSecondary" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFA000" stop-opacity="0.75" />
+      <stop offset="60%" stop-color="#FFD180" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#FFF3E0" stop-opacity="0.1" />
+    </linearGradient>
+    <linearGradient id="waveGradAccent" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FF3D00" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#FFAB40" stop-opacity="0.15" />
+    </linearGradient>
+  </defs>
+
+  <!-- Flowing Organic Wave 1 (Deep background wave) -->
+  <path
+    d="M0 32 C35 25, 75 58, 140 42 L140 90 L0 90 Z"
+    fill="url(#waveGradSecondary)"
+  />
+
+  <!-- Flowing Organic Wave 2 (Mid-ground wave) -->
+  <path
+    d="M0 48 C42 42, 80 78, 120 58 L120 90 L0 90 Z"
+    fill="url(#waveGradPrimary)"
+  />
+
+  <!-- Flowing Organic Wave 3 (Foreground accent contour) -->
+  <path
+    d="M0 64 C28 60, 58 84, 94 72 L94 90 L0 90 Z"
+    fill="url(#waveGradAccent)"
+  />
+</svg>

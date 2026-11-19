@@ -6,8 +6,11 @@ export interface TokenClaims {
   userId: string;
   organizationId?: string;
   centerId?: string;
+  globalCustomerId?: string;
   role: string;
   actorType: 'STAFF' | 'CUSTOMER';
+  fullName?: string;
+  phoneNumber?: string;
   iat?: number;
   exp?: number;
 }
@@ -27,6 +30,7 @@ export class HmacJwtTokenService implements ITokenService {
       userId: string;
       organizationId?: string;
       centerId?: string;
+      globalCustomerId?: string;
       role: string;
       actorType: 'STAFF' | 'CUSTOMER';
     },
@@ -55,8 +59,11 @@ export class HmacJwtTokenService implements ITokenService {
     userId: string;
     organizationId?: string;
     centerId?: string;
+    globalCustomerId?: string;
     role: string;
     actorType: 'STAFF' | 'CUSTOMER';
+    fullName?: string;
+    phoneNumber?: string;
   } {
     if (!token) {
       throw new UnauthorizedError('Authentication token missing');
@@ -110,6 +117,7 @@ export class HmacJwtTokenService implements ITokenService {
       userId: payload.userId,
       organizationId: payload.organizationId,
       centerId: payload.centerId,
+      globalCustomerId: payload.globalCustomerId,
       role: payload.role,
       actorType: payload.actorType,
     };

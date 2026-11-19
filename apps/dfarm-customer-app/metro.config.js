@@ -19,9 +19,10 @@ config.resolver.nodeModulesPaths = [
 // Add .onnx asset extension for YuNet and SFace models
 config.resolver.assetExts.push('onnx');
 
-// 3. Intercept Node builtins and onnxruntime modules to prevent Metro bundler crashes (HTTP 500)
+// 3. Intercept Node builtins, onnxruntime, and web asset registry to prevent Metro bundler crashes
 const ortShimPath = path.resolve(projectRoot, 'src/face-ai/ort-shim.ts');
 const emptyShimPath = path.resolve(projectRoot, 'src/face-ai/empty-shim.ts');
+const assetRegistryShimPath = path.resolve(projectRoot, 'src/face-ai/asset-registry-shim.js');
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === 'onnxruntime-web' || moduleName === 'onnxruntime-node') {
@@ -38,6 +39,16 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   ) {
     return {
       filePath: emptyShimPath,
+      type: 'sourceFile',
+    };
+  }
+  if (
+    moduleName === '@react-native/assets-registry/registry' ||
+    moduleName === '@react-native/assets-registry' ||
+    moduleName === 'react-native-web/dist/exports/AssetRegistry'
+  ) {
+    return {
+      filePath: assetRegistryShimPath,
       type: 'sourceFile',
     };
   }

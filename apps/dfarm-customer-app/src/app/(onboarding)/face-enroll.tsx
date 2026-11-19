@@ -35,6 +35,11 @@ export default function FaceEnrollScreen() {
     village?: string;
     milkSupplyType?: 'COW' | 'BUFFALO' | 'BOTH';
     mobileNumber?: string;
+    bankName?: string;
+    accountNumber?: string;
+    confirmAccountNumber?: string;
+    ifscCode?: string;
+    accountHolderName?: string;
   }>();
 
   const [permission, requestPermission] = useCameraPermissions();
@@ -101,6 +106,16 @@ export default function FaceEnrollScreen() {
       setStatusMessage('Encrypting & registering biometric template with backend...');
       setProgress(90);
 
+      const bankDetails = (params.accountNumber && params.ifscCode)
+        ? {
+            bankName: params.bankName || 'Cooperative Bank',
+            accountNumber: params.accountNumber,
+            confirmAccountNumber: params.confirmAccountNumber || params.accountNumber,
+            ifscCode: params.ifscCode,
+            accountHolderName: params.accountHolderName || params.fullName || 'Registered Farmer',
+          }
+        : undefined;
+
       const registrationResult = await register({
         selectedDairyId: params.dairyId || '00000000-0000-0000-0000-000000000001',
         fullName: params.fullName || 'Registered Farmer',
@@ -108,6 +123,7 @@ export default function FaceEnrollScreen() {
         mobileNumber: params.mobileNumber,
         milkSupplyType: params.milkSupplyType || 'COW',
         biometricConsent: true,
+        bankDetails,
         faceTemplate: {
           modelVersion: 'sface_int8_2021dec',
           embedding: embeddingResult.embedding,
@@ -128,7 +144,14 @@ export default function FaceEnrollScreen() {
         },
       });
     } catch (err: any) {
-      const msg = err?.message || 'Face enrollment failed. Please retry.';
+      const serverError =
+        err?.response?.data?.error?.message ||
+        err?.response?.data?.message ||
+        err?.response?.data?.error;
+      const msg =
+        (typeof serverError === 'string' ? serverError : null) ||
+        err?.message ||
+        'Face enrollment failed. Please retry.';
       setErrorMessage(msg);
       setStatusMessage('Face capture failed. Please retry.');
       Alert.alert('Registration Error', msg);

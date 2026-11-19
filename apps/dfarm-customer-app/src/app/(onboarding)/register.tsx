@@ -41,6 +41,14 @@ export default function RegisterScreen() {
   const [village, setVillage] = useState(params.village || '');
   const [milkType, setMilkType] = useState<AnimalType>('COW');
   const [consentChecked, setConsentChecked] = useState(false);
+
+  // Bank Beneficiary details for direct payout settlement
+  const [accountHolderName, setAccountHolderName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [confirmAccountNumber, setConfirmAccountNumber] = useState('');
+  const [ifscCode, setIfscCode] = useState('');
+  const [bankName, setBankName] = useState('');
+
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
   const validate = (): boolean => {
@@ -54,12 +62,33 @@ export default function RegisterScreen() {
     if (!consentChecked) {
       newErrors.consent = 'Biometric consent is mandatory to proceed with contactless collection';
     }
+
+    // Bank account validation
+    const cleanAccount = accountNumber.trim();
+    const cleanConfirm = confirmAccountNumber.trim();
+    const cleanIfsc = ifscCode.trim().toUpperCase();
+
+    if (!cleanAccount || cleanAccount.length < 9 || cleanAccount.length > 18) {
+      newErrors.accountNumber = 'Bank account number must be between 9 and 18 digits';
+    } else if (cleanAccount !== cleanConfirm) {
+      newErrors.confirmAccountNumber = 'Account numbers do not match';
+    }
+
+    const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+    if (!cleanIfsc || !ifscRegex.test(cleanIfsc)) {
+      newErrors.ifscCode = 'Valid 11-character IFSC code is required (e.g. SBIN0001234)';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleNext = () => {
     if (!validate()) return;
+    const cleanAccount = accountNumber.trim();
+    const cleanConfirm = confirmAccountNumber.trim();
+    const cleanIfsc = ifscCode.trim().toUpperCase();
+
     router.push({
       pathname: '/(onboarding)/face-enroll',
       params: {
@@ -69,6 +98,11 @@ export default function RegisterScreen() {
         village: village.trim(),
         milkSupplyType: milkType,
         mobileNumber,
+        bankName: bankName.trim() || 'Cooperative Bank',
+        accountNumber: cleanAccount,
+        confirmAccountNumber: cleanConfirm,
+        ifscCode: cleanIfsc,
+        accountHolderName: accountHolderName.trim() || fullName.trim(),
       },
     });
   };
@@ -156,6 +190,73 @@ export default function RegisterScreen() {
             <View style={styles.fieldSection}>
               <Text style={styles.fieldLabel}>Milk Supply Animals / दूध देणारे जनावर</Text>
               <AnimalSelector value={milkType} onChange={setMilkType} />
+            </View>
+
+            {/* Bank Beneficiary Details Section */}
+            <View style={styles.bankHeaderRow}>
+              <Text style={styles.sectionHeaderTitle}>Bank Settlement Details / बँक तपशील</Text>
+              <ClayBadge label="For Direct Payouts" variant="success" />
+            </View>
+
+            <ClayInput
+              label="Account Holder Name / खातेदाराचे नाव"
+              placeholder="As per bank passbook"
+              value={accountHolderName}
+              onChangeText={(val) => {
+                setAccountHolderName(val);
+                if (errors.accountHolderName) setErrors((prev) => ({ ...prev, accountHolderName: '' }));
+              }}
+              error={errors.accountHolderName}
+            />
+
+            <ClayInput
+              label="Bank Account Number / बँक खाते क्रमांक"
+              placeholder="e.g. 10293847561"
+              value={accountNumber}
+              keyboardType="number-pad"
+              secureTextEntry
+              onChangeText={(val) => {
+                setAccountNumber(val.replace(/[^0-9]/g, ''));
+                if (errors.accountNumber) setErrors((prev) => ({ ...prev, accountNumber: '' }));
+              }}
+              error={errors.accountNumber}
+            />
+
+            <ClayInput
+              label="Confirm Account Number / खाते क्रमांक पुन्हा टाका"
+              placeholder="Re-enter bank account number"
+              value={confirmAccountNumber}
+              keyboardType="number-pad"
+              onChangeText={(val) => {
+                setConfirmAccountNumber(val.replace(/[^0-9]/g, ''));
+                if (errors.confirmAccountNumber) setErrors((prev) => ({ ...prev, confirmAccountNumber: '' }));
+              }}
+              error={errors.confirmAccountNumber}
+            />
+
+            <View style={styles.twoColumnRow}>
+              <View style={styles.columnHalf}>
+                <ClayInput
+                  label="IFSC Code / आय.एफ.एस.सी."
+                  placeholder="e.g. SBIN0001234"
+                  value={ifscCode}
+                  autoCapitalize="characters"
+                  maxLength={11}
+                  onChangeText={(val) => {
+                    setIfscCode(val.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+                    if (errors.ifscCode) setErrors((prev) => ({ ...prev, ifscCode: '' }));
+                  }}
+                  error={errors.ifscCode}
+                />
+              </View>
+              <View style={styles.columnHalf}>
+                <ClayInput
+                  label="Bank Name / बँकेचे नाव"
+                  placeholder="e.g. SBI"
+                  value={bankName}
+                  onChangeText={setBankName}
+                />
+              </View>
             </View>
 
             {/* Biometric Consent Box */}
@@ -361,5 +462,24 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.85,
+  },
+  bankHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  sectionHeaderTitle: {
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryText,
+  },
+  twoColumnRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  columnHalf: {
+    flex: 1,
   },
 });

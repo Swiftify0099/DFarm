@@ -1,0 +1,111 @@
+{
+  "suite": "DFARM Multi-Dairy Customer Membership & Identity Verification",
+  "executionDate": "2026-11-19T00:14:00+05:30",
+  "framework": "Node.js 22 native test runner",
+  "totalTests": 9,
+  "passed": 9,
+  "failed": 0,
+  "skipped": 0,
+  "durationMs": 41948,
+  "tests": [
+    {
+      "id": 0,
+      "name": "Database Environment Pre-Flight & Provisioning",
+      "target": "dfarm_central & isolated tenant DBs",
+      "rule": "System Prerequisites",
+      "status": "PASS",
+      "assertions": [
+        "Organizations seeded in control plane",
+        "Dairy centers seeded in control plane",
+        "Global identity and membership tables verified"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "Rule 1: One Global Customer Identity per verified mobile number",
+      "target": "global_customer_identities",
+      "rule": "Rule 1",
+      "status": "PASS",
+      "assertions": [
+        "OTP requested via real Dove SMS Gateway",
+        "OTP verified and canonical E.164 phone normalized",
+        "globalCustomerId UUID generated",
+        "Re-login idempotent with stable globalCustomerId"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Rule 2 & 3: Register in Dairy A (Success) & Duplicate within Dairy A (Rejected)",
+      "target": "customers & customer_dairy_memberships",
+      "rule": "Rule 2 & Rule 3",
+      "status": "PASS",
+      "assertions": [
+        "Registration in Dairy A returns 201 Created",
+        "Status is PENDING_APPROVAL",
+        "Duplicate registration attempt returns 400 Bad Request",
+        "Error matches /already exists/i"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Rule 2: Same Customer Identity Registering in Dairy B is Allowed",
+      "target": "Dairy B Tenant DB & Central Directory",
+      "rule": "Rule 2",
+      "status": "PASS",
+      "assertions": [
+        "Registration in Dairy B returns 201 Created",
+        "New tenant customer UUID created in Dairy B",
+        "Duplicate in Dairy B returns 400 Bad Request"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Membership Discovery Directory returns all memberships with isolated statuses",
+      "target": "GET /api/v1/customers/memberships",
+      "rule": "Discovery Routing",
+      "status": "PASS",
+      "assertions": [
+        "Returns exactly 2 memberships",
+        "Dairy A membership discovered with status PENDING_APPROVAL",
+        "Dairy B membership discovered with status PENDING_APPROVAL"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Rule 4: Independent Membership Lifecycle & Admin Approvals",
+      "target": "Admin Approval Routes",
+      "rule": "Rule 4",
+      "status": "PASS",
+      "assertions": [
+        "Dairy Admin A approves customer with farmer code C-WARNA-101",
+        "Dairy Admin B rejects customer with mandatory reason",
+        "Central directory reflects Dairy A as APPROVED and Dairy B as REJECTED"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Rule 5: Dairy Switching & Tenant Scoped JWT Generation",
+      "target": "POST /api/v1/customers/switch-dairy",
+      "rule": "Rule 5",
+      "status": "PASS",
+      "assertions": [
+        "Switch to APPROVED Dairy A returns 200 with tenant-scoped token",
+        "Token claims match Dairy A organizationId and role FARMER_CUSTOMER",
+        "Switch to REJECTED Dairy B is strictly rejected (400)"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Rule 5: Strict Operational Tenant Isolation across Dairies",
+      "target": "Tenant DB Endpoints (/me, /collections/history, /ledger/summary, /bills)",
+      "rule": "Rule 5",
+      "status": "PASS",
+      "assertions": [
+        "Customer profile scoped to Dairy A tenant ID",
+        "Collections history queries Dairy A tenant database",
+        "Ledger summary queries Dairy A tenant database",
+        "Bills query Dairy A tenant database with zero cross-tenant leakage"
+      ]
+    }
+  ]
+}

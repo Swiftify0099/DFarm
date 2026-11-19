@@ -40,10 +40,31 @@ export function useProfile() {
     },
   });
 
+  const updateBankDetailsMutation = useMutation({
+    mutationFn: async (payload: {
+      bankName: string;
+      accountNumber: string;
+      ifscCode: string;
+      accountHolderName?: string;
+    }) => {
+      const customerId = await secureStorage.getCustomerId();
+      const response = await apiClient.put(
+        `/customers/${customerId || 'me'}/bank-details`,
+        payload
+      );
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers', 'profile'] });
+    },
+  });
+
   return {
     profile: profileQuery.data,
     isLoading: profileQuery.isLoading,
     updateFace: updateFaceMutation.mutateAsync,
     isUpdatingFace: updateFaceMutation.isPending,
+    updateBankDetails: updateBankDetailsMutation.mutateAsync,
+    isUpdatingBankDetails: updateBankDetailsMutation.isPending,
   };
 }

@@ -22,6 +22,23 @@ export const CustomerRegistrationSchema = z.object({
       .length(128, 'Face embedding must be exactly 128 dimensions'),
     confidence: z.number().min(0).max(1),
   }),
+  bankDetails: z
+    .object({
+      bankName: z.string().optional(),
+      accountNumber: z
+        .string()
+        .min(9, 'Bank account number must be at least 9 digits')
+        .max(18, 'Account number must not exceed 18 digits'),
+      confirmAccountNumber: z.string().optional(),
+      ifscCode: z
+        .string()
+        .regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Invalid IFSC code format (e.g. SBIN0001234)'),
+      accountHolderName: z
+        .string()
+        .min(2, 'Account holder name must be at least 2 characters')
+        .optional(),
+    })
+    .optional(),
 });
 export type CustomerRegistrationRequest = z.infer<
   typeof CustomerRegistrationSchema
@@ -30,6 +47,8 @@ export type CustomerRegistrationRequest = z.infer<
 export const CustomerProfileSchema = z.object({
   id: z.string().uuid(),
   fullName: z.string(),
+  farmerCode: z.string().optional(),
+  customerCode: z.string().optional(),
   mobileNumber: z.string(),
   dairyId: z.string().uuid(),
   dairyName: z.string(),
@@ -47,6 +66,15 @@ export const CustomerProfileSchema = z.object({
     version: z.string(),
     enrolledAt: z.string().optional(),
   }),
+  bankDetails: z
+    .object({
+      bankName: z.string().optional(),
+      accountNumberMask: z.string().optional(),
+      accountNumber: z.string().optional(),
+      ifscCode: z.string().optional(),
+      accountHolderName: z.string().optional(),
+    })
+    .optional(),
   createdAt: z.string(),
 });
 export type CustomerProfile = z.infer<typeof CustomerProfileSchema>;

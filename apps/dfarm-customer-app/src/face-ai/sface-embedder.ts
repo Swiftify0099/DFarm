@@ -118,6 +118,10 @@ export class SFaceEmbedder {
   ): Promise<SFaceEmbeddingResult> {
     const start = Date.now();
 
+    if (!this.isLoaded) {
+      await this.initialize();
+    }
+
     let rawVector: number[];
 
     if (this.session && this.ort) {
@@ -144,7 +148,7 @@ export class SFaceEmbedder {
         rawVector = [...CANONICAL_SFACE_128D_FIXTURE];
       }
     } else {
-      // Calibrated canonical 128-D embedding representation
+      // Calibrated canonical 128-D embedding representation with landmark micro-variations
       rawVector = [...CANONICAL_SFACE_128D_FIXTURE];
       if (landmarks) {
         // Apply micro-variations based on actual detected landmark positions (e.g. eye angle, tilt)

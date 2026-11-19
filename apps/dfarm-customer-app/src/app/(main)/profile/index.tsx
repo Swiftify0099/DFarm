@@ -24,7 +24,7 @@ import { DairyCenterIcon } from '../../../assets/vectors/LocationAssets';
 export default function ProfileScreen() {
   const router = useRouter();
   const { profile } = useProfile();
-  const { logout } = useAuth();
+  const { logout, session, memberships } = useAuth();
 
   const handleLogout = async () => {
     await logout();
@@ -92,6 +92,39 @@ export default function ProfileScreen() {
           </View>
         </ClayCard>
 
+        {/* Multi-Dairy Memberships Card */}
+        <ClayCard variant="raised" style={styles.settingsCard}>
+          <View style={styles.bioHeader}>
+            <View style={styles.bioTitleRow}>
+              <DairyCenterIcon size={24} />
+              <Text style={styles.sectionTitle}>Dairy Memberships / डेअरी खाती</Text>
+            </View>
+            <ClayBadge
+              label={`${memberships?.length || 1} Registered`}
+              variant="orange"
+            />
+          </View>
+          <Text style={styles.bioDescription}>
+            Active: {profile?.dairyName || session?.dairyName || 'Cooperative Milk Center'}. Each dairy has an isolated passbook, ledger, and approval lifecycle.
+          </Text>
+          <View style={styles.bioActionRow}>
+            <ClayButton
+              title="Switch Dairy / डेअरी बदला"
+              onPress={() => router.push('/(auth)/select-dairy')}
+              variant="secondary"
+              size="md"
+              style={styles.bioBtn}
+            />
+            <ClayButton
+              title="+ Add New Dairy"
+              onPress={() => router.push('/(onboarding)/dairy-discovery')}
+              variant="outline"
+              size="md"
+              style={styles.bioBtn}
+            />
+          </View>
+        </ClayCard>
+
         {/* Biometrics & Diagnostics Management */}
         <ClayCard variant="highlight" style={styles.bioCard}>
           <View style={styles.bioHeader}>
@@ -127,6 +160,62 @@ export default function ProfileScreen() {
               style={styles.bioBtn}
             />
           </View>
+        </ClayCard>
+
+        {/* Bank Beneficiary Details Card */}
+        <ClayCard variant="raised" style={styles.settingsCard}>
+          <View style={styles.bioHeader}>
+            <Text style={styles.sectionTitle}>Bank Beneficiary / बँक खाते</Text>
+            <ClayBadge
+              label={
+                profile?.bankDetails?.accountNumber || profile?.bankDetails?.accountNumberMask
+                  ? 'Details Submitted'
+                  : 'Action Required'
+              }
+              variant={
+                profile?.bankDetails?.accountNumber || profile?.bankDetails?.accountNumberMask
+                  ? 'success'
+                  : 'orange'
+              }
+            />
+          </View>
+
+          <View style={styles.settingItem}>
+            <Text style={styles.settingLabel}>Bank Name</Text>
+            <Text style={styles.settingValue}>
+              {profile?.bankDetails?.bankName || 'Not Registered'}
+            </Text>
+          </View>
+
+          <View style={styles.settingItem}>
+            <Text style={styles.settingLabel}>Account Number</Text>
+            <Text style={styles.settingValueMono}>
+              {profile?.bankDetails?.accountNumberMask ||
+                (profile?.bankDetails?.accountNumber
+                  ? (String(profile.bankDetails.accountNumber).startsWith('XXXX')
+                      ? profile.bankDetails.accountNumber
+                      : `XXXX-XXXX-${String(profile.bankDetails.accountNumber).slice(-4)}`)
+                  : 'Not Provided')}
+            </Text>
+          </View>
+
+          <View style={styles.settingItem}>
+            <Text style={styles.settingLabel}>IFSC Code</Text>
+            <Text style={styles.settingValueMono}>
+              {profile?.bankDetails?.ifscCode || 'Not Provided'}
+            </Text>
+          </View>
+
+          <View style={styles.settingItem}>
+            <Text style={styles.settingLabel}>Account Holder</Text>
+            <Text style={styles.settingValue}>
+              {profile?.bankDetails?.accountHolderName || profile?.fullName || 'Not Provided'}
+            </Text>
+          </View>
+
+          <Text style={styles.bankNote}>
+            🔒 Payout disbursements are deposited directly to this registered bank account via double-entry subledger reconciliation.
+          </Text>
         </ClayCard>
 
         {/* System Settings & Logout */}
@@ -294,6 +383,18 @@ const styles = StyleSheet.create({
     ...DFARM_TYPOGRAPHY.bodySm,
     fontWeight: '600',
     color: DFARM_COLORS.secondaryText,
+  },
+  settingValueMono: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryOrange,
+  },
+  bankNote: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    color: DFARM_COLORS.secondaryText,
+    marginTop: 12,
+    fontStyle: 'italic',
+    lineHeight: 18,
   },
   logoutBtn: {
     marginTop: 20,

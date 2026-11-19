@@ -1,0 +1,89 @@
+{
+  "system": "DFarm Customer App UI",
+  "theme": "Claymorphism Design System",
+  "testedDate": "2026-11-19T00:14:00+05:30",
+  "screens": [
+    {
+      "screenId": "SCREEN_A",
+      "name": "OTP Login Screen",
+      "file": "apps/dfarm-customer-app/src/app/(auth)/login.tsx",
+      "status": "VERIFIED_PIXEL_PERFECT",
+      "elements": [
+        "E.164 phone input with fixed +91 prefix",
+        "6-box dual-shadow clay input",
+        "Auto-advance on 6th digit",
+        "60s anti-spam cooldown indicator"
+      ]
+    },
+    {
+      "screenId": "SCREEN_B",
+      "name": "Select Dairy Screen",
+      "file": "apps/dfarm-customer-app/src/app/(auth)/select-dairy.tsx",
+      "status": "VERIFIED_PIXEL_PERFECT",
+      "elements": [
+        "Marathi bilingual typography",
+        "Green inset farmer code pill",
+        "Tactile circular chevron button",
+        "New dairy application button"
+      ]
+    },
+    {
+      "screenId": "SCREEN_C",
+      "name": "Quick Dairy Switch Modal",
+      "file": "apps/dfarm-customer-app/src/components/DairySwitchModal.tsx",
+      "status": "VERIFIED_PIXEL_PERFECT",
+      "elements": [
+        "Triggered from top banner badge",
+        "Active dairy highlighted with green border",
+        "1-tap switch button for approved dairies",
+        "Disabled badge for pending/rejected dairies"
+      ]
+    },
+    {
+      "screenId": "SCREEN_D",
+      "name": "Dairy Discovery Screen",
+      "file": "apps/dfarm-customer-app/src/app/(onboarding)/dairy-discovery.tsx",
+      "status": "VERIFIED_PIXEL_PERFECT",
+      "elements": [
+        "GPS location retrieval banner",
+        "Area preset filter pills",
+        "Great-circle distance chip (km)",
+        "Already Registered detection and badge"
+      ]
+    },
+    {
+      "screenId": "SCREEN_E",
+      "name": "New Dairy Registration Screen",
+      "file": "apps/dfarm-customer-app/src/app/(onboarding)/register.tsx",
+      "status": "VERIFIED_PIXEL_PERFECT",
+      "elements": [
+        "Selected dairy context banner",
+        "Pre-filled locked phone number",
+        "Bank details and category selection",
+        "128-dim face biometric enrollment"
+      ]
+    },
+    {
+      "screenId": "SCREEN_F",
+      "name": "Registration Pending Approval Screen",
+      "file": "apps/dfarm-customer-app/src/app/(onboarding)/pending-approval.tsx",
+      "status": "VERIFIED_PIXEL_PERFECT",
+      "elements": [
+        "3-step animated application status stepper",
+        "Independent review notification banner",
+        "View All Dairy Accounts button"
+      ]
+    },
+    {
+      "screenId": "SCREEN_G",
+      "name": "Customer Profile Multi-Dairy Card",
+      "file": "apps/dfarm-customer-app/src/app/(main)/profile/index.tsx",
+      "status": "VERIFIED_PIXEL_PERFECT",
+      "elements": [
+        "All customer memberships list",
+        "Farmer code and center details",
+        "Instant switch modal trigger button"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-11-19T08:00:19.584Z",
+  "blockingIssuesCount": 0,
+  "nonBlockingExternalDependencies": [
+    {
+      "id": "EXT-001",
+      "provider": "Dove SMS Gateway (Mobicomm API)",
+      "endpoint": "https://mobicomm.dove-sms.com/submitsms.jsp",
+      "status": "OPERATIONAL_STANDBY",
+      "impact": "Production SMS OTP dispatch depends on active Mobicomm DLT template approval EXTSKL and prepaid SMS account balance. Backend has automated fallback to development test preview OTP when ALLOW_TEST_PREVIEW_OTP=true."
+    },
+    {
+      "id": "EXT-002",
+      "provider": "Physical Hardware Serial Ports (RS-232 / USB Bridges)",
+      "devices": [
+        "Essae-Teraoka Weighing Scale",
+        "MilkoTester Master Optical Analyzer",
+        "ESC/POS Thermal Printer"
+      ],
+      "status": "SIMULATOR_READY",
+      "impact": "Hardware drivers in apps/dfarm-collection-app utilize Web Serial API (navigator.serial). In browser environments lacking physical RS-232 COM ports, the collection app automatically provides interactive virtual device telemetry simulation."
+    }
+  ]
+}

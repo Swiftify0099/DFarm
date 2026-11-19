@@ -86,3 +86,21 @@ export class ForbiddenTenantError extends DomainError {
     super(message, 'CROSS_TENANT_ACCESS_DENIED', 403);
   }
 }
+
+export class ForbiddenError extends DomainError {
+  constructor(message = 'Access forbidden', code = 'FORBIDDEN') {
+    super(message, code, 403);
+  }
+}
+
+export class NotFoundError extends DomainError {
+  constructor(message = 'Resource not found', code = 'NOT_FOUND') {
+    super(message, code, 404);
+  }
+}
+
+export class BadRequestError extends DomainError {
+  constructor(message = 'Bad request', code = 'BAD_REQUEST') {
+    super(message, code, 400);
+  }
+}

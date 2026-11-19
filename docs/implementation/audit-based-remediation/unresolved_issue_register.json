@@ -1,0 +1,26 @@
+{
+  "unresolved_register_metadata": {
+    "title": "DFarm Unresolved and Pending Issues Register",
+    "timestamp": "2026-11-18T21:12:00+05:30",
+    "total_unresolved": 1,
+    "blocked_by_external_data": 1
+  },
+  "items": [
+    {
+      "issue_id": "DFARM-AUDIT-004",
+      "title": "Biometric Face Distance Cosine Verification Threshold Calibration",
+      "layer": "AI_BIOMETRIC_SERVICE",
+      "target_file": "services/backend/src/infrastructure/biometrics/FaceModelService.ts",
+      "status": "PENDING_FIELD_CALIBRATION_DATASET",
+      "current_value": 0.720,
+      "root_cause_analysis": "The cosine similarity threshold of 0.720 was set as a baseline architectural constant. Lowering the threshold arbitrarily risks false positive identity mismatches (granting unauthorized collection access to wrong farmer), while raising it risks high false rejection rates in rural collection environments (dim lighting, low camera resolution, weather variations).",
+      "remediation_blocker": "Modifying biometric verification thresholds without an empirical validation dataset violates production safety standards and Section 5.4 guidelines.",
+      "required_inputs_for_resolution": [
+        "Field dataset of minimum 1,000 paired face enrollment/verification samples captured under real rural collection center lighting and hardware conditions.",
+        "ROC (Receiver Operating Characteristic) curve analysis plotting False Accept Rate (FAR) vs False Reject Rate (FRR).",
+        "Product Owner and Security Lead approval of the target FAR (< 0.1%) and FRR (< 2.0%)."
+      ],
+      "interim_mitigation": "Preserved the existing conservative threshold of 0.720. Biometric failure falls back to OTP or operator PIN override with immutable audit logging."
+    }
+  ]
+}

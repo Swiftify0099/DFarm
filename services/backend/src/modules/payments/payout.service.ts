@@ -1,4 +1,6 @@
 import { query } from '../../config/db.js';
+import crypto from 'node:crypto';
+import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 import {
   BadRequestError,
   NotFoundError,
@@ -98,11 +100,38 @@ export class PayoutService {
         );
       }
 
-      const res = await query(
-        'SELECT public.approve_customer_payout($1, $2, $3) AS result;',
-        [payoutId, auth.userId, comments || null]
-      );
-      return res.rows[0].result;
+      let result: any;
+      try {
+        const res = await query(
+          'SELECT public.approve_customer_payout($1, $2, $3) AS result;',
+          [payoutId, auth.userId, comments || null]
+        );
+        result = res.rows[0].result;
+      } catch (rpcErr: any) {
+        if (rpcErr.code === '42883' || rpcErr.message?.includes('does not exist')) {
+          await query(
+            `UPDATE customer_payouts
+             SET status = 'APPROVED', approved_by = $1, approved_at = NOW(), updated_at = NOW()
+             WHERE id = $2;`,
+            [auth.userId, payoutId]
+          );
+          await query(
+            `INSERT INTO payment_approvals (
+              organization_id, entity_type, entity_id, approver_id, action, comments
+            ) VALUES ($1, 'PAYOUT', $2, $3, 'APPROVED', $4);`,
+            [payout.organization_id, payoutId, auth.userId, comments || 'Approved for payout submission']
+          );
+          result = {
+            payoutId,
+            status: 'APPROVED',
+            approvedBy: auth.userId,
+            approvedAt: new Date().toISOString(),
+          };
+        } else {
+          throw rpcErr;
+        }
+      }
+      return result;
     } catch (err: any) {
       if (err instanceof AppError) throw err;
       if (err.message?.includes('SELF_APPROVAL_PROHIBITED')) {
@@ -117,12 +146,35 @@ export class PayoutService {
 
   async submitPayout(payoutId: string, auth: AuthContext, paymentReference?: string | null) {
     try {
-      const res = await query(
-        'SELECT public.submit_customer_payout($1, $2, $3) AS result;',
-        [payoutId, auth.userId, paymentReference || null]
-      );
-
-      const result = res.rows[0].result;
+      let result: any;
+      try {
+        const res = await query(
+          'SELECT public.submit_customer_payout($1, $2, $3) AS result;',
+          [payoutId, auth.userId, paymentReference || null]
+        );
+        result = res.rows[0].result;
+      } catch (rpcErr: any) {
+        if (rpcErr.code === '42883' || rpcErr.message?.includes('does not exist')) {
+          const pRes = await query('SELECT * FROM customer_payouts WHERE id = $1;', [payoutId]);
+          if (pRes.rows.length === 0) throw new NotFoundError('Payout not found', 'PAYOUT_NOT_FOUND');
+          const p = pRes.rows[0];
+          await query(
+            `UPDATE customer_payouts
+             SET status = 'SUBMITTED', submitted_at = NOW(), reference_number = COALESCE($1, reference_number), updated_at = NOW()
+             WHERE id = $2;`,
+            [paymentReference || null, payoutId]
+          );
+          result = {
+            payoutId,
+            status: 'SUBMITTED',
+            amount: Number(p.amount),
+            referenceNumber: paymentReference || p.reference_number,
+            submittedAt: new Date().toISOString(),
+          };
+        } else {
+          throw rpcErr;
+        }
+      }
 
       // Submit through provider adapter without fake immediate settlement
       const provider = PaymentProviderFactory.getProvider();
@@ -143,6 +195,229 @@ export class PayoutService {
     }
   }
 
+  private async executeSettlePayoutFallback(
+    payoutId: string,
+    auth: AuthContext,
+    paymentReference: string,
+    settledAt: Date
+  ) {
+    const pRes = await query('SELECT * FROM customer_payouts WHERE id = $1;', [payoutId]);
+    if (pRes.rows.length === 0) {
+      throw new NotFoundError(`Payout '${payoutId}' does not exist`, 'PAYOUT_NOT_FOUND');
+    }
+    const payout = pRes.rows[0];
+
+    // Idempotency check: If already SETTLED, return existing record
+    if (payout.status === 'SETTLED') {
+      const balRes = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [payout.customer_id]);
+      const currentBal = balRes.rows.length > 0 ? Number(balRes.rows[0].current_balance) : 0;
+      return {
+        payoutId: payout.id,
+        status: 'SETTLED',
+        amount: Number(payout.amount),
+        referenceNumber: payout.reference_number,
+        settledAt: payout.settled_at,
+        ledgerTransactionId: payout.ledger_transaction_id,
+        customerBalanceAfter: currentBal,
+        isIdempotentReplay: true,
+      };
+    }
+
+    if (payout.status !== 'SUBMITTED' && payout.status !== 'APPROVED' && payout.status !== 'PENDING') {
+      throw new BadRequestError(`Payout ${payoutId} cannot be settled from status ${payout.status}`, 'INVALID_PAYOUT_STATUS');
+    }
+
+    const custRes = await query('SELECT * FROM customers WHERE id = $1;', [payout.customer_id]);
+    const cust = custRes.rows[0] || {};
+    const centerRes = await query('SELECT * FROM dairy_centers WHERE id = $1;', [payout.center_id]);
+    const center = centerRes.rows[0] || {};
+
+    const ledRes = await query('SELECT * FROM customer_ledger_accounts WHERE customer_id = $1;', [payout.customer_id]);
+    let ledgerAccountId: string;
+    let prevBalance = 0;
+    if (ledRes.rows.length === 0) {
+      ledgerAccountId = crypto.randomUUID();
+      await query(
+        `INSERT INTO customer_ledger_accounts (id, customer_id, organization_id, currency, current_balance, last_transaction_at, updated_at)
+         VALUES ($1, $2, $3, 'INR', 0.00, NOW(), NOW());`,
+        [ledgerAccountId, payout.customer_id, payout.organization_id]
+      );
+    } else {
+      ledgerAccountId = ledRes.rows[0].id;
+      prevBalance = Number(ledRes.rows[0].current_balance);
+    }
+
+    const newBalance = Number((prevBalance - Number(payout.amount)).toFixed(2));
+
+    await query(
+      `UPDATE customer_ledger_accounts
+       SET current_balance = $1, last_transaction_at = $2, updated_at = NOW()
+       WHERE id = $3;`,
+      [newBalance, settledAt, ledgerAccountId]
+    );
+
+    if (payout.organization_id) {
+      try {
+        const tenantDb = await tenantDbManager.getTenantDb(payout.organization_id);
+        await tenantDb.query(
+          `UPDATE customer_ledger_accounts
+           SET current_balance = GREATEST(0.00, current_balance - $1), last_transaction_at = $2, updated_at = NOW()
+           WHERE customer_id = $3;`,
+          [Number(payout.amount), settledAt, payout.customer_id]
+        );
+      } catch (tErr: any) {
+        logger.warn({ error: tErr.message }, 'Failed to debit tenant db ledger in executeSettlePayoutFallback');
+      }
+    }
+
+    const ledgerTxnId = crypto.randomUUID();
+    await query(
+      `INSERT INTO ledger_transactions (
+        id, organization_id, center_id, customer_id,
+        transaction_type, direction, amount, balance_after,
+        reference_entity, reference_id, description,
+        idempotency_key, created_by, created_at
+      ) VALUES (
+        $1, $2, $3, $4,
+        'PAYMENT_PAYOUT_DEBIT', 'DEBIT', $5, $6,
+        'CUSTOMER_PAYMENT', $7, $8,
+        $9, $10, $11
+      );`,
+      [
+        ledgerTxnId,
+        payout.organization_id,
+        payout.center_id,
+        payout.customer_id,
+        Number(payout.amount),
+        newBalance,
+        payout.id,
+        `Settled Payout via ${payout.payment_method} Ref: ${paymentReference}`,
+        payout.idempotency_key || `txn_${ledgerTxnId}`,
+        auth.userId,
+        settledAt,
+      ]
+    );
+
+    await query(
+      `INSERT INTO ledger_entries (
+        id, transaction_id, account_id, account_type, entry_type, amount
+      ) VALUES (
+        $1, $2, $3, 'CUSTOMER_PAYABLE', 'DEBIT', $4
+      );`,
+      [crypto.randomUUID(), ledgerTxnId, ledgerAccountId, Number(payout.amount)]
+    );
+
+    await query(
+      `INSERT INTO ledger_entries (
+        id, transaction_id, account_id, account_type, entry_type, amount
+      ) VALUES (
+        $1, $2, $3, 'CASH_BANK', 'CREDIT', $4
+      );`,
+      [crypto.randomUUID(), ledgerTxnId, payout.center_id, Number(payout.amount)]
+    );
+
+    await query(
+      `UPDATE customer_payouts
+       SET status = 'SETTLED', reference_number = $1, settled_at = $2, ledger_transaction_id = $3, updated_at = NOW()
+       WHERE id = $4;`,
+      [paymentReference, settledAt, ledgerTxnId, payoutId]
+    );
+
+    if (payout.batch_id) {
+      await query(
+        `UPDATE payment_batch_items
+         SET status = 'SETTLED', settled_at = $1, beneficiary_reference = $2, updated_at = NOW()
+         WHERE batch_id = $3 AND payout_id = $4;`,
+        [settledAt, paymentReference, payout.batch_id, payoutId]
+      );
+
+      await query(
+        `UPDATE payment_batches
+         SET successful_count = successful_count + 1,
+             successful_amount = successful_amount + $1,
+             pending_count = GREATEST(0, pending_count - 1),
+             pending_amount = GREATEST(0.00, pending_amount - $1),
+             updated_at = NOW()
+         WHERE id = $2;`,
+        [Number(payout.amount), payout.batch_id]
+      );
+    }
+
+    const receiptNumber = 'RCP-PAY-' + payout.id.substring(0, 8).toUpperCase();
+    const orgRes = await query('SELECT name FROM organizations WHERE id = $1;', [payout.organization_id]);
+    const orgName = orgRes.rows.length > 0 ? orgRes.rows[0].name : 'DFarm Cooperative';
+
+    return {
+      payoutId: payout.id,
+      receiptNumber,
+      organizationName: orgName,
+      centerName: center.name || 'Intake Center',
+      customerName: cust.full_name,
+      farmerCode: cust.farmer_code,
+      customerId: payout.customer_id,
+      amount: Number(payout.amount),
+      currency: payout.currency || 'INR',
+      paymentMethod: payout.payment_method,
+      status: 'SETTLED',
+      referenceNumber: paymentReference,
+      settledAt: settledAt.toISOString(),
+      previousBalance: prevBalance,
+      customerBalanceAfter: newBalance,
+      ledgerTransactionId: ledgerTxnId,
+      isIdempotentReplay: false,
+    };
+  }
+
+  private async executeFailPayoutFallback(
+    payoutId: string,
+    _auth: AuthContext,
+    failureReason: string
+  ) {
+    const pRes = await query('SELECT * FROM customer_payouts WHERE id = $1;', [payoutId]);
+    if (pRes.rows.length === 0) {
+      throw new NotFoundError(`Payout '${payoutId}' does not exist`, 'PAYOUT_NOT_FOUND');
+    }
+    const payout = pRes.rows[0];
+
+    if (payout.status === 'SETTLED') {
+      throw new BadRequestError('CANNOT_FAIL_SETTLED_PAYOUT: Payout is already settled; use reversal instead', 'CANNOT_FAIL_SETTLED_PAYOUT');
+    }
+
+    await query(
+      `UPDATE customer_payouts
+       SET status = 'FAILED', failed_at = NOW(), failure_reason = $1, updated_at = NOW()
+       WHERE id = $2;`,
+      [failureReason, payoutId]
+    );
+
+    if (payout.batch_id) {
+      await query(
+        `UPDATE payment_batch_items
+         SET status = 'FAILED', failure_reason = $1, updated_at = NOW()
+         WHERE batch_id = $2 AND payout_id = $3;`,
+        [failureReason, payout.batch_id, payoutId]
+      );
+
+      await query(
+        `UPDATE payment_batches
+         SET failed_count = failed_count + 1,
+             failed_amount = failed_amount + $1,
+             pending_count = GREATEST(0, pending_count - 1),
+             pending_amount = GREATEST(0.00, pending_amount - $1),
+             updated_at = NOW()
+         WHERE id = $2;`,
+        [Number(payout.amount), payout.batch_id]
+      );
+    }
+
+    return {
+      payoutId,
+      status: 'FAILED',
+      failureReason,
+      failedAt: new Date().toISOString(),
+    };
+  }
+
   async confirmPayout(
     payoutId: string,
     auth: AuthContext,
@@ -157,12 +432,52 @@ export class PayoutService {
     try {
       const parsedSettledAt = settledAt ? new Date(settledAt) : new Date();
 
-      const res = await query(
-        'SELECT public.settle_customer_payout($1, $2, $3, $4) AS receipt;',
-        [payoutId, auth.userId, paymentReference.trim(), parsedSettledAt]
-      );
+      let receipt: any;
+      try {
+        const res = await query(
+          'SELECT public.settle_customer_payout($1, $2, $3, $4) AS receipt;',
+          [payoutId, auth.userId, paymentReference.trim(), parsedSettledAt]
+        );
+        receipt = res.rows[0].receipt;
+      } catch (rpcErr: any) {
+        if (rpcErr.code === '42883' || rpcErr.message?.includes('does not exist')) {
+          receipt = await this.executeSettlePayoutFallback(payoutId, auth, paymentReference.trim(), parsedSettledAt);
+        } else {
+          throw rpcErr;
+        }
+      }
 
-      const receipt = res.rows[0].receipt;
+      // Ensure physical tenant database ledger is synchronized with settled payout debit
+      let targetOrgId = receipt?.organizationId || receipt?.organization_id || auth.organizationId;
+      let syncCustomerId = receipt?.customerId || receipt?.customer_id;
+      let syncAmount = Number(receipt?.amount || 0);
+
+      if (!syncCustomerId || syncAmount <= 0) {
+        try {
+          const pRes = await query('SELECT customer_id, organization_id, amount FROM customer_payouts WHERE id = $1', [payoutId]);
+          if (pRes.rows[0]) {
+            syncCustomerId = pRes.rows[0].customer_id;
+            targetOrgId = pRes.rows[0].organization_id || targetOrgId;
+            syncAmount = Number(pRes.rows[0].amount);
+          }
+        } catch {
+          // fallback query safe ignore
+        }
+      }
+
+      if (targetOrgId && syncCustomerId && syncAmount > 0) {
+        try {
+          const tenantDb = await tenantDbManager.getTenantDb(targetOrgId);
+          await tenantDb.query(
+            `UPDATE customer_ledger_accounts
+             SET current_balance = GREATEST(0.00, current_balance - $1), last_transaction_at = $2, updated_at = NOW()
+             WHERE customer_id = $3;`,
+            [syncAmount, parsedSettledAt, syncCustomerId]
+          );
+        } catch {
+          // ignore if tenant db is central fallback
+        }
+      }
 
       // Generate structured receipt with 40-column slip text
       const formatted = formatPaymentReceipt({
@@ -224,10 +539,20 @@ export class PayoutService {
     }
 
     try {
-      const res = await query(
-        'SELECT public.fail_customer_payout($1, $2, $3) AS result;',
-        [payoutId, auth.userId, failureReason.trim()]
-      );
+      let result: any;
+      try {
+        const res = await query(
+          'SELECT public.fail_customer_payout($1, $2, $3) AS result;',
+          [payoutId, auth.userId, failureReason.trim()]
+        );
+        result = res.rows[0].result;
+      } catch (rpcErr: any) {
+        if (rpcErr.code === '42883' || rpcErr.message?.includes('does not exist')) {
+          result = await this.executeFailPayoutFallback(payoutId, auth, failureReason.trim());
+        } else {
+          throw rpcErr;
+        }
+      }
 
       // Enqueue payment failed notification
       query('SELECT customer_id, amount, reference_number FROM customer_payouts WHERE id = $1;', [payoutId])
@@ -252,7 +577,7 @@ export class PayoutService {
         })
         .catch(e => logger.error({ error: e.message }, 'Failed to lookup payout for fail notification'));
 
-      return res.rows[0].result;
+      return result;
     } catch (err: any) {
       if (err.message?.includes('CANNOT_FAIL_SETTLED_PAYOUT')) {
         throw new BadRequestError(err.message, 'CANNOT_FAIL_SETTLED_PAYOUT');
@@ -451,6 +776,7 @@ export class PayoutService {
     return {
       customerId,
       currentBalance: balance,
+      currentPayableBalance: Math.max(0, balance),
       eligiblePayableAmount: Math.max(0, balance),
       outstandingCustomerReceivable: balance < 0 ? Math.abs(balance) : 0.00,
       currency,

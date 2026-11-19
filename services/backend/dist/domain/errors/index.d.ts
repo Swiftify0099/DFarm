@@ -39,4 +39,13 @@ export declare class UnauthorizedAccessError extends DomainError {
 export declare class ForbiddenTenantError extends DomainError {
     constructor(message?: string);
 }
+export declare class ForbiddenError extends DomainError {
+    constructor(message?: string, code?: string);
+}
+export declare class NotFoundError extends DomainError {
+    constructor(message?: string, code?: string);
+}
+export declare class BadRequestError extends DomainError {
+    constructor(message?: string, code?: string);
+}
 //# sourceMappingURL=index.d.ts.map

@@ -96,14 +96,14 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* KPI Metrics Row */}
+      {/* Primary KPI Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <ClayMetricCard
           title="Total Registered Dairies"
           value={metrics?.totalDairies ?? '—'}
           subtitle={`${metrics?.activeDairies ?? 0} Active • ${metrics?.suspendedDairies ?? 0} Suspended`}
           icon={<Building2 className="w-5 h-5" />}
-          trend={{ value: '+2 this month', isPositive: true }}
+          trend={{ value: `${metrics?.activeDairies ?? 0} Live`, isPositive: true }}
           onClick={() => navigate('/dairies')}
         />
 
@@ -116,20 +116,53 @@ export const DashboardPage: React.FC = () => {
         />
 
         <ClayMetricCard
-          title="Connected Hardware"
+          title="Total Hardware Inventory"
           value={metrics?.totalRegisteredHardwareUnits ?? '—'}
-          subtitle="Analyzers & digital scales across nodes"
+          subtitle={`${metrics?.allocatedHardwareUnits ?? 0} Allocated • ${metrics?.unallocatedHardwareUnits ?? 0} Stock`}
           icon={<HardDrive className="w-5 h-5" />}
-          onClick={() => navigate('/monitoring')}
+          onClick={() => navigate('/hardware')}
         />
 
         <ClayMetricCard
           title="Platform Sync Health"
           value={metrics?.platformSyncHealthStatus ? metrics.platformSyncHealthStatus.toUpperCase() : 'HEALTHY'}
-          subtitle={`${metrics?.openAlertsCount ?? 0} Active Alerts (${metrics?.criticalAlertsCount ?? 0} Critical)`}
+          subtitle={`${metrics?.openAlertsCount ?? 0} Alerts (${metrics?.criticalAlertsCount ?? 0} Critical)`}
           icon={<Activity className="w-5 h-5" />}
           variant={metrics?.criticalAlertsCount && metrics.criticalAlertsCount > 0 ? 'peach' : 'default'}
           onClick={() => navigate('/alerts')}
+        />
+
+        {/* Row 2: Platform Services & Governance Metrics */}
+        <ClayMetricCard
+          title="Active AMC Care Contracts"
+          value={metrics?.activeAmcSubscriptions ?? '—'}
+          subtitle={`${metrics?.expiringAmcSubscriptions ?? 0} Expiring Soon • ${metrics?.expiredAmcSubscriptions ?? 0} Expired`}
+          icon={<ShieldCheck className="w-5 h-5" />}
+          onClick={() => navigate('/amc')}
+        />
+
+        <ClayMetricCard
+          title="Global Policies"
+          value={(metrics?.globalRatePoliciesCount ?? 0) + (metrics?.globalFatSnfPoliciesCount ?? 0)}
+          subtitle={`${(metrics?.publishedRateVersionsCount ?? 0) + (metrics?.publishedFatSnfVersionsCount ?? 0)} Published Versions`}
+          icon={<FileText className="w-5 h-5" />}
+          onClick={() => navigate('/policies/rate')}
+        />
+
+        <ClayMetricCard
+          title="Diagnostic Support"
+          value={metrics?.activeSupportSessionsCount ?? 0}
+          subtitle="Time-bound audited sessions"
+          icon={<Users2 className="w-5 h-5" />}
+          onClick={() => navigate('/support-access')}
+        />
+
+        <ClayMetricCard
+          title="Primary Dairy Admins"
+          value={metrics?.totalPrimaryAdmins ?? '—'}
+          subtitle={`${metrics?.adminsAwaitingActivation ?? 0} Pending Onboarding`}
+          icon={<Users2 className="w-5 h-5" />}
+          onClick={() => navigate('/admins')}
         />
       </div>
 
@@ -329,7 +362,7 @@ export const DashboardPage: React.FC = () => {
                   </div>
                 </div>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#FAF2EC] text-[#817A75]">
-                  {log.outcome.toUpperCase()}
+                  {log.outcome?.toUpperCase() ?? '—'}
                 </span>
               </div>
             ))}

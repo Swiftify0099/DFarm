@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import {
   ClayCard,
   ClayBadge,
 } from '../../design-system';
+import { useAuth } from '../../features/auth/useAuth';
 import { useCollection } from '../../features/collection/useCollection';
 import { useLedger } from '../../features/ledger/useLedger';
 import { useProfile } from '../../features/profile/useProfile';
@@ -23,9 +24,12 @@ import { DairyCenterIcon } from '../../assets/vectors/LocationAssets';
 import { CowIcon } from '../../assets/vectors/CowIcon';
 import { BuffaloIcon } from '../../assets/vectors/BuffaloIcon';
 import { BiometricSuccessBadge } from '../../assets/vectors/BiometricAssets';
+import { DairySwitchModal } from '../../components/DairySwitchModal';
 
 export default function DashboardScreen() {
   const router = useRouter();
+  const { session } = useAuth();
+  const [switchModalVisible, setSwitchModalVisible] = useState(false);
   const { collections, monthlySummary } = useCollection();
   const { summary: khata } = useLedger();
   const { profile } = useProfile();
@@ -41,12 +45,18 @@ export default function DashboardScreen() {
           <Text style={styles.userName} numberOfLines={1}>
             {profile?.fullName || 'DFarm Producer'}
           </Text>
-          <View style={styles.dairyTagRow}>
+          <Pressable
+            onPress={() => setSwitchModalVisible(true)}
+            style={({ pressed }) => [styles.dairyTagRow, pressed && styles.pressed]}
+          >
             <DairyCenterIcon size={16} />
             <Text style={styles.dairyTag} numberOfLines={1}>
-              {profile?.dairyName || 'DFarm Cooperative Society'}
+              {profile?.dairyName || session?.dairyName || 'DFarm Cooperative Society'}
             </Text>
-          </View>
+            <View style={styles.switchPill}>
+              <Text style={styles.switchPillText}>बदला ▾</Text>
+            </View>
+          </Pressable>
         </View>
 
         <Pressable
@@ -262,6 +272,11 @@ export default function DashboardScreen() {
           </Pressable>
         </View>
       </ScrollView>
+
+      <DairySwitchModal
+        visible={switchModalVisible}
+        onClose={() => setSwitchModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -304,6 +319,18 @@ const styles = StyleSheet.create({
     color: DFARM_COLORS.primaryOrange,
     fontWeight: '600',
     flex: 1,
+  },
+  switchPill: {
+    backgroundColor: '#FFE9D6',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginLeft: 6,
+  },
+  switchPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryOrange,
   },
   diagBadgeBtn: {
     alignSelf: 'center',

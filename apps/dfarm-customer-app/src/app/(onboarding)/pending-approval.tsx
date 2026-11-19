@@ -281,6 +281,12 @@ export default function PendingApprovalScreen() {
                 variant="primary"
                 style={styles.actionBtn}
               />
+              <ClayButton
+                title="View All My Dairy Accounts / सर्व खाती पहा"
+                onPress={() => router.push('/(auth)/select-dairy')}
+                variant="secondary"
+                style={[styles.actionBtn, { marginTop: 10 }]}
+              />
             </View>
           </>
         )}

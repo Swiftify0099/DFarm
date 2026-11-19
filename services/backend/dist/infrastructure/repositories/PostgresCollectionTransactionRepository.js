@@ -219,6 +219,18 @@ export class PostgresCollectionTransactionRepository {
         }
     }
     async listRecentBySession(sessionId, limit = 20, organizationId) {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId);
+        const sessionWhere = isUuid
+            ? `(mc.session_id = $1 OR (
+          mc.center_id = (SELECT center_id FROM kiosk_shift_sessions WHERE id = $1 LIMIT 1)
+          AND mc.business_date = (SELECT business_date FROM kiosk_shift_sessions WHERE id = $1 LIMIT 1)
+          AND mc.shift_type = (SELECT shift FROM kiosk_shift_sessions WHERE id = $1 LIMIT 1)
+        ))`
+            : `(mc.session_id IN (SELECT id FROM kiosk_shift_sessions WHERE session_code = $1) OR (
+          mc.center_id = (SELECT center_id FROM kiosk_shift_sessions WHERE session_code = $1 LIMIT 1)
+          AND mc.business_date = (SELECT business_date FROM kiosk_shift_sessions WHERE session_code = $1 LIMIT 1)
+          AND mc.shift_type = (SELECT shift FROM kiosk_shift_sessions WHERE session_code = $1 LIMIT 1)
+        ))`;
         const sql = `
       SELECT 
         mc.*,
@@ -232,11 +244,7 @@ export class PostgresCollectionTransactionRepository {
       JOIN customers c ON c.id = mc.customer_id
       LEFT JOIN collection_sessions cs ON cs.id = mc.session_id
       LEFT JOIN users u ON u.id = cs.operator_id
-      WHERE (mc.session_id = $1 OR (
-        mc.center_id = (SELECT center_id FROM kiosk_shift_sessions WHERE id = $1 LIMIT 1)
-        AND mc.business_date = (SELECT business_date FROM kiosk_shift_sessions WHERE id = $1 LIMIT 1)
-        AND mc.shift_type = (SELECT shift FROM kiosk_shift_sessions WHERE id = $1 LIMIT 1)
-      ))
+      WHERE ${sessionWhere}
       ORDER BY mc.created_at DESC
       LIMIT $2;
     `;

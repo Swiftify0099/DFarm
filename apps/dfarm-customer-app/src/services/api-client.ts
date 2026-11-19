@@ -13,13 +13,26 @@ const resolveDefaultBaseUrl = (): string => {
   }
 
   // 1. Detect dynamic host IP from Metro bundler (Expo Go / Development Client)
+  // When running via Metro on Wi-Fi, this automatically reflects the machine's current IP
   const hostUri =
     Constants.expoConfig?.hostUri ||
     (Constants as any).manifest?.debuggerHost ||
     (Constants as any).manifest2?.extra?.expoGo?.debuggerHost;
   const metroHost = hostUri ? hostUri.split(':')[0] : null;
 
-  // 2. Check if a non-localhost, non-emulator IP is specified in env
+  if (metroHost && metroHost !== 'localhost' && metroHost !== '127.0.0.1') {
+    return `http://${metroHost}:4000/api/v1`;
+  }
+
+  // 2. Android emulator check: always use loopback gateway if running on an emulator without metroHost
+  if (Platform.OS === 'android') {
+    const isEmulator = (Constants as any).isDevice === false;
+    if (isEmulator && (!metroHost || metroHost === 'localhost' || metroHost === '127.0.0.1')) {
+      return 'http://10.0.2.2:4000/api/v1';
+    }
+  }
+
+  // 3. Check if a non-localhost, non-emulator IP is specified in env
   const envUrl = process.env.EXPO_PUBLIC_API_URL || process.env.EXPO_PUBLIC_API_BASE_URL;
   if (
     envUrl &&
@@ -30,19 +43,8 @@ const resolveDefaultBaseUrl = (): string => {
     return envUrl;
   }
 
-  // 3. If connected to Metro on Wi-Fi, use Metro host's IP
-  if (metroHost && metroHost !== 'localhost' && metroHost !== '127.0.0.1') {
-    return `http://${metroHost}:4000/api/v1`;
-  }
-
-  // 4. Android platform routing
+  // 4. Android physical device fallback on LAN Wi-Fi
   if (Platform.OS === 'android') {
-    // Only use 10.0.2.2 for Android Studio Emulator without an active Metro host IP
-    const isEmulator = (Constants as any).isDevice === false && !metroHost;
-    if (isEmulator) {
-      return 'http://10.0.2.2:4000/api/v1';
-    }
-    // Physical phone on local LAN Wi-Fi
     return 'http://10.114.224.223:4000/api/v1';
   }
 

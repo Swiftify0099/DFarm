@@ -29,7 +29,26 @@ export const corsOptions: CorsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'Accept', 'X-Dairy-Tenant-ID', 'x-dairy-tenant-id'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Request-Id',
+    'Accept',
+    'X-Dairy-Tenant-ID',
+    'x-dairy-tenant-id',
+    'X-Dairy-Id',
+    'x-dairy-id',
+    'X-Client-App',
+    'x-client-app',
+    'X-Client-Version',
+    'x-client-version',
+    'X-Device-Id',
+    'x-device-id',
+    'X-Idempotency-Key',
+    'x-idempotency-key',
+    'X-Access-Token',
+    'x-access-token'
+  ],
   exposedHeaders: ['X-Request-Id'],
   maxAge: 86400, // 24 hours
 };

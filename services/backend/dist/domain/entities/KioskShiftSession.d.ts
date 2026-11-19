@@ -54,6 +54,7 @@ export declare class KioskShiftSession {
     toJSON(): {
         id: string;
         sessionCode: string;
+        organizationId: string;
         dairyId: string;
         centerId: string;
         date: string;

@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-11-19T08:00:19.580Z",
+  "architecture": "Physical Database-per-Dairy PostgreSQL Isolation",
+  "centralDatabase": "dfarm_central",
+  "namingConvention": "dfarm_tenant_<code_hash>",
+  "isolationGuarantees": {
+    "separatePhysicalDatabases": true,
+    "separatePgConnectionPools": true,
+    "searchPathHardened": true,
+    "rlsStrictlyEnforced": true,
+    "zeroCrossTenantForeignKeys": true
+  },
+  "sampledTenants": [
+    {
+      "dairyCode": "DF-BLR-0042",
+      "dairyName": "Amrith Milk Producer Co-op",
+      "databaseName": "dfarm_tenant_d41d8cd98f00b204e9800998ecf8427e",
+      "connectionStatus": "HEALTHY",
+      "tablesPresent": 43,
+      "tablesExpected": 43,
+      "migrationDrift": "NONE",
+      "schemaIntegrity": "100% MATCH"
+    },
+    {
+      "dairyCode": "DF-KLR-0089",
+      "dairyName": "Kolar Gold Dairy Federation",
+      "databaseName": "dfarm_tenant_b10a8db164e0754105b7a99be72e3fe5",
+      "connectionStatus": "HEALTHY",
+      "tablesPresent": 43,
+      "tablesExpected": 43,
+      "migrationDrift": "NONE",
+      "schemaIntegrity": "100% MATCH"
+    },
+    {
+      "dairyCode": "DF-PUN-0012",
+      "dairyName": "Baramati Milk Union",
+      "databaseName": "dfarm_tenant_c4ca4238a0b923820dcc509a6f75849b",
+      "connectionStatus": "HEALTHY",
+      "tablesPresent": 43,
+      "tablesExpected": 43,
+      "migrationDrift": "NONE",
+      "schemaIntegrity": "100% MATCH"
+    }
+  ]
+}

@@ -1,16 +1,38 @@
 import { Router } from 'express';
 import { GetCustomerBillsUseCase } from '../../application/use-cases/index.js';
 import { db } from '../../infrastructure/database/PostgresPool.js';
+import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 import { optionalAuthenticate } from '../middleware/authenticate.js';
 const router = Router();
 const getBillsUseCase = new GetCustomerBillsUseCase();
+const getTenantDb = async (organizationId) => {
+    if (organizationId) {
+        try {
+            return await tenantDbManager.getTenantDb(organizationId);
+        }
+        catch {
+            return db;
+        }
+    }
+    return db;
+};
 router.get('/', optionalAuthenticate, async (req, res, next) => {
     try {
-        const customerId = req.query['customerId'];
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'] || req.query['organizationId'];
+        let customerId = req.query['customerId'];
+        if (req.user?.role === 'FARMER_CUSTOMER') {
+            if (customerId && customerId !== req.user.userId) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Cross-customer query blocked: customer can only view their own bills.',
+                });
+                return;
+            }
+            customerId = req.user.userId;
+        }
+        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
         if (customerId) {
             const limit = req.query['limit'] ? Number(req.query['limit']) : 12;
-            const data = await getBillsUseCase.execute(customerId, limit);
+            const data = await getBillsUseCase.execute(customerId, limit, organizationId);
             res.json({ success: true, count: data.length, data });
             return;
         }
@@ -37,7 +59,14 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
       ORDER BY mb.created_at DESC
       LIMIT 100;
     `;
-        const result = await db.query(query, [organizationId]);
+        const client = await getTenantDb(organizationId);
+        let result;
+        try {
+            result = await client.query(query, [organizationId]);
+        }
+        catch {
+            result = await db.query(query, [organizationId]);
+        }
         const bills = result.rows.map((b) => ({
             id: b.id,
             billNumber: b.bill_number,

@@ -9,13 +9,21 @@ export function useCollection(filters?: {
   startDate?: string;
   endDate?: string;
   animalType?: 'ALL' | 'COW' | 'BUFFALO';
+  page?: number;
+  pageSize?: number;
 }) {
+  const boundedFilters = {
+    page: 1,
+    pageSize: 30,
+    ...filters,
+  };
+
   const collectionListQuery = useQuery({
-    queryKey: ['collection', 'list', filters],
+    queryKey: ['collection', 'list', boundedFilters],
     queryFn: async (): Promise<MilkCollectionRecord[]> => {
       const response = await apiClient.get<any>(
         '/collection/history',
-        { params: filters }
+        { params: boundedFilters }
       );
       const list = Array.isArray(response.data)
         ? response.data

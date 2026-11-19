@@ -34,6 +34,7 @@ CREATE INDEX IF NOT EXISTS idx_dairy_admin_invitations_email ON dairy_admin_invi
 
 -- 2. Extend users table with compatibility columns and activation timestamp if not present
 ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_number VARCHAR(20);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS normalized_mobile_number VARCHAR(20);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS user_role VARCHAR(30);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
 

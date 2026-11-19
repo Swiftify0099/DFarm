@@ -6,7 +6,9 @@ import { validateRequest } from '../../middleware/validate-request.js';
 import { UserRole } from '@dfarm/shared-types';
 import { CreatePayoutInputSchema, ApprovePayoutInputSchema, SubmitPayoutInputSchema, ConfirmPayoutInputSchema, FailPayoutInputSchema, ReversePayoutInputSchema, CreateReceiptInputSchema, ConfirmReceiptInputSchema, CreatePaymentBatchSchema, ReconcileBatchSchema, } from '@dfarm/shared-validation';
 export const paymentRouter = Router();
-// All payment routes require valid authentication
+// Ephemeral Token Bank File Download (Pre-authenticated by token, browser stream compatible)
+paymentRouter.get('/batches/:batchId/download', PaymentController.downloadBatch);
+// All other payment routes require valid authentication
 paymentRouter.use(authenticate);
 // ----------------------------------------------------
 // Individual Farmer Payouts
@@ -122,6 +124,13 @@ paymentRouter.post('/batches/:batchId/reconcile', requireRole([
     UserRole.CENTER_MANAGER,
     UserRole.ACCOUNTANT,
 ]), validateRequest({ body: ReconcileBatchSchema }), PaymentController.reconcileBatch);
+// 14b. Export Batch as Bank File (NEFT / SBI CMP)
+paymentRouter.get('/batches/:batchId/export', requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.ACCOUNTANT,
+]), PaymentController.exportBatch);
 // ----------------------------------------------------
 // Customer Payment History & Receipt Slips
 // ----------------------------------------------------

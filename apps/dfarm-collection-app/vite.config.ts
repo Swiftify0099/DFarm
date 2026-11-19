@@ -13,7 +13,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   assetsInclude: ['**/*.onnx'],
   server: {
-    port: 5173,
+    port: 5175,
     proxy: {
       '/api': {
         target: 'http://localhost:4000',

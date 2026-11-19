@@ -3,9 +3,13 @@ import type { CustomerIdentity, MilkCategory } from '@/types'
 import { customersApi } from '@/api/client'
 import { ClayCard, ClayInput, ClayButton, ClayBadge, ClayTable } from '@/components/ui'
 import { CustomerDetailModal } from './CustomerDetailModal'
-import { Search, Users, ShieldCheck, Radio, Eye } from 'lucide-react'
+import { Search, Users, ShieldCheck, Radio, Eye, UserCheck } from 'lucide-react'
 
-export const CustomerLookup: React.FC = () => {
+interface CustomerLookupProps {
+  onSelectCustomer?: (customer: CustomerIdentity) => void
+}
+
+export const CustomerLookup: React.FC<CustomerLookupProps> = ({ onSelectCustomer }) => {
   const [customers, setCustomers] = useState<CustomerIdentity[]>([])
   const [filteredCustomers, setFilteredCustomers] = useState<CustomerIdentity[]>([])
   const [searchTerm, setSearchTerm] = useState('')
@@ -127,15 +131,28 @@ export const CustomerLookup: React.FC = () => {
       key: 'actions',
       header: 'Action',
       render: (c: CustomerIdentity) => (
-        <ClayButton
-          variant="secondary"
-          size="sm"
-          onClick={() => handleOpenDetail(c)}
-          className="flex items-center space-x-1 text-xs"
-        >
-          <Eye className="w-3.5 h-3.5" />
-          <span>View</span>
-        </ClayButton>
+        <div className="flex items-center space-x-2">
+          {onSelectCustomer && (
+            <ClayButton
+              variant="primary"
+              size="sm"
+              onClick={() => onSelectCustomer(c)}
+              className="flex items-center space-x-1 text-xs"
+            >
+              <UserCheck className="w-3.5 h-3.5 mr-1" />
+              <span>Select</span>
+            </ClayButton>
+          )}
+          <ClayButton
+            variant="secondary"
+            size="sm"
+            onClick={() => handleOpenDetail(c)}
+            className="flex items-center space-x-1 text-xs"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>View</span>
+          </ClayButton>
+        </div>
       ),
     },
   ]

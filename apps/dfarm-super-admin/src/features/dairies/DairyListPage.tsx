@@ -70,7 +70,22 @@ export const DairyListPage: React.FC = () => {
     {
       key: 'status',
       header: 'Tenant Status',
-      render: (d) => <ClayBadge variant={d.status} />,
+      render: (d) => (
+        <div className="flex flex-col gap-1 items-start">
+          <ClayBadge variant={d.status} />
+          {d.provisioningStatus && d.provisioningStatus !== 'ACTIVE' && (
+            <span
+              className={`text-[10px] font-mono font-medium px-1.5 py-0.5 rounded ${
+                d.provisioningStatus === 'FAILED'
+                  ? 'bg-rose-100 text-rose-700'
+                  : 'bg-amber-100 text-amber-700'
+              }`}
+            >
+              DB: {d.provisioningStatus}
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       key: 'location',
@@ -134,6 +149,21 @@ export const DairyListPage: React.FC = () => {
           >
             <Eye className="w-3.5 h-3.5" />
           </button>
+
+          {d.provisioningStatus === 'FAILED' && (
+            <button
+              onClick={async () => {
+                try {
+                  await apiClient.retryTenantProvisioning(d.id)
+                  refetch()
+                } catch {}
+              }}
+              className="p-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+              title="Retry Tenant Database Provisioning"
+            >
+              <Activity className="w-3.5 h-3.5" />
+            </button>
+          )}
 
           {d.status === 'suspended' ? (
             <button

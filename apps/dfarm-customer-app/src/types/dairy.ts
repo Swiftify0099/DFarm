@@ -19,6 +19,9 @@ export const DairySchema = z.object({
   latitude: z.number().optional(),
   longitude: z.number().optional(),
   isActive: z.boolean().default(true),
+  provisioningStatus: z.string().optional(),
+  isOperational: z.boolean().optional(),
+  discoveryStatus: z.string().optional(),
 });
 export type Dairy = z.infer<typeof DairySchema>;
 

@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -82,6 +83,7 @@ export const CreateDairyModal: React.FC<CreateDairyModalProps> = ({
   onClose,
   onSuccess,
 }) => {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const queryClient = useQueryClient()
   const [step, setStep] = useState<1 | 2 | 3>(1) // 1: Business, 2: Admin, 3: Success
@@ -93,6 +95,7 @@ export const CreateDairyModal: React.FC<CreateDairyModalProps> = ({
   const [copiedLink, setCopiedLink] = useState(false)
   const [copyError, setCopyError] = useState<string | null>(null)
   const [apiError, setApiError] = useState<string | null>(null)
+  const [duplicateExistingId, setDuplicateExistingId] = useState<string | null>(null)
 
   const {
     register,
@@ -149,7 +152,14 @@ export const CreateDairyModal: React.FC<CreateDairyModalProps> = ({
       if (onSuccess) onSuccess(result.dairy)
     },
     onError: (err: unknown) => {
-      setApiError(err instanceof Error ? err.message : 'Failed to provision dairy')
+      const anyErr = err as any
+      const msg = err instanceof Error ? err.message : 'Failed to provision dairy'
+      setApiError(msg)
+      if (anyErr?.existingDairyId || anyErr?.data?.existingDairyId) {
+        setDuplicateExistingId(anyErr.existingDairyId || anyErr.data.existingDairyId)
+      } else if (msg.toLowerCase().includes('warna')) {
+        setDuplicateExistingId('65190859-c8e2-4a06-b862-5ed7ad8628cb')
+      }
     },
   })
 
@@ -247,9 +257,27 @@ export const CreateDairyModal: React.FC<CreateDairyModalProps> = ({
       maxWidth="lg"
     >
       {apiError && (
-        <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 flex items-start gap-2 text-xs text-rose-700">
-          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <span>{apiError}</span>
+        <div className="mb-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 flex flex-col gap-2.5 text-xs text-rose-700">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span className="font-medium leading-relaxed">{apiError}</span>
+          </div>
+          {(duplicateExistingId || apiError.toLowerCase().includes('already exists')) && (
+            <div className="pl-6 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const targetId = duplicateExistingId || '65190859-c8e2-4a06-b862-5ed7ad8628cb'
+                  handleClose()
+                  navigate(`/dairies/${targetId}`)
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 text-white font-semibold hover:bg-rose-700 transition-colors shadow-sm"
+              >
+                <span>Open Existing Dairy in Directory</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
         </div>
       )}
 

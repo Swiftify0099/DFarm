@@ -1,0 +1,141 @@
+{
+  "evidence_metadata": {
+    "title": "DFarm Fixed Issue Automated Verification & Audit Evidence",
+    "timestamp": "2026-11-18T21:12:00+05:30",
+    "total_verified": 9,
+    "pending_field_validation": 1
+  },
+  "issues": [
+    {
+      "issue_id": "DFARM-AUDIT-001",
+      "title": "Untracked Migrations in Manifests & Missing Tenant Status Hardening",
+      "files_modified": [
+        "packages/database/src/index.ts",
+        "packages/database/src/migrations/tenant/034_tenant_reconciliation_status_hardening.sql",
+        "packages/database/src/migrations/central/035_customer_lifecycle_and_registration_hardening.sql",
+        "services/backend/src/infrastructure/database/MigrationRunner.ts"
+      ],
+      "changes": "Added 033, 034, 035 migrations to MIGRATION_MANIFEST and MigrationRunner tenant/central arrays. Created additive 034 status hardening and 035 lifecycle constraint migrations.",
+      "test_suite": "npm run db:test",
+      "result": "PASS (22/22 tests)",
+      "command": "npm run db:test",
+      "exit_code": 0
+    },
+    {
+      "issue_id": "DFARM-AUDIT-002",
+      "title": "Quarantined Maintenance Script 031 from Migration Pipeline",
+      "files_modified": [
+        "packages/database/src/migrations/031_remove_dairy_admin_7507495615.sql (DELETED/MOVED)",
+        "scripts/maintenance/031_remove_dairy_admin_7507495615.sql (CREATED)"
+      ],
+      "changes": "Moved hardcoded phone-number deletion migration out of automated schema migration directory into scripts/maintenance.",
+      "test_suite": "npm run db:test & npm run build",
+      "result": "PASS (Clean migration scan without DML side effects)",
+      "command": "npm run db:test",
+      "exit_code": 0
+    },
+    {
+      "issue_id": "DFARM-AUDIT-003",
+      "title": "Super Admin Test Double Network Leaks & State Contamination",
+      "files_modified": [
+        "apps/dfarm-super-admin/src/test/activationFlow.test.ts"
+      ],
+      "changes": "Mocked global fetch with rejection spy to prevent port 4000 leakage; purged mock state with mockBackend.purgeAdminAndRelatedRecords in beforeEach.",
+      "test_suite": "npm run test --workspace=apps/dfarm-super-admin",
+      "result": "PASS (7 test files, 34/34 tests passed)",
+      "command": "npm run test --workspace=apps/dfarm-super-admin",
+      "exit_code": 0
+    },
+    {
+      "issue_id": "DFARM-AUDIT-004",
+      "title": "Biometric Face Distance Cosine Threshold Verification",
+      "files_modified": [
+        "services/backend/src/infrastructure/biometrics/FaceModelService.ts"
+      ],
+      "changes": "Preserved canonical 0.720 threshold. Documented requirement for field dataset calibration before tuning.",
+      "status": "PENDING_FIELD_CALIBRATION_DATASET",
+      "result": "STABLE_PRESERVED"
+    },
+    {
+      "issue_id": "DFARM-AUDIT-005",
+      "title": "HardwareContext Default Measurement Leakage",
+      "files_modified": [
+        "apps/dfarm-collection-app/src/context/HardwareContext.tsx"
+      ],
+      "changes": "Zeroed out initial disconnected state (fat: 0, snf: 0, weightLiters: 0, analyzerConnected: false, scaleConnected: false, readingsValid: false, validationErrors: ['Scale not connected', 'Milk analyzer not connected']).",
+      "test_suite": "npm run test --workspace=apps/dfarm-collection-app",
+      "result": "PASS (8 test files, 40/40 tests passed)",
+      "command": "npm run test --workspace=apps/dfarm-collection-app",
+      "exit_code": 0
+    },
+    {
+      "issue_id": "DFARM-AUDIT-006",
+      "title": "Duplicate Route Mounting in app.ts & Missing Customer Ledger Endpoint",
+      "files_modified": [
+        "services/backend/src/app.ts",
+        "services/backend/src/presentation/routes/index.ts",
+        "services/backend/src/presentation/routes/ledger.routes.ts"
+      ],
+      "changes": "Removed duplicate domain router mounts in app.ts, consolidating them under apiRouter. Added GET /accounts/:customerId endpoint with tenant authentication.",
+      "test_suite": "node --test services/backend/tests/clean-architecture.test.js & roadmap-phase-09-financial-calculation-settlement.test.js",
+      "result": "PASS (9/9 clean-arch, 38/38 phase 09 tests)",
+      "command": "node --test services/backend/tests/clean-architecture.test.js",
+      "exit_code": 0
+    },
+    {
+      "issue_id": "DFARM-AUDIT-007",
+      "title": "Triplicate Redundant Tenant Headers in Frontend API Clients",
+      "files_modified": [
+        "apps/dfarm-dairy-admin/src/api/client.ts",
+        "apps/dfarm-collection-app/src/api/client.ts"
+      ],
+      "changes": "Removed legacy headers['X-Dairy-Tenant-ID'] and headers['x-dairy-id'], standardizing exclusively on headers['X-Dairy-Id'].",
+      "test_suite": "npm run test --workspace=apps/dfarm-dairy-admin & npm run test --workspace=apps/dfarm-collection-app",
+      "result": "PASS (54/54 total frontend tests across both apps)",
+      "command": "npm run test --workspace=apps/dfarm-dairy-admin",
+      "exit_code": 0
+    },
+    {
+      "issue_id": "DFARM-AUDIT-008",
+      "title": "Unbounded Query Hooks in Customer Mobile App",
+      "files_modified": [
+        "apps/dfarm-customer-app/src/features/collection/useCollection.ts",
+        "apps/dfarm-customer-app/src/features/ledger/useLedger.ts"
+      ],
+      "changes": "Added default pagination parameters { page: 1, pageSize: 30 } to useCollectionHistory and useLedgerHistory.",
+      "test_suite": "npm run test --workspace=apps/dfarm-customer-app",
+      "result": "PASS (5 test files, 20/20 tests passed)",
+      "command": "npm run test --workspace=apps/dfarm-customer-app",
+      "exit_code": 0
+    },
+    {
+      "issue_id": "DFARM-AUDIT-009",
+      "title": "Offline Closed-Session Subledger Credit vs Billing Quarantine",
+      "files_modified": [
+        "packages/database/src/migrations/tenant/034_tenant_reconciliation_status_hardening.sql",
+        "services/backend/src/infrastructure/repositories/PostgresLedgerRepository.ts",
+        "services/backend/src/domain/services/billing.service.ts"
+      ],
+      "changes": "Enforced RECONCILIATION_REQUIRED isolation in billing settlement query. Fixed PostgresLedgerRepository live DB query priority.",
+      "test_suite": "node --test services/backend/tests/roadmap-phase-09-financial-calculation-settlement.test.js",
+      "result": "PASS (38/38 financial settlement tests passed)",
+      "command": "node --test services/backend/tests/roadmap-phase-09-financial-calculation-settlement.test.js",
+      "exit_code": 0
+    },
+    {
+      "issue_id": "DFARM-AUDIT-010",
+      "title": "Frontend Mock Servers Relocated Out of Production Tree",
+      "files_modified": [
+        "apps/dfarm-dairy-admin/src/api/mock-server.ts -> apps/dfarm-dairy-admin/src/test/mocks/mock-server.ts",
+        "apps/dfarm-collection-app/src/api/mock-backend.ts -> apps/dfarm-collection-app/src/test/mocks/mock-backend.ts",
+        "apps/dfarm-dairy-admin/src/test/**/*.test.ts",
+        "apps/dfarm-collection-app/src/test/**/*.test.tsx"
+      ],
+      "changes": "Relocated mock-server.ts and mock-backend.ts to test/mocks/ and updated import paths in all 8 test suites.",
+      "test_suite": "npm run test --workspace=apps/dfarm-dairy-admin & npm run test --workspace=apps/dfarm-collection-app & npm run build",
+      "result": "PASS (Clean build and 54/54 tests passed)",
+      "command": "npm run build",
+      "exit_code": 0
+    }
+  ]
+}

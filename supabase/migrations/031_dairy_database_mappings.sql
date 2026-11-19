@@ -11,9 +11,9 @@ CREATE TABLE IF NOT EXISTS dairy_database_mappings (
     resource_type VARCHAR(50) NOT NULL DEFAULT 'ISOLATED_INSTANCE', -- 'PHYSICAL_DATABASE', 'DEDICATED_SCHEMA', 'ISOLATED_INSTANCE'
     connection_uri_encrypted TEXT,
     schema_version VARCHAR(50) NOT NULL DEFAULT 'v1.0.0',
-    provisioning_status VARCHAR(50) NOT NULL DEFAULT 'ACTIVE', -- 'PENDING', 'PROVISIONING', 'MIGRATED', 'ACTIVE', 'FAILED'
+    provisioning_status VARCHAR(50) NOT NULL DEFAULT 'PENDING', -- 'PENDING', 'PROVISIONING', 'MIGRATING', 'ACTIVE', 'FAILED'
     provisioning_error TEXT,
-    provisioned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    provisioned_at TIMESTAMPTZ,
     last_verified_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

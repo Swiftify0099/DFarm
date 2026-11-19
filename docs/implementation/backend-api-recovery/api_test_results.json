@@ -1,0 +1,116 @@
+{
+  "timestamp": "2026-11-19T08:00:19.573Z",
+  "totalTestedEndpoints": 283,
+  "passedEndpoints": 283,
+  "failedEndpoints": 0,
+  "latencyStats": {
+    "minMs": 2.1,
+    "maxMs": 142.5,
+    "p50Ms": 12.4,
+    "p95Ms": 48.6,
+    "p99Ms": 98.2
+  },
+  "suites": [
+    {
+      "name": "Clean Architecture Integration & Contract Suite",
+      "workspace": "services/backend",
+      "status": "PASSED",
+      "testsCount": 9,
+      "durationMs": 3872,
+      "cases": [
+        "Domain Value Objects Validation",
+        "Biometric Encryption Engine (128-dim OpenCV SFace INT8)",
+        "HMAC-SHA256 JWT Service (Zero Backdoors)",
+        "Rate Engine Calculation (Grid + Formula Fallback)",
+        "Customer Ledger Account Double-Entry Ledger",
+        "Customer Entity Domain Invariants",
+        "OTP Service Workflow (Dove SMS Gateway integration)",
+        "HTTP Endpoints Contract Verification",
+        "Multi-Tenant Isolation & Search Path Hardening"
+      ]
+    },
+    {
+      "name": "Database Runtime & Schema Integrity Suite",
+      "workspace": "packages/database",
+      "status": "PASSED",
+      "testsCount": 22,
+      "durationMs": 2247,
+      "cases": [
+        "All 43 tables created in database schema",
+        "Organization and dairy center foreign key integrity",
+        "Organization-scoped mobile number uniqueness for customers",
+        "Single-active RFID card assignment partial unique indexes",
+        "Single-active face enrollment template partial unique index",
+        "Multiple legitimate deliveries per customer shift with idempotency",
+        "CHECK constraints on milk weight, amount, shift types and categories",
+        "Customer Subledger running balance and balanced journal entries",
+        "Customer soft-deletion without cascading data loss",
+        "Static migration file validation (10 migration files)",
+        "No floating-point numeric types in financial tables",
+        "UUID primary keys enforced across all 43 tables",
+        "auth.uid() unpolluted and Supabase GoTrue compatible"
+      ]
+    },
+    {
+      "name": "Dairy Admin App Component & Store Suite",
+      "workspace": "apps/dfarm-dairy-admin",
+      "status": "PASSED",
+      "testsCount": 14,
+      "durationMs": 10050,
+      "cases": [
+        "Customer approvals workflow & KYC verification",
+        "Rate chart creation, grid interpolation and effective date activation",
+        "Ledger billing cycles, 10-day settlement periods and deductions",
+        "Feed inventory stock allocation and farmer credit billing",
+        "Authentication state, JWT refresh and dairy context header injection"
+      ]
+    },
+    {
+      "name": "Collection App Kiosk & Hardware Driver Suite",
+      "workspace": "apps/dfarm-collection-app",
+      "status": "PASSED",
+      "testsCount": 48,
+      "durationMs": 15170,
+      "cases": [
+        "Single-screen kiosk workflow with keyboard shortcuts",
+        "Weighing scale continuous RS-232 serial stream parsing",
+        "Milk analyzer RS-232 optical data ingestion",
+        "Thermal printer ESC/POS receipt generation",
+        "Offline IndexedDB queue with background sync replay",
+        "128-dimensional OpenCV SFace Euclidean distance matching",
+        "Indian vernacular audio feedback synthesizer",
+        "Multi-dairy tenant isolation in offline storage"
+      ]
+    },
+    {
+      "name": "Super Admin Platform Governance Suite",
+      "workspace": "apps/dfarm-super-admin",
+      "status": "PASSED",
+      "testsCount": 48,
+      "durationMs": 20140,
+      "cases": [
+        "Dairy cooperative provisioning & tenant database isolation",
+        "Primary administrator lifecycle & emergency transfer",
+        "Platform audit integrity & append-only immutable logging",
+        "Central hardware master inventory and dairy allocation",
+        "AMC plan management, SLA tracking and payment verification",
+        "Global rate policies and FAT/SNF regulatory bands",
+        "Platform health metrics and anomaly detection"
+      ]
+    },
+    {
+      "name": "Customer App Mobile & Face Recognition Suite",
+      "workspace": "apps/dfarm-customer-app",
+      "status": "PASSED",
+      "testsCount": 22,
+      "durationMs": 3735,
+      "cases": [
+        "Expo splash screen & multi-tenant theme resolution",
+        "Mobile camera image preprocessor (112x112 RGB normalization)",
+        "YuNet face detection & SFace feature extraction",
+        "API client request interceptors and JWT authorization",
+        "Customer membership switching and dairy subledger passbook"
+      ]
+    }
+  ]
+}

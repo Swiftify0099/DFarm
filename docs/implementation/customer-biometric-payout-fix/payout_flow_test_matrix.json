@@ -1,0 +1,75 @@
+{
+  "matrixTitle": "Dairy Admin Financial Payout & Settlement Test Matrix",
+  "testCases": [
+    {
+      "id": "PAY-TC-01",
+      "name": "Billing Cycle Generation & Period Finalization",
+      "expectedStatus": 201,
+      "result": "PASS",
+      "notes": "Creates immutable billing period record with finalized net payable calculation"
+    },
+    {
+      "id": "PAY-TC-02",
+      "name": "Payout Batch Assembly (DRAFT)",
+      "expectedStatus": 201,
+      "result": "PASS",
+      "notes": "Resolves eligible farmers with current_balance > 0 and valid bank details"
+    },
+    {
+      "id": "PAY-TC-03",
+      "name": "Duplicate Payout Batch Rejection",
+      "expectedStatus": 409,
+      "result": "PASS",
+      "notes": "Rejects duplicate batch creation for already reserved billing cycle"
+    },
+    {
+      "id": "PAY-TC-04",
+      "name": "Maker-Checker Self-Approval Block",
+      "expectedStatus": 403,
+      "result": "PASS",
+      "notes": "Creator cannot approve own batch (MAKER_CHECKER_SELF_APPROVAL_PROHIBITED)"
+    },
+    {
+      "id": "PAY-TC-05",
+      "name": "Independent Checker Approval",
+      "expectedStatus": 200,
+      "result": "PASS",
+      "notes": "Transitions batch and items to APPROVED"
+    },
+    {
+      "id": "PAY-TC-06",
+      "name": "Standard NEFT Bank File Export",
+      "expectedStatus": 200,
+      "result": "PASS",
+      "notes": "Streams valid CSV with Cache-Control: no-store and SHA-256 header; ledger remains untouched"
+    },
+    {
+      "id": "PAY-TC-07",
+      "name": "Settlement Reconciliation & Double-Entry Debit",
+      "expectedStatus": 200,
+      "result": "PASS",
+      "notes": "Debits customer ledger to 0.00; generates balanced debit/credit lines"
+    },
+    {
+      "id": "PAY-TC-08",
+      "name": "Reconciliation Idempotency",
+      "expectedStatus": 200,
+      "result": "PASS",
+      "notes": "Replaying reconciliation does not produce duplicate ledger debits"
+    },
+    {
+      "id": "PAY-TC-09",
+      "name": "Farmer Digital Passbook Reflection",
+      "expectedStatus": 200,
+      "result": "PASS",
+      "notes": "Passbook immediately reflects settled payout as DEBIT with UTR number"
+    },
+    {
+      "id": "PAY-TC-10",
+      "name": "Cross-Dairy Payout Access Denial",
+      "expectedStatus": 403,
+      "result": "PASS",
+      "notes": "Tenant B blocked from accessing Tenant A batch (CROSS_ORG_ACCESS_DENIED)"
+    }
+  ]
+}

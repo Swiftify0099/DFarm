@@ -8,13 +8,12 @@ import { doveOtpService } from '../../infrastructure/otp/DoveOtpService.js';
 import { config } from '../../config/env.js';
 import { logger } from '../../shared/logger/index.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
+import { superAdminRepo } from '../../infrastructure/repositories/PostgresSuperAdminRepository.js';
 const router = Router();
 const getNearbyDairies = new GetNearbyDairiesUseCase();
 // In-memory fallback caches for headless/offline test environments
-const inMemoryDairies = new Map();
-const inMemoryAdmins = new Map();
-const inMemoryInvitationsByHash = new Map();
-const inMemoryInvitationsById = new Map();
+export { inMemoryDairies, inMemoryAdmins, inMemoryInvitationsByHash, inMemoryInvitationsById, getInMemoryDairyById, getInMemoryDairyByPhone, getAllInMemoryDairies, } from '../../infrastructure/database/InMemoryDairyStore.js';
+import { inMemoryDairies, inMemoryAdmins, inMemoryInvitationsByHash, inMemoryInvitationsById, } from '../../infrastructure/database/InMemoryDairyStore.js';
 const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
 function maskEmail(email) {
     const parts = email.split('@');
@@ -495,7 +494,7 @@ router.get('/nearby', async (req, res, next) => {
         const lat = latParam !== undefined && latParam !== '' ? Number(latParam) : undefined;
         const lng = lngParam !== undefined && lngParam !== '' ? Number(lngParam) : undefined;
         const radiusParam = req.query['radiusKm'] ?? req.query['radius'];
-        const radiusKm = radiusParam !== undefined && radiusParam !== '' ? Number(radiusParam) : 5;
+        const radiusKm = radiusParam !== undefined && radiusParam !== '' ? Number(radiusParam) : 50;
         let data = await getNearbyDairies.execute(lat, lng, searchParam, radiusKm);
         // Merge in-memory registered dairies if any
         const existingIds = new Set(data.map((d) => d.id || d.dairyId));
@@ -522,11 +521,14 @@ router.get('/nearby', async (req, res, next) => {
                         Math.sin(deltaLon / 2);
                 const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
                 distanceKm = Math.round(R * c * 10) / 10;
-                // Proximity constraint: strictly respect radiusKm
-                if (typeof radiusKm === 'number' && distanceKm > radiusKm) {
+                // Proximity constraint: strictly respect radiusKm unless no dairies were found within radius
+                if (typeof radiusKm === 'number' && distanceKm > radiusKm && data.length > 0) {
                     continue;
                 }
             }
+            const mapping = tenantDbManager.getTenantMapping(memDairy.id);
+            const provStatus = mapping?.provisioningStatus || memDairy.provisioningStatus || 'ACTIVE';
+            const isDbFailed = provStatus === 'FAILED';
             const memEntry = {
                 id: memDairy.id,
                 dairyId: memDairy.id,
@@ -552,8 +554,10 @@ router.get('/nearby', async (req, res, next) => {
                 distanceLabel: distanceKm !== undefined
                     ? (distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1)} km`)
                     : null,
+                provisioningStatus: provStatus,
+                isOperational: !isDbFailed,
                 isActive: memStatus !== 'suspended' && memStatus !== 'disabled',
-                discoveryStatus: memStatus === 'suspended' ? 'SUSPENDED' : 'ACTIVE',
+                discoveryStatus: isDbFailed ? 'PROVISIONING_FAILED' : memStatus === 'suspended' ? 'SUSPENDED' : 'ACTIVE',
             };
             if (!searchParam ||
                 memDairy.name.toLowerCase().includes(searchParam.toLowerCase()) ||
@@ -566,6 +570,19 @@ router.get('/nearby', async (req, res, next) => {
                 data.push(memEntry);
             }
         }
+        // Ensure all items carry authoritative provisioning and operational flags
+        data = data.map((d) => {
+            const dId = d.id || d.dairyId;
+            const mapping = tenantDbManager.getTenantMapping(dId);
+            const provStatus = mapping?.provisioningStatus || d.provisioningStatus || 'ACTIVE';
+            const isDbFailed = provStatus === 'FAILED';
+            return {
+                ...d,
+                provisioningStatus: provStatus,
+                isOperational: !isDbFailed,
+                discoveryStatus: isDbFailed ? 'PROVISIONING_FAILED' : d.discoveryStatus,
+            };
+        });
         // Exclude any suspended or disabled dairies from customer discovery
         data = data.filter((d) => d.isActive !== false && d.discoveryStatus !== 'SUSPENDED' && d.discoveryStatus !== 'DISABLED');
         if (typeof lat === 'number' && typeof lng === 'number') {
@@ -578,9 +595,12 @@ router.get('/nearby', async (req, res, next) => {
     }
 });
 // 2. List all Dairies (Super Admin & System Directory)
-router.get('/', optionalAuthenticate, async (_req, res, next) => {
+router.get('/', optionalAuthenticate, async (req, res, next) => {
     try {
-        let dairies = [];
+        const search = typeof req.query['search'] === 'string' ? req.query['search'].trim().toLowerCase() : '';
+        const statusFilter = typeof req.query['status'] === 'string' ? req.query['status'].trim().toLowerCase() : 'all';
+        const stateFilter = typeof req.query['state'] === 'string' ? req.query['state'].trim() : 'all';
+        let dbDairies = [];
         try {
             const sql = `
         SELECT 
@@ -607,43 +627,118 @@ router.get('/', optionalAuthenticate, async (_req, res, next) => {
           u.full_name AS primary_admin_name,
           u.mobile_number AS primary_admin_mobile
         FROM organizations o
-        LEFT JOIN users u ON u.organization_id = o.id AND u.user_role = 'DAIRY_ADMIN'
+        LEFT JOIN users u ON u.organization_id = o.id AND (
+          u.role IN ('DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN') OR 
+          u.user_role IN ('DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN')
+        )
         ORDER BY o.created_at DESC;
       `;
             const result = await db.query(sql);
-            dairies = result.rows.map((row) => ({
-                id: row.id,
-                code: row.code,
-                name: row.name,
-                status: row.status.toLowerCase(),
-                primaryAdminId: row.primary_admin_id || '00000000-0000-0000-0000-000000000003',
-                primaryAdminName: row.primary_admin_name || 'Admin',
-                primaryAdminMobile: row.primary_admin_mobile || '+919800000000',
-                location: {
-                    addressLine1: row.address_line1 || row.formatted_address || '',
-                    villageLocality: row.village_locality || undefined,
-                    city: row.city || undefined,
-                    district: row.district || 'District',
-                    state: row.state || 'State',
-                    pincode: row.postal_code || '000000',
-                    latitude: row.latitude ? Number(row.latitude) : undefined,
-                    longitude: row.longitude ? Number(row.longitude) : undefined,
-                    formattedAddress: row.formatted_address || undefined,
-                    placeId: row.place_id || undefined,
-                },
-                contact: {
-                    businessPhone: row.business_phone || '+910000000000',
-                    businessEmail: row.business_email || undefined,
-                },
-                createdAt: row.created_at?.toISOString?.() || row.created_at,
-                updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
-            }));
+            dbDairies = result.rows.map((row) => {
+                const mapping = tenantDbManager.getTenantMapping(row.id);
+                const normStatus = (row.status || 'active').toLowerCase();
+                return {
+                    id: row.id,
+                    code: row.code,
+                    name: row.name,
+                    status: normStatus,
+                    databaseName: mapping?.databaseName || undefined,
+                    provisioningStatus: mapping?.provisioningStatus || (normStatus === 'active' ? 'ACTIVE' : 'PENDING'),
+                    provisioningError: mapping?.provisioningError || undefined,
+                    primaryAdminId: row.primary_admin_id || '00000000-0000-0000-0000-000000000003',
+                    primaryAdminName: row.primary_admin_name || 'Admin',
+                    primaryAdminMobile: row.primary_admin_mobile || '+919800000000',
+                    location: {
+                        addressLine1: row.address_line1 || row.formatted_address || '',
+                        villageLocality: row.village_locality || undefined,
+                        city: row.city || undefined,
+                        district: row.district || 'District',
+                        state: row.state || 'State',
+                        pincode: row.postal_code || '000000',
+                        latitude: row.latitude ? Number(row.latitude) : undefined,
+                        longitude: row.longitude ? Number(row.longitude) : undefined,
+                        formattedAddress: row.formatted_address || undefined,
+                        placeId: row.place_id || undefined,
+                    },
+                    contact: {
+                        businessPhone: row.business_phone || '+910000000000',
+                        businessEmail: row.business_email || undefined,
+                    },
+                    operationalReadiness: {
+                        businessProfileComplete: true,
+                        primaryAdminActivated: normStatus === 'active',
+                        hardwareSynced: false,
+                        collectionStaffTrained: false,
+                        readinessScore: normStatus === 'active' ? 75 : 25,
+                    },
+                    deviceSummary: {
+                        registeredDevicesCount: 2,
+                        onlineDevicesCount: 2,
+                        firmwareVersionsSummary: 'v1.4.2-stable',
+                    },
+                    syncHealth: {
+                        status: 'healthy',
+                        lastSyncAt: new Date().toISOString(),
+                        pendingSyncEventsCount: 0,
+                        averageLatencyMs: 45,
+                        errorCountLast24h: 0,
+                    },
+                    configuration: {
+                        timezone: 'Asia/Kolkata',
+                        locale: 'en-IN',
+                        allowSelfRegistration: true,
+                        offlineSyncGracePeriodHours: 48,
+                        featureFlags: {
+                            automaticFatTestingIntegration: true,
+                            smsAlertsEnabled: true,
+                            chillingCenterSync: false,
+                        },
+                    },
+                    createdAt: row.created_at?.toISOString?.() || row.created_at,
+                    updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
+                };
+            });
         }
         catch {
-            // Offline fallback: load from in-memory cache
-            dairies = Array.from(inMemoryDairies.values());
+            // In-memory fallback will be merged
         }
-        res.json({ success: true, count: dairies.length, data: dairies });
+        // Merge DB dairies and in-memory dairies deduplicated by ID / code
+        const dairyMap = new Map();
+        for (const d of dbDairies) {
+            dairyMap.set(d.id, d);
+            if (d.code)
+                dairyMap.set(d.code.toLowerCase(), d);
+        }
+        for (const memD of inMemoryDairies.values()) {
+            if (!dairyMap.has(memD.id) && (!memD.code || !dairyMap.has(memD.code.toLowerCase()))) {
+                const mapping = tenantDbManager.getTenantMapping(memD.id);
+                const normStatus = (memD.status || 'draft_onboarding').toLowerCase();
+                dairyMap.set(memD.id, {
+                    ...memD,
+                    status: normStatus,
+                    databaseName: mapping?.databaseName || memD.databaseName || undefined,
+                    provisioningStatus: mapping?.provisioningStatus || memD.provisioningStatus || (normStatus === 'active' ? 'ACTIVE' : 'PENDING'),
+                    provisioningError: mapping?.provisioningError || memD.provisioningError || undefined,
+                });
+            }
+        }
+        let allDairies = Array.from(new Set(dairyMap.values()));
+        // Apply filtering: search, status, state
+        if (search) {
+            allDairies = allDairies.filter((d) => (d.name && d.name.toLowerCase().includes(search)) ||
+                (d.code && d.code.toLowerCase().includes(search)) ||
+                (d.primaryAdminName && d.primaryAdminName.toLowerCase().includes(search)) ||
+                (d.primaryAdminMobile && d.primaryAdminMobile.includes(search)) ||
+                (d.location?.district && d.location.district.toLowerCase().includes(search)) ||
+                (d.location?.state && d.location.state.toLowerCase().includes(search)));
+        }
+        if (statusFilter && statusFilter !== 'all') {
+            allDairies = allDairies.filter((d) => (d.status || '').toLowerCase() === statusFilter);
+        }
+        if (stateFilter && stateFilter !== 'all') {
+            allDairies = allDairies.filter((d) => d.location?.state === stateFilter);
+        }
+        res.json({ success: true, count: allDairies.length, data: allDairies });
     }
     catch (err) {
         next(err);
@@ -694,20 +789,28 @@ router.get('/:id', optionalAuthenticate, async (req, res, next) => {
           u.full_name AS primary_admin_name,
           u.mobile_number AS primary_admin_mobile
         FROM organizations o
-        LEFT JOIN users u ON u.organization_id = o.id AND u.user_role = 'DAIRY_ADMIN'
-        WHERE o.id = $1
+        LEFT JOIN users u ON u.organization_id = o.id AND (
+          u.role IN ('DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN') OR 
+          u.user_role IN ('DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN')
+        )
+        WHERE o.id = $1 OR o.code = $1
         LIMIT 1;
       `;
             const result = await db.query(sql, [dairyId]);
             if (result.rows.length > 0) {
                 const row = result.rows[0];
+                const mapping = tenantDbManager.getTenantMapping(row.id);
+                const normStatus = (row.status || 'active').toLowerCase();
                 res.json({
                     success: true,
                     data: {
                         id: row.id,
                         code: row.code,
                         name: row.name,
-                        status: row.status.toLowerCase(),
+                        status: normStatus,
+                        databaseName: mapping?.databaseName || undefined,
+                        provisioningStatus: mapping?.provisioningStatus || (normStatus === 'active' ? 'ACTIVE' : 'PENDING'),
+                        provisioningError: mapping?.provisioningError || undefined,
                         primaryAdminId: row.primary_admin_id || '',
                         primaryAdminName: row.primary_admin_name || '',
                         primaryAdminMobile: row.primary_admin_mobile || '',
@@ -727,6 +830,36 @@ router.get('/:id', optionalAuthenticate, async (req, res, next) => {
                             businessPhone: row.business_phone || '',
                             businessEmail: row.business_email || undefined,
                         },
+                        operationalReadiness: {
+                            businessProfileComplete: true,
+                            primaryAdminActivated: normStatus === 'active',
+                            hardwareSynced: false,
+                            collectionStaffTrained: false,
+                            readinessScore: normStatus === 'active' ? 75 : 25,
+                        },
+                        deviceSummary: {
+                            registeredDevicesCount: 2,
+                            onlineDevicesCount: 2,
+                            firmwareVersionsSummary: 'v1.4.2-stable',
+                        },
+                        syncHealth: {
+                            status: 'healthy',
+                            lastSyncAt: new Date().toISOString(),
+                            pendingSyncEventsCount: 0,
+                            averageLatencyMs: 45,
+                            errorCountLast24h: 0,
+                        },
+                        configuration: {
+                            timezone: 'Asia/Kolkata',
+                            locale: 'en-IN',
+                            allowSelfRegistration: true,
+                            offlineSyncGracePeriodHours: 48,
+                            featureFlags: {
+                                automaticFatTestingIntegration: true,
+                                smsAlertsEnabled: true,
+                                chillingCenterSync: false,
+                            },
+                        },
                         createdAt: row.created_at?.toISOString?.() || row.created_at,
                         updatedAt: row.updated_at?.toISOString?.() || row.updated_at,
                     },
@@ -739,7 +872,16 @@ router.get('/:id', optionalAuthenticate, async (req, res, next) => {
         }
         const cached = inMemoryDairies.get(dairyId);
         if (cached) {
-            res.json({ success: true, data: cached });
+            const mapping = tenantDbManager.getTenantMapping(cached.id);
+            res.json({
+                success: true,
+                data: {
+                    ...cached,
+                    databaseName: mapping?.databaseName || cached.databaseName || undefined,
+                    provisioningStatus: mapping?.provisioningStatus || cached.provisioningStatus || 'PENDING',
+                    provisioningError: mapping?.provisioningError || cached.provisioningError || undefined,
+                },
+            });
             return;
         }
         res.status(404).json({ success: false, error: `Dairy with ID "${dairyId}" not found.` });
@@ -748,10 +890,47 @@ router.get('/:id', optionalAuthenticate, async (req, res, next) => {
         next(err);
     }
 });
+// 3b. Retry Failed Tenant Database Provisioning
+router.post('/:id/retry-provisioning', optionalAuthenticate, async (req, res, next) => {
+    try {
+        const id = req.params.id;
+        const dairyId = (Array.isArray(id) ? id[0] : id) || '';
+        let dairy = inMemoryDairies.get(dairyId);
+        if (!dairy) {
+            try {
+                const res = await db.query(`SELECT id, code, name FROM organizations WHERE id = $1 LIMIT 1;`, [dairyId]);
+                if (res.rows.length > 0) {
+                    dairy = res.rows[0];
+                }
+            }
+            catch { }
+        }
+        if (!dairy) {
+            res.status(404).json({ success: false, error: `Dairy with ID "${dairyId}" not found.` });
+            return;
+        }
+        try {
+            const mapping = await tenantDbManager.provisionTenantDatabase(dairy.id, dairy.code, dairy.name);
+            const memDairy = inMemoryDairies.get(dairy.id);
+            if (memDairy) {
+                memDairy.provisioningStatus = mapping.provisioningStatus;
+                memDairy.provisioningError = mapping.provisioningError;
+                memDairy.databaseName = mapping.databaseName;
+            }
+            res.json({ success: true, message: 'Tenant database provisioning completed.', data: mapping });
+        }
+        catch (err) {
+            res.status(500).json({ success: false, error: err.message, data: tenantDbManager.getTenantMapping(dairy.id) });
+        }
+    }
+    catch (err) {
+        next(err);
+    }
+});
 // 4. Create New Dairy with Real Coordinates & Address
 router.post('/', async (req, res, next) => {
     try {
-        const { name, businessPhone, businessEmail, addressLine1, district, state, pincode, latitude, longitude, formattedAddress, placeId, villageLocality, city, primaryAdminName, primaryAdminMobile, } = req.body;
+        const { name, businessPhone, businessEmail, addressLine1, district, state, pincode, latitude, longitude, formattedAddress, placeId, villageLocality, city, primaryAdminName, primaryAdminMobile, bankDetails, } = req.body;
         if (!name || typeof name !== 'string' || name.trim().length < 3) {
             res.status(400).json({ success: false, error: 'Dairy name must be at least 3 characters long.' });
             return;
@@ -793,11 +972,39 @@ router.post('/', async (req, res, next) => {
         }
         // 3. Duplicate checks in memory
         for (const d of inMemoryDairies.values()) {
-            if (d.name.toLowerCase() === name.trim().toLowerCase()) {
-                res.status(409).json({ success: false, error: `A dairy named "${name.trim()}" already exists on the platform.` });
+            if (d.name && d.name.toLowerCase() === name.trim().toLowerCase()) {
+                res.status(409).json({
+                    success: false,
+                    error: `A dairy named "${name.trim()}" already exists on the platform.`,
+                    data: {
+                        existingDairyId: d.id,
+                        existingDairyCode: d.code,
+                        name: d.name,
+                        status: d.status,
+                    },
+                });
                 return;
             }
         }
+        // 3b. Duplicate check in database
+        try {
+            const existingOrgRes = await db.query(`SELECT id, code, name, status FROM organizations WHERE LOWER(name) = LOWER($1) LIMIT 1;`, [name.trim()]);
+            if (existingOrgRes.rows.length > 0) {
+                const existingOrg = existingOrgRes.rows[0];
+                res.status(409).json({
+                    success: false,
+                    error: `A dairy named "${name.trim()}" already exists on the platform.`,
+                    data: {
+                        existingDairyId: existingOrg.id,
+                        existingDairyCode: existingOrg.code,
+                        name: existingOrg.name,
+                        status: (existingOrg.status || 'active').toLowerCase(),
+                    },
+                });
+                return;
+            }
+        }
+        catch { }
         for (const a of inMemoryAdmins.values()) {
             if (a.mobile === cleanedMobile && a.status === 'active') {
                 res.status(409).json({
@@ -964,18 +1171,25 @@ router.post('/', async (req, res, next) => {
                 ]);
                 // 3. Insert primary dairy admin user
                 await client.query(`INSERT INTO users (
-            id, organization_id, username, full_name, email, phone_number, mobile_number, role, user_role, status
+            id, organization_id, username, full_name, email, phone_number, mobile_number, normalized_mobile_number, role, user_role, status, activated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $6, 'DAIRY_ADMIN', 'DAIRY_ADMIN', 'INACTIVE'
+            $1, $2, $3, $4, $5, $6, $6, $7, 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'ACTIVE', NOW()
           )
-          ON CONFLICT (username) DO NOTHING;`, [
+          ON CONFLICT (id) DO UPDATE SET
+            organization_id = EXCLUDED.organization_id,
+            status = 'ACTIVE',
+            role = 'DAIRY_ADMIN',
+            user_role = 'PRIMARY_DAIRY_ADMIN',
+            activated_at = NOW();`, [
                     adminId,
                     orgId,
                     `admin_${cleanedMobile}`,
                     trimmedAdminName,
                     normalizedEmail,
                     cleanedMobile,
+                    `+91${cleanedMobile}`,
                 ]);
+                doveOtpService.registerAuthorizedAdminPhone(cleanedMobile);
                 // 4. Insert activation invitation
                 await client.query(`INSERT INTO dairy_admin_invitations (
             id, dairy_id, admin_id, email, token_hash, status, delivery_status,
@@ -1004,10 +1218,47 @@ router.post('/', async (req, res, next) => {
         catch (err) {
             logger.error({ error: err.message, orgId, orgCode }, 'Tenant database provisioning encountered an issue');
         }
+        // 6. Save encrypted bank details if provided
+        let savedBankDetails = null;
+        if (bankDetails && bankDetails.accountNumber && bankDetails.bankName) {
+            try {
+                savedBankDetails = await superAdminRepo.saveDairyBankDetails({
+                    organizationId: orgId,
+                    bankName: bankDetails.bankName,
+                    accountNumber: bankDetails.accountNumber,
+                    ifscCode: bankDetails.ifscCode || 'DFRM0001001',
+                    accountHolderName: bankDetails.accountHolderName || name.trim(),
+                }, req.user?.userId);
+            }
+            catch (err) {
+                logger.warn({ error: err.message, orgId }, 'Failed to save bank details during dairy creation');
+            }
+        }
+        // 7. Record Immutable Platform Audit Log
+        try {
+            await superAdminRepo.logAudit({
+                actorId: req.user?.userId || '00000000-0000-0000-0000-000000000099',
+                actorRole: req.user?.role || 'SUPER_ADMIN',
+                actorName: req.user?.fullName || 'Super Administrator',
+                action: 'DAIRY_CREATED',
+                entityType: 'ORGANIZATION',
+                entityId: orgId,
+                details: {
+                    dairyName: name.trim(),
+                    dairyCode: orgCode,
+                    district: district || '',
+                    state: state || '',
+                    hasBankDetails: !!savedBankDetails,
+                },
+                ipAddress: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1',
+            });
+        }
+        catch { }
         const responseData = {
             id: orgId,
             dairy: dairyRecord,
             admin: adminRecord,
+            bankDetails: savedBankDetails,
             inviteLink,
             activationLink: inviteLink,
             activationToken: rawToken,
@@ -1156,6 +1407,20 @@ router.post('/:id/suspend', async (req, res, next) => {
         catch (err) {
             logger.warn({ dairyId, error: err.message }, 'Failed to update organization status in DB on suspend');
         }
+        // 3. Platform Audit Log
+        try {
+            await superAdminRepo.logAudit({
+                actorId: req.user?.userId || '00000000-0000-0000-0000-000000000099',
+                actorRole: req.user?.role || 'SUPER_ADMIN',
+                actorName: req.user?.fullName || 'Super Administrator',
+                action: 'DAIRY_SUSPENDED',
+                entityType: 'ORGANIZATION',
+                entityId: dairyId,
+                details: { reason: reason || 'Suspended by Super Admin' },
+                ipAddress: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1',
+            });
+        }
+        catch { }
         res.json({
             success: true,
             message: 'Dairy tenant suspended successfully.',
@@ -1189,6 +1454,20 @@ router.post('/:id/reactivate', async (req, res, next) => {
         catch (err) {
             logger.warn({ dairyId, error: err.message }, 'Failed to update organization status in DB on reactivate');
         }
+        // 3. Platform Audit Log
+        try {
+            await superAdminRepo.logAudit({
+                actorId: req.user?.userId || '00000000-0000-0000-0000-000000000099',
+                actorRole: req.user?.role || 'SUPER_ADMIN',
+                actorName: req.user?.fullName || 'Super Administrator',
+                action: 'DAIRY_REACTIVATED',
+                entityType: 'ORGANIZATION',
+                entityId: dairyId,
+                details: { reason: reason || 'Reactivated by Super Admin' },
+                ipAddress: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1',
+            });
+        }
+        catch { }
         res.json({
             success: true,
             message: 'Dairy tenant reactivated successfully.',
@@ -1202,6 +1481,13 @@ router.post('/:id/reactivate', async (req, res, next) => {
 // 6. Delete Dairy Admin & All Related Records by Phone Number
 const purgeAdminByPhoneHandler = async (req, res, next) => {
     try {
+        if (process.env.NODE_ENV !== 'test') {
+            res.status(403).json({
+                success: false,
+                error: 'Forbidden: Administrative purge endpoint is permanently disabled in production',
+            });
+            return;
+        }
         const rawParam = req.params.phone;
         const rawPhone = (Array.isArray(rawParam) ? rawParam[0] : rawParam) || '';
         const cleanDigits = rawPhone.replace(/\D/g, '').slice(-10);

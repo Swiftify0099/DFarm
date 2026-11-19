@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { pool } from '../../db.js';
 import { BillingService } from './billing.service.js';
 import { BillingScheduler } from './billing.scheduler.js';
 import { authenticate } from '../../middleware/authenticate.js';
@@ -64,6 +65,25 @@ billingRouter.post('/periods/:periodId/generate', requireRole([UserRole.SUPER_AD
         const validatedBody = GenerateBillsSchema.parse(req.body || {});
         const result = await BillingService.generateBills(periodId, validatedBody, req.auth);
         ApiResponse.success(res, result, 200);
+    }
+    catch (err) {
+        next(err);
+    }
+});
+/**
+ * 4b. POST /api/v1/billing/periods/:periodId/finalize
+ * Finalize all bills in period and lock period.
+ */
+billingRouter.post('/periods/:periodId/finalize', requireRole([UserRole.SUPER_ADMIN, UserRole.DAIRY_OWNER]), async (req, res, next) => {
+    try {
+        const periodId = req.params['periodId'];
+        const billsRes = await pool.query(`SELECT id FROM monthly_bills WHERE billing_period_id = $1 AND bill_status <> 'FINALIZED';`, [periodId]);
+        for (const row of billsRes.rows) {
+            await BillingService.finalizeBill(row.id, req.body?.notes, req.auth);
+        }
+        await BillingService.finalizePeriod(periodId, req.auth.userId);
+        const updatedPeriod = await BillingService.getPeriod(periodId, req.auth);
+        ApiResponse.success(res, updatedPeriod);
     }
     catch (err) {
         next(err);

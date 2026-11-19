@@ -1,11 +1,26 @@
 import { Router } from 'express';
 import { db } from '../../infrastructure/database/PostgresPool.js';
+import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
+import { PostgresRateChartRepository } from '../../infrastructure/repositories/PostgresRateChartRepository.js';
 import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 const router = Router();
+const rateChartRepo = new PostgresRateChartRepository();
+const getTenantDb = async (organizationId) => {
+    if (organizationId) {
+        try {
+            return await tenantDbManager.getTenantDb(organizationId);
+        }
+        catch {
+            return db;
+        }
+    }
+    return db;
+};
 // 1. List Rate Charts for Dairy
 router.get('/', optionalAuthenticate, async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;
@@ -29,20 +44,33 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
       WHERE rc.organization_id = $1
       ORDER BY rc.milk_category ASC, rcv.version_number DESC;
     `;
-        const result = await db.query(query, [organizationId]);
+        const client = await getTenantDb(organizationId);
+        let result;
+        try {
+            result = await client.query(query, [organizationId]);
+        }
+        catch {
+            result = await db.query(query, [organizationId]);
+        }
         const charts = result.rows.map((row) => ({
-            id: row.version_id || row.chart_id,
+            id: row.chart_id,
             chartId: row.chart_id,
+            versionId: row.version_id || row.chart_id,
+            title: row.name,
             name: row.name,
             milkCategory: row.milk_category,
             pricingType: row.pricing_type,
+            version: row.version_number || 1,
             versionNumber: row.version_number || 1,
             baseRatePerLiter: Number(row.base_rate || (row.milk_category === 'COW' ? 38.0 : 62.0)),
+            baseRate: Number(row.base_rate || (row.milk_category === 'COW' ? 38.0 : 62.0)),
             baseFat: Number(row.base_fat || (row.milk_category === 'COW' ? 3.5 : 6.0)),
             baseSnf: Number(row.base_snf || (row.milk_category === 'COW' ? 8.5 : 9.0)),
             status: row.is_active ? 'ACTIVE' : 'DRAFT',
+            isActive: Boolean(row.is_active),
             effectiveFrom: row.effective_from ? new Date(row.effective_from).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
             effectiveTo: row.effective_to ? new Date(row.effective_to).toISOString().split('T')[0] : undefined,
+            changeNotes: row.version_number > 1 ? `Revision v${row.version_number}` : 'Initial baseline chart',
         }));
         res.json({ success: true, count: charts.length, data: charts });
     }
@@ -50,32 +78,65 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
         next(err);
     }
 });
-// 2. Create Draft Rate Chart Version
+// 2. Create Draft Rate Chart Version with Backend Range & Field Validation
 router.post('/draft', optionalAuthenticate, async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'] || req.body.dairyId;
-        const { title, milkCategory, baseRatePerLiter, minFat, maxFat: _maxFat, minSnf, maxSnf: _maxSnf, effectiveDate } = req.body;
+        if (req.user) {
+            authorizePermission('rate_charts:manage')(req, res, () => { });
+        }
+        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.body?.dairyId || req.body?.organizationId;
+        const { title, milkCategory, baseRatePerLiter, minFat, maxFat: _maxFat, minSnf, maxSnf: _maxSnf, effectiveDate, changeNotes } = req.body;
+        if (!organizationId) {
+            res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+            return;
+        }
+        // Backend Validation
+        if (!milkCategory || (milkCategory !== 'COW' && milkCategory !== 'BUFFALO')) {
+            res.status(400).json({ success: false, error: 'Valid milkCategory (COW or BUFFALO) is required.' });
+            return;
+        }
+        const baseRate = Number(baseRatePerLiter);
+        if (isNaN(baseRate) || baseRate <= 0) {
+            res.status(400).json({ success: false, error: 'baseRatePerLiter must be a positive number.' });
+            return;
+        }
+        const fat = Number(minFat ?? (milkCategory === 'COW' ? 3.5 : 6.0));
+        const snf = Number(minSnf ?? (milkCategory === 'COW' ? 8.5 : 9.0));
+        if (fat < 2.0 || fat > 15.0) {
+            res.status(400).json({ success: false, error: 'Fat percentage must be between 2.0% and 15.0%.' });
+            return;
+        }
+        if (snf < 5.0 || snf > 12.0) {
+            res.status(400).json({ success: false, error: 'SNF percentage must be between 5.0% and 12.0%.' });
+            return;
+        }
+        const client = await getTenantDb(organizationId);
         // Check or insert master rate chart
         let chartId;
-        const existingChart = await db.query(`SELECT id FROM rate_charts WHERE organization_id = $1 AND milk_category = $2 LIMIT 1;`, [organizationId, milkCategory]);
+        const existingChart = await client.query(`SELECT id FROM rate_charts WHERE organization_id = $1 AND milk_category = $2 LIMIT 1;`, [organizationId, milkCategory]);
         if (existingChart.rows.length > 0) {
             chartId = existingChart.rows[0].id;
         }
         else {
-            const inserted = await db.query(`INSERT INTO rate_charts (organization_id, name, milk_category, pricing_type, is_active)
+            const inserted = await client.query(`INSERT INTO rate_charts (organization_id, name, milk_category, pricing_type, is_active)
          VALUES ($1, $2, $3, 'GRID', TRUE) RETURNING id;`, [organizationId, title || `${milkCategory} Standard Chart`, milkCategory]);
             chartId = inserted.rows[0].id;
         }
-        const versionRes = await db.query(`INSERT INTO rate_chart_versions (rate_chart_id, version_number, base_rate, base_fat, base_snf, effective_from)
+        const versionRes = await client.query(`INSERT INTO rate_chart_versions (rate_chart_id, version_number, base_rate, base_fat, base_snf, effective_from)
        VALUES ($1, (SELECT COALESCE(MAX(version_number), 0) + 1 FROM rate_chart_versions WHERE rate_chart_id = $1), $2, $3, $4, $5)
-       RETURNING id, version_number;`, [chartId, baseRatePerLiter, minFat || 3.5, minSnf || 8.5, effectiveDate || new Date()]);
+       RETURNING id, version_number;`, [chartId, baseRate, fat, snf, effectiveDate || new Date()]);
+        const versionNum = versionRes.rows[0].version_number;
         res.status(201).json({
             success: true,
             message: 'Draft rate chart version created successfully',
             data: {
+                id: chartId,
                 chartId,
                 versionId: versionRes.rows[0].id,
-                versionNumber: versionRes.rows[0].version_number,
+                versionNumber: versionNum,
+                version: versionNum,
+                title: title || `${milkCategory} Standard Chart v${versionNum}`,
+                changeNotes: changeNotes || 'Draft revision created by Dairy Admin',
             },
         });
     }
@@ -83,12 +144,80 @@ router.post('/draft', optionalAuthenticate, async (req, res, next) => {
         next(err);
     }
 });
-// 3. Activate Rate Chart Version
+// 3. Activate Rate Chart Version (Preserving Historical Versions)
 router.post('/:id/activate', optionalAuthenticate, async (req, res, next) => {
     try {
+        if (req.user) {
+            authorizePermission('rate_charts:manage')(req, res, () => { });
+        }
         const { id } = req.params;
-        await db.query(`UPDATE rate_charts SET is_active = TRUE WHERE id = $1;`, [id]);
+        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query?.organizationId;
+        const client = await getTenantDb(organizationId);
+        // Look up chart category
+        const chartRes = await client.query(`SELECT organization_id, milk_category FROM rate_charts WHERE id = $1;`, [id]);
+        if (chartRes.rows.length === 0) {
+            res.status(404).json({ success: false, error: 'Rate chart not found.' });
+            return;
+        }
+        const { milk_category } = chartRes.rows[0];
+        // Deactivate previously active charts for the same category
+        if (organizationId) {
+            await client.query(`UPDATE rate_charts SET is_active = FALSE WHERE organization_id = $1 AND milk_category = $2 AND id != $3;`, [organizationId, milk_category, id]).catch(() => { });
+        }
+        await client.query(`UPDATE rate_charts SET is_active = TRUE WHERE id = $1;`, [id]);
+        await client.query(`UPDATE rate_chart_versions SET is_active = TRUE WHERE id = $1;`, [id]).catch(() => { });
         res.json({ success: true, message: `Rate chart ${id} activated successfully` });
+    }
+    catch (err) {
+        next(err);
+    }
+});
+// 4. Rate Preview Calculation Endpoint (Pure Calculation, Zero Financial Mutation)
+router.post('/preview', optionalAuthenticate, async (req, res, next) => {
+    try {
+        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.body?.organizationId;
+        const { milkCategory = 'COW', fatPercentage, fat, snfPercentage, snf, weightLiters = 10, volume = 10 } = req.body;
+        const effFat = Number(fatPercentage ?? fat ?? (milkCategory === 'COW' ? 3.8 : 6.5));
+        const effSnf = Number(snfPercentage ?? snf ?? (milkCategory === 'COW' ? 8.5 : 9.0));
+        const effVol = Number(weightLiters ?? volume ?? 10);
+        let activeChart;
+        try {
+            const category = milkCategory === 'BUFFALO' ? 'BUFFALO' : 'COW';
+            activeChart = await rateChartRepo.getActiveRateChart('00000000-0000-0000-0000-000000000002', organizationId || '00000000-0000-0000-0000-000000000010', category, new Date().toISOString().slice(0, 10));
+        }
+        catch {
+            // Fallback calculation using standard rate formula
+        }
+        let ratePerLiter = 0;
+        let rule = 'STANDARD_FORMULA';
+        if (activeChart) {
+            const calc = activeChart.calculateRate(effFat, effSnf);
+            ratePerLiter = calc.ratePerLiter;
+            rule = calc.rule;
+        }
+        else {
+            // Standard baseline formula fallback
+            const baseRate = milkCategory === 'COW' ? 38.0 : 62.0;
+            const baseFat = milkCategory === 'COW' ? 3.5 : 6.0;
+            const baseSnf = milkCategory === 'COW' ? 8.5 : 9.0;
+            const fatFactor = milkCategory === 'COW' ? 4.2 : 5.0;
+            const snfFactor = milkCategory === 'COW' ? 3.5 : 4.0;
+            ratePerLiter = Math.round((baseRate + (effFat - baseFat) * fatFactor + (effSnf - baseSnf) * snfFactor) * 100) / 100;
+        }
+        const totalPayable = Math.round(ratePerLiter * effVol * 100) / 100;
+        res.json({
+            success: true,
+            data: {
+                milkCategory,
+                fatPercentage: effFat,
+                snfPercentage: effSnf,
+                weightLiters: effVol,
+                ratePerLiter,
+                totalPayable,
+                rule,
+                isPreview: true,
+            },
+        });
     }
     catch (err) {
         next(err);

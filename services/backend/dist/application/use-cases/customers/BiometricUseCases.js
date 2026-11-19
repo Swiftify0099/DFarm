@@ -62,7 +62,7 @@ export class UpdateCustomerBiometricsUseCase {
         this.encryptor = encryptor;
     }
     async execute(params) {
-        const customer = await this.customerRepo.findById(params.customerId);
+        const customer = await this.customerRepo.findById(params.customerId, params.organizationId);
         if (!customer) {
             throw new CustomerNotFoundError(params.customerId);
         }
@@ -75,6 +75,25 @@ export class UpdateCustomerBiometricsUseCase {
         if (modelRes.rows.length > 0) {
             modelId = modelRes.rows[0].id;
             expectedDim = modelRes.rows[0].embedding_dimension;
+        }
+        else {
+            const anyRes = await tenantDb.query('SELECT id, embedding_dimension FROM face_model_versions LIMIT 1;');
+            if (anyRes.rows.length > 0) {
+                modelId = anyRes.rows[0].id;
+                expectedDim = anyRes.rows[0].embedding_dimension;
+            }
+            else {
+                const insRes = await tenantDb.query(`
+          INSERT INTO face_model_versions (
+            model_name, model_version, embedding_dimension, similarity_metric,
+            recommended_threshold, is_active
+          ) VALUES (
+            'OpenCV-SFace-INT8', $1, 128, 'COSINE', 0.363, TRUE
+          ) RETURNING id, embedding_dimension;
+        `, [modelVersion]);
+                modelId = insRes.rows[0].id;
+                expectedDim = insRes.rows[0].embedding_dimension;
+            }
         }
         if (params.embedding.length !== expectedDim) {
             throw new DomainValidationError(`Biometric vector dimension mismatch: expected ${expectedDim} for ${modelVersion}, received ${params.embedding.length}`);

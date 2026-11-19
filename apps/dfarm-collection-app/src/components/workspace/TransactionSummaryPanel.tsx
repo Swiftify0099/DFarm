@@ -26,6 +26,7 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
     refreshSession,
     refreshOfflineCount,
     resetIntakeCycle,
+    printReceipt,
   } = useHardware()
 
   const { operator } = useAuth()
@@ -45,7 +46,10 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
   let canSubmit = true
   let lockReason: string | null = null
 
-  if (!customer) {
+  if (activeSession && activeSession.status === 'CLOSED') {
+    canSubmit = false
+    lockReason = 'Current shift session is CLOSED. Open an active session to accept milk intake.'
+  } else if (!customer) {
     canSubmit = false
     lockReason = 'Identify patron via Face Camera, RFID, or Manual Search first.'
   } else if (measurements.weightLiters <= 0) {
@@ -65,6 +69,20 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
   const handleCategorySelect = (category: MilkCategory) => {
     updateMeasurements({ milkCategory: category })
   }
+
+  // Allow Ctrl+Enter to submit intake when valid
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        if (canSubmit && customer && !isSubmitting) {
+          e.preventDefault()
+          handleSubmit()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [canSubmit, customer, isSubmitting])
 
   const handleSubmit = async () => {
     if (!canSubmit || !customer || isSubmitting) return
@@ -124,6 +142,13 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
       setSuccessMessage(
         `Intake recorded! Txn #${res.transactionCode} — ${res.weightLiters}L of ${res.milkCategory} milk for ₹${res.totalAmount}`
       )
+
+      // Automatically trigger thermal voucher / serial print
+      try {
+        await printReceipt(res)
+      } catch (printErr) {
+        console.warn('Auto-print receipt warning:', printErr)
+      }
 
       await refreshSession()
       await refreshOfflineCount()

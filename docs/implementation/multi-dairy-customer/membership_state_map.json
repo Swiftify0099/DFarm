@@ -1,0 +1,40 @@
+{
+  "states": {
+    "UNREGISTERED": {
+      "description": "Customer has verified phone number but has no registration in this cooperative",
+      "canSwitch": false,
+      "allowedActions": ["REGISTER"]
+    },
+    "PENDING_APPROVAL": {
+      "description": "Customer registration submitted and awaiting Dairy Admin review",
+      "canSwitch": false,
+      "badge": { "label": "मंजुरी प्रलंबित", "color": "#D48B14", "bg": "#FFF8E1" },
+      "allowedActions": ["VIEW_STATUS", "RESUBMIT_BIOMETRICS"]
+    },
+    "APPROVED": {
+      "description": "Dairy Admin approved application and assigned unique farmer code",
+      "canSwitch": true,
+      "badge": { "label": "सक्रिय शेतकरी", "color": "#1B5E20", "bg": "#E8F5E9" },
+      "allowedActions": ["SWITCH_SESSION", "VIEW_COLLECTIONS", "VIEW_PASSBOOK", "VIEW_BILLS"]
+    },
+    "REJECTED": {
+      "description": "Dairy Admin rejected application with an auditable reason",
+      "canSwitch": false,
+      "badge": { "label": "नाकारले", "color": "#C62828", "bg": "#FFEBEE" },
+      "allowedActions": ["VIEW_REJECTION_REASON", "APPLY_AGAIN"]
+    },
+    "SUSPENDED": {
+      "description": "Cooperative suspended member operations temporarily",
+      "canSwitch": false,
+      "badge": { "label": "निलंबित", "color": "#B71C1C", "bg": "#FFCDD2" },
+      "allowedActions": ["CONTACT_SECRETARY"]
+    }
+  },
+  "transitions": [
+    { "from": "UNREGISTERED", "to": "PENDING_APPROVAL", "trigger": "Customer Registration Form Submit" },
+    { "from": "PENDING_APPROVAL", "to": "APPROVED", "trigger": "Dairy Admin Approval" },
+    { "from": "PENDING_APPROVAL", "to": "REJECTED", "trigger": "Dairy Admin Rejection with Reason" },
+    { "from": "APPROVED", "to": "SUSPENDED", "trigger": "Dairy Admin Manual Suspension" },
+    { "from": "SUSPENDED", "to": "APPROVED", "trigger": "Dairy Admin Reinstatement" }
+  ]
+}

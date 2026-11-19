@@ -18,6 +18,7 @@ export interface CustomerProps {
   village?: string;
   rfidCardUid?: string | null;
   faceTemplateEnrolled?: boolean;
+  globalCustomerId?: string;
   balanceDue?: number;
   lastDelivery?: {
     date: string;
@@ -96,6 +97,15 @@ export class Customer {
     return Boolean(this.props.faceTemplateEnrolled);
   }
 
+  public get globalCustomerId(): string | undefined {
+    return this.props.globalCustomerId;
+  }
+
+  public setGlobalCustomerId(id: string): void {
+    this.props.globalCustomerId = id;
+    this.props.updatedAt = new Date().toISOString();
+  }
+
   public get balanceDue(): number {
     return this.props.balanceDue || 0.0;
   }
@@ -109,8 +119,11 @@ export class Customer {
   }
 
   public validateCanDeliver(category: MilkCategory): void {
-    if (this.props.status === 'SUSPENDED') {
+    if (this.props.status === 'SUSPENDED' || (this.props.registrationStatus as string) === 'SUSPENDED') {
       throw new CustomerSuspendedError(this.props.fullName);
+    }
+    if (this.props.registrationStatus !== 'APPROVED' || this.props.status !== 'ACTIVE') {
+      throw new CustomerSuspendedError(`Farmer ${this.props.fullName} is not active or pending approval.`);
     }
     if (!this.props.permittedCategories.includes(category)) {
       throw new CategoryNotAuthorizedError(category, this.props.fullName);
@@ -147,6 +160,40 @@ export class Customer {
     this.props.registrationStatus = 'REJECTED';
     this.props.status = 'INACTIVE';
     this.props.rejectionReason = reason;
+    this.props.updatedAt = new Date().toISOString();
+  }
+
+  public suspend(reason?: string): void {
+    this.props.status = 'SUSPENDED';
+    if (reason) {
+      this.props.rejectionReason = reason;
+    }
+    this.props.updatedAt = new Date().toISOString();
+  }
+
+  public reactivate(): void {
+    this.props.status = 'ACTIVE';
+    this.props.updatedAt = new Date().toISOString();
+  }
+
+  public updateProfile(updates: {
+    fullName?: string;
+    village?: string;
+    permittedCategories?: MilkCategory[];
+    mobileNumber?: string;
+  }): void {
+    if (updates.fullName && updates.fullName.trim()) {
+      this.props.fullName = updates.fullName.trim();
+    }
+    if (updates.village !== undefined) {
+      this.props.village = updates.village.trim();
+    }
+    if (updates.permittedCategories && updates.permittedCategories.length > 0) {
+      this.props.permittedCategories = [...updates.permittedCategories];
+    }
+    if (updates.mobileNumber && updates.mobileNumber.trim()) {
+      this.props.mobileNumber = updates.mobileNumber.trim();
+    }
     this.props.updatedAt = new Date().toISOString();
   }
 

@@ -1,58 +1,45 @@
-import React from 'react';
-import { Redirect } from 'expo-router';
-import { View, StyleSheet, ActivityIndicator, Text } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../features/auth/useAuth';
-import { DFARM_COLORS, DFARM_TYPOGRAPHY } from '../design-system/theme';
-import { DFarmBrandMark } from '../assets/vectors/DFarmBrandMark';
+import { DFarmSplashScreen } from '../components/splash/DFarmSplashScreen';
 
 export default function Index() {
+  const router = useRouter();
   const { session, isLoadingSession } = useAuth();
+  const [animationFinished, setAnimationFinished] = useState(false);
+  const [hasNavigated, setHasNavigated] = useState(false);
 
-  if (isLoadingSession) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.brandBox}>
-          <DFarmBrandMark width={180} height={44} />
-          <View style={styles.spinnerRow}>
-            <ActivityIndicator size="small" color={DFARM_COLORS.primaryOrange} />
-            <Text style={styles.loadingText}>Connecting to DFarm Network...</Text>
-          </View>
-        </View>
-      </View>
-    );
-  }
+  const navigateToDestination = useCallback(() => {
+    if (hasNavigated) return;
+    setHasNavigated(true);
 
-  if (session?.token) {
-    if (session.status === 'PENDING_APPROVAL') {
-      return <Redirect href="/(onboarding)/pending-approval" />;
+    if (session?.token) {
+      if (session.status === 'PENDING_APPROVAL') {
+        router.replace('/(onboarding)/pending-approval');
+      } else {
+        router.replace('/(main)');
+      }
+    } else {
+      router.replace('/(auth)/login');
     }
-    return <Redirect href="/(main)" />;
-  }
+  }, [hasNavigated, session, router]);
 
-  return <Redirect href="/(auth)/login" />;
+  const handleAnimationFinish = useCallback(() => {
+    setAnimationFinished(true);
+  }, []);
+
+  // When animation has completed and session loading is resolved, perform transition
+  useEffect(() => {
+    if (animationFinished && !isLoadingSession && !hasNavigated) {
+      navigateToDestination();
+    }
+  }, [animationFinished, isLoadingSession, hasNavigated, navigateToDestination]);
+
+  return (
+    <DFarmSplashScreen
+      isLoading={isLoadingSession}
+      minDurationMs={1800}
+      onFinish={handleAnimationFinish}
+    />
+  );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: DFARM_COLORS.primaryCream,
-    paddingHorizontal: 24,
-  },
-  brandBox: {
-    alignItems: 'center',
-    gap: 20,
-  },
-  spinnerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginTop: 8,
-  },
-  loadingText: {
-    ...DFARM_TYPOGRAPHY.bodySm,
-    color: DFARM_COLORS.secondaryText,
-    fontWeight: '500',
-  },
-});

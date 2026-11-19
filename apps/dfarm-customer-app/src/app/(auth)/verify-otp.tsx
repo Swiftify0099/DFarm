@@ -21,7 +21,6 @@ import {
   ClayBadge,
 } from '../../design-system';
 import { useAuth } from '../../features/auth/useAuth';
-import { DirectDoveSmsService } from '../../services/smsService';
 
 export default function VerifyOtpScreen() {
   const router = useRouter();
@@ -48,11 +47,12 @@ export default function VerifyOtpScreen() {
     try {
       await requestOtp({ mobileNumber });
     } catch (err: any) {
-      try {
-        await DirectDoveSmsService.sendDirectDoveOtp(mobileNumber);
-      } catch {
-        setError(err?.response?.data?.message || 'Failed to resend OTP. Please retry.');
-      }
+      setError(
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        'Failed to resend OTP. Please retry.'
+      );
     }
   };
 
@@ -68,27 +68,34 @@ export default function VerifyOtpScreen() {
         otp,
       });
 
-      if (session.user.status === 'APPROVED') {
-        router.replace('/(main)');
-      } else if (session.user.status === 'PENDING_APPROVAL') {
-        router.replace('/(onboarding)/pending-approval');
-      } else {
+      const memberships = session.memberships || [];
+      if (memberships.length === 0) {
+        // No dairy registrations yet -> start discovery
         router.replace({
           pathname: '/(onboarding)/dairy-discovery',
+          params: { mobileNumber },
+        });
+      } else if (memberships.length === 1 && memberships[0].membershipStatus === 'APPROVED') {
+        // Exactly 1 approved dairy -> enter dashboard
+        router.replace('/(main)');
+      } else if (memberships.length === 1 && memberships[0].membershipStatus === 'PENDING_APPROVAL') {
+        // 1 pending registration -> view status
+        router.replace({
+          pathname: '/(onboarding)/pending-approval',
+          params: {
+            dairyName: memberships[0].dairyName,
+            customerId: memberships[0].id,
+            farmerCode: memberships[0].farmerCode || undefined,
+          },
+        });
+      } else {
+        // Multiple dairy accounts (or mixed statuses) -> Show Dairy Account Selector
+        router.replace({
+          pathname: '/(auth)/select-dairy',
           params: { mobileNumber },
         });
       }
     } catch (err: any) {
-      // Check emergency direct SMS verification fallback
-      const isDirectValid = await DirectDoveSmsService.verifyDirectDoveOtp(mobileNumber, otp);
-      if (isDirectValid) {
-        router.replace({
-          pathname: '/(onboarding)/dairy-discovery',
-          params: { mobileNumber },
-        });
-        return;
-      }
-
       setError(
         err?.response?.data?.message ||
         err?.response?.data?.error ||

@@ -16,4 +16,6 @@ export * from './payments.routes.js';
 export * from './staff.routes.js';
 export * from './audit.routes.js';
 export * from './notifications.routes.js';
+export * from './super-admin.routes.js';
+export * from './reports.routes.js';
 //# sourceMappingURL=index.d.ts.map

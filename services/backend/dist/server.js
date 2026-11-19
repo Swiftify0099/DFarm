@@ -5,6 +5,15 @@ import { logger } from './shared/logger/index.js';
 let server = null;
 export function startServer() {
     server = http.createServer(app);
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            logger.fatal({ port: config.PORT }, `Port ${config.PORT} is already in use by another process. Please free port ${config.PORT} or configure a different PORT.`);
+        }
+        else {
+            logger.fatal({ err }, 'Server error encountered during startup');
+        }
+        process.exit(1);
+    });
     server.listen(config.PORT, () => {
         logger.info({
             port: config.PORT,

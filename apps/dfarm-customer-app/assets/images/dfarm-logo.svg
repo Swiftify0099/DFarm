@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" width="320" height="200" fill="none">
+  <defs>
+    <linearGradient id="dfarmLeafGradCenter" x1="160" y1="95" x2="160" y2="15" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E65100" />
+      <stop offset="45%" stop-color="#FF6A00" />
+      <stop offset="100%" stop-color="#FFA726" />
+    </linearGradient>
+    <linearGradient id="dfarmLeafGradLeft" x1="150" y1="95" x2="110" y2="35" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#D84315" />
+      <stop offset="50%" stop-color="#F57C00" />
+      <stop offset="100%" stop-color="#FFB74D" />
+    </linearGradient>
+    <linearGradient id="dfarmLeafGradRight" x1="170" y1="95" x2="210" y2="35" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E65100" />
+      <stop offset="50%" stop-color="#FF6A00" />
+      <stop offset="100%" stop-color="#FFA726" />
+    </linearGradient>
+    <filter id="softGlow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#FF6A00" flood-opacity="0.22" />
+    </filter>
+  </defs>
+
+  <!-- 3-Leaf Agricultural Sprout Symbol -->
+  <g filter="url(#softGlow)">
+    <!-- Left Leaf -->
+    <path
+      d="M156 90 C146 72 124 54 112 42 C128 36 148 54 156 90 Z"
+      fill="url(#dfarmLeafGradLeft)"
+    />
+    <path
+      d="M154 84 C144 68 134 56 122 46"
+      stroke="#FFFFFF"
+      stroke-width="2.2"
+      stroke-linecap="round"
+      opacity="0.85"
+    />
+
+    <!-- Center Leaf (Tallest) -->
+    <path
+      d="M160 92 C152 64 150 36 160 16 C170 36 168 64 160 92 Z"
+      fill="url(#dfarmLeafGradCenter)"
+    />
+    <path
+      d="M160 86 C160 62 160 40 160 22"
+      stroke="#FFFFFF"
+      stroke-width="2.4"
+      stroke-linecap="round"
+      opacity="0.9"
+    />
+
+    <!-- Right Leaf -->
+    <path
+      d="M164 90 C174 72 196 54 208 42 C192 36 172 54 164 90 Z"
+      fill="url(#dfarmLeafGradRight)"
+    />
+    <path
+      d="M166 84 C176 68 186 56 198 46"
+      stroke="#FFFFFF"
+      stroke-width="2.2"
+      stroke-linecap="round"
+      opacity="0.85"
+    />
+
+    <!-- Stem Base Anchor -->
+    <path
+      d="M156 91 C158 97 162 97 164 91 Z"
+      fill="#BF360C"
+    />
+  </g>
+
+  <!-- Wordmark: DFarm -->
+  <text
+    x="160"
+    y="142"
+    text-anchor="middle"
+    font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    font-size="46"
+    font-weight="800"
+    fill="#211B18"
+    letter-spacing="-0.8"
+  >DFarm</text>
+
+  <!-- Flanked Tagline: — Smart Dairy Transparency — -->
+  <!-- Left horizontal accent rule -->
+  <line x1="38" y1="168" x2="82" y2="168" stroke="#D1C7BF" stroke-width="1.2" stroke-linecap="round" />
+
+  <!-- Tagline Text -->
+  <text
+    x="160"
+    y="172"
+    text-anchor="middle"
+    font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    font-size="12"
+    font-weight="600"
+    fill="#685E57"
+    letter-spacing="0.8"
+  >Smart Dairy Transparency</text>
+
+  <!-- Right horizontal accent rule -->
+  <line x1="238" y1="168" x2="282" y2="168" stroke="#D1C7BF" stroke-width="1.2" stroke-linecap="round" />
+</svg>

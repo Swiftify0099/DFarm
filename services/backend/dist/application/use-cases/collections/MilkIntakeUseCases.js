@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { MilkCollectionTransaction } from '../../../domain/entities/MilkCollectionTransaction.js';
 import { DomainValidationError, CustomerNotFoundError, SessionClosedError, } from '../../../domain/errors/index.js';
 import { FatPercentage, SnfPercentage, MilkWeight } from '../../../domain/value-objects/index.js';
+import { financialPolicyResolutionService } from '../../../domain/services/FinancialPolicyResolutionService.js';
 export class ProcessMilkIntakeUseCase {
     customerRepo;
     sessionRepo;
@@ -34,27 +35,35 @@ export class ProcessMilkIntakeUseCase {
         new FatPercentage(dto.fatPercentage, dto.milkCategory);
         new SnfPercentage(dto.snfPercentage, dto.milkCategory);
         // 3. Verify Customer & Permissions
-        const customer = await this.customerRepo.findById(dto.customerId);
+        const customer = await this.customerRepo.findById(dto.customerId, dto.organizationId);
         if (!customer) {
             throw new CustomerNotFoundError(dto.customerId);
         }
         customer.validateCanDeliver(dto.milkCategory);
         // 4. Verify Active Session
+        const orgId = dto.organizationId || customer.organizationId;
         let session = dto.sessionCode
-            ? await this.sessionRepo.findByCode(dto.sessionCode)
+            ? await this.sessionRepo.findByCode(dto.sessionCode, orgId)
             : null;
         if (!session && dto.sessionId) {
             // Find active session for customer's center
-            session = await this.sessionRepo.findActiveSession(customer.centerId, dto.deviceId || 'KIOSK_MAIN');
+            session = await this.sessionRepo.findActiveSession(customer.centerId, dto.deviceId || 'KIOSK_MAIN', orgId);
         }
         if (!session || !session.isOpen) {
             throw new SessionClosedError(dto.sessionCode || dto.sessionId || 'Unknown');
         }
         // 5. Authoritative Rate & Amount Calculation
         const rateChart = await this.rateChartRepo.getActiveRateChart(customer.centerId, customer.organizationId, dto.milkCategory, session.businessDate);
-        const calculation = rateChart.calculateRate(dto.fatPercentage, dto.snfPercentage);
+        const calculation = await financialPolicyResolutionService.calculateAuthoritativePrice({
+            rateChart,
+            milkCategory: dto.milkCategory,
+            weightLiters: dto.weightLiters,
+            fatPercentage: dto.fatPercentage,
+            snfPercentage: dto.snfPercentage,
+            businessDate: session.businessDate,
+        });
         const appliedRate = calculation.ratePerLiter;
-        const totalAmount = calculation.totalForVolume(dto.weightLiters);
+        const totalAmount = calculation.totalAmount;
         // 6. Instantiate MilkCollectionTransaction Entity
         const transactionId = crypto.randomUUID();
         const transactionCode = `TXN-${transactionId.substring(0, 8).toUpperCase()}`;
@@ -109,8 +118,8 @@ export class GetCustomerCollectionHistoryUseCase {
     constructor(transactionRepo) {
         this.transactionRepo = transactionRepo;
     }
-    async execute(customerId, limit = 50, offset = 0) {
-        const records = await this.transactionRepo.listByCustomer(customerId, limit, offset);
+    async execute(customerId, limit = 50, offset = 0, organizationId) {
+        const records = await this.transactionRepo.listByCustomer(customerId, limit, offset, organizationId);
         return records.map((r) => r.toJSON());
     }
 }
@@ -119,9 +128,9 @@ export class GetMonthlyMilkSummaryUseCase {
     constructor(transactionRepo) {
         this.transactionRepo = transactionRepo;
     }
-    async execute(customerId, monthYear) {
+    async execute(customerId, monthYear, organizationId) {
         const my = monthYear || new Date().toISOString().substring(0, 7); // YYYY-MM
-        return this.transactionRepo.getMonthlySummary(customerId, my);
+        return this.transactionRepo.getMonthlySummary(customerId, my, organizationId);
     }
 }
 //# sourceMappingURL=MilkIntakeUseCases.js.map

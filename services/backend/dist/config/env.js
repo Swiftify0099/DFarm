@@ -54,6 +54,13 @@ const envSchema = z.object({
     RATE_LIMIT_WINDOW_MS: z.coerce.number().positive().default(60000),
     RATE_LIMIT_MAX_REQUESTS: z.coerce.number().positive().default(100),
     DATABASE_URL: z.string().default('postgresql://postgres:postgres@127.0.0.1:54322/postgres'),
+    CENTRAL_DATABASE_URL: z.string().optional(),
+    DATABASE_PROVISIONER_URL: z.string().optional(),
+    TENANT_DB_ENCRYPTION_KEY: z.string().default('dfarm-super-secret-encryption-key-32chars!'),
+    TENANT_POOL_MAX: z.coerce.number().int().positive().default(5),
+    TENANT_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+    TENANT_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
+    DATABASE_TLS_MODE: z.enum(['disable', 'require', 'prefer']).default('prefer'),
     JWT_SECRET: z.string().default('super-secret-jwt-token-with-at-least-32-characters-long'),
     // WhatsApp Business Cloud API Configuration
     WHATSAPP_ENABLED: z.coerce.boolean().default(false),

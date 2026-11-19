@@ -1,16 +1,27 @@
 import crypto from 'node:crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import { db } from '../../infrastructure/database/PostgresPool.js';
-import { PostgresLedgerRepository } from '../../infrastructure/index.js';
+import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { paymentRouter } from '../../modules/payments/payment.routes.js';
 
 const router = Router();
-const ledgerRepo = new PostgresLedgerRepository();
+
+const getTenantDb = async (organizationId?: string) => {
+  if (organizationId) {
+    try {
+      return await tenantDbManager.getTenantDb(organizationId);
+    } catch {
+      return db;
+    }
+  }
+  return db;
+};
 
 // 1. Get Payment Records for Dairy
 router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
     if (!organizationId) {
       res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
       return;
@@ -19,21 +30,27 @@ router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: 
     // Query ledger payments
     const query = `
       SELECT 
-        cle.id,
-        cle.customer_id,
-        cle.amount,
-        cle.description,
-        cle.created_at,
+        lt.id,
+        lt.customer_id,
+        lt.amount,
+        lt.description,
+        lt.created_at,
         c.farmer_code,
         c.full_name
-      FROM customer_ledger_entries cle
-      JOIN customers c ON c.id = cle.customer_id
-      WHERE c.organization_id = $1 AND cle.entry_type = 'DEBIT' AND cle.source_module IN ('PAYMENT', 'SETTLEMENT', 'MANUAL_ADJUSTMENT')
-      ORDER BY cle.created_at DESC
+      FROM ledger_transactions lt
+      JOIN customers c ON c.id = lt.customer_id
+      WHERE c.organization_id = $1 AND lt.direction = 'DEBIT' AND lt.reference_entity IN ('CUSTOMER_PAYMENT', 'MANUAL_ADJUSTMENT', 'CUSTOMER_PAYOUT', 'PAYMENT_BATCH')
+      ORDER BY lt.created_at DESC
       LIMIT 100;
     `;
 
-    const result = await db.query(query, [organizationId]);
+    const client = await getTenantDb(organizationId);
+    let result;
+    try {
+      result = await client.query(query, [organizationId]);
+    } catch {
+      result = await db.query(query, [organizationId]);
+    }
     const payments = result.rows.map((p: any) => ({
       id: p.id,
       customerId: p.customer_id,
@@ -62,17 +79,58 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response, next:
       return;
     }
 
+    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.body.organizationId as string);
     const numAmount = Number(amount);
     const paymentId = crypto.randomUUID();
-    await ledgerRepo.appendEntry({
-      customerId,
-      entryType: 'DEBIT',
-      amount: numAmount,
-      balanceAfter: 0,
-      referenceId: paymentId,
-      sourceModule: 'PAYMENT',
-      description: `Disbursed ₹${numAmount} via ${paymentMethod || 'BANK_TRANSFER'} Ref: ${transactionReference || 'N/A'} by ${operatorName || 'Admin'}: ${notes || ''}`,
-    });
+
+    if (organizationId) {
+      const client = await getTenantDb(organizationId);
+      let accRes = await client.query(
+        `SELECT id, current_balance FROM customer_ledger_accounts WHERE customer_id = $1 LIMIT 1;`,
+        [customerId]
+      );
+      if (accRes.rows.length === 0) {
+        accRes = await client.query(
+          `INSERT INTO customer_ledger_accounts (id, customer_id, organization_id, current_balance)
+           VALUES (gen_random_uuid(), $1, $2, 0.00) RETURNING id, current_balance;`,
+          [customerId, organizationId]
+        );
+      }
+      const accountId = accRes.rows[0].id;
+      const oldBalance = Number(accRes.rows[0].current_balance || 0);
+      const balanceAfter = oldBalance - numAmount;
+
+      const custRes = await client.query(`SELECT primary_center_id FROM customers WHERE id = $1 LIMIT 1;`, [customerId]);
+      const centerId = custRes.rows[0]?.primary_center_id || '00000000-0000-0000-0000-000000000083';
+
+      await client.query(
+        `INSERT INTO ledger_transactions (
+           id, organization_id, center_id, customer_id, transaction_type,
+           direction, amount, balance_after, reference_entity, reference_id,
+           description, idempotency_key, created_by
+         ) VALUES (
+           $1, $2, $3, $4, 'PAYMENT_PAYOUT_DEBIT',
+           'DEBIT', $5, $6, 'CUSTOMER_PAYMENT', $1,
+           $7, $8, $9
+         );`,
+        [
+          paymentId,
+          organizationId,
+          centerId,
+          customerId,
+          numAmount,
+          balanceAfter,
+          `Disbursed ₹${numAmount} via ${paymentMethod || 'BANK_TRANSFER'} Ref: ${transactionReference || 'N/A'} by ${operatorName || 'Admin'}: ${notes || ''}`,
+          `PAY-${paymentId}-${Date.now()}`,
+          req.user?.userId || '00000000-0000-0000-0000-000000000084',
+        ]
+      );
+
+      await client.query(
+        `UPDATE customer_ledger_accounts SET current_balance = $1, last_transaction_at = NOW(), updated_at = NOW() WHERE id = $2;`,
+        [balanceAfter, accountId]
+      );
+    }
 
     res.status(201).json({
       success: true,
@@ -89,5 +147,7 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response, next:
     next(err);
   }
 });
+
+router.use('/', paymentRouter);
 
 export const paymentsRoutes = router;

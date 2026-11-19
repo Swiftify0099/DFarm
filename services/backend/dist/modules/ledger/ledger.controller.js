@@ -1,7 +1,49 @@
+import { pool } from '../../db.js';
 import { LedgerService } from './ledger.service.js';
 import { ApiResponse } from '../../shared/response/api-response.js';
 import { UnauthorizedError } from '../../shared/errors/app-error.js';
 export class LedgerController {
+    /**
+     * GET /api/v1/ledger/entries (Farmer Passbook Stream)
+     */
+    static async getFarmerPassbookEntries(req, res, next) {
+        try {
+            if (!req.auth)
+                throw new UnauthorizedError('Authentication required');
+            const customerId = req.auth.customerProfile?.customerId || req.auth.userId;
+            const txns = await pool.query(`SELECT * FROM ledger_transactions WHERE customer_id = $1 ORDER BY created_at DESC;`, [customerId]);
+            const mapped = txns.rows.map((tx) => ({
+                id: tx.id,
+                transactionType: tx.transaction_type,
+                direction: tx.direction,
+                amount: parseFloat(tx.amount),
+                balanceAfter: parseFloat(tx.balance_after),
+                referenceEntity: tx.reference_entity,
+                referenceId: tx.reference_id,
+                description: tx.description,
+                createdAt: tx.created_at,
+            }));
+            return ApiResponse.success(res, mapped, 200);
+        }
+        catch (err) {
+            next(err);
+        }
+    }
+    /**
+     * GET /api/v1/ledger/summary (Farmer Khata Summary)
+     */
+    static async getMySummary(req, res, next) {
+        try {
+            if (!req.auth)
+                throw new UnauthorizedError('Authentication required');
+            const customerId = req.auth.userId;
+            const result = await LedgerService.getCustomerSummary(customerId, req.auth);
+            return ApiResponse.success(res, result, 200);
+        }
+        catch (err) {
+            next(err);
+        }
+    }
     /**
      * 1. GET /api/v1/ledger/accounts
      */

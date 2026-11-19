@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { GetFaceTemplatesUseCase } from '../../application/use-cases/index.js';
 import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 import { Aes256GcmBiometricEncryptor } from '../../infrastructure/security/Aes256GcmBiometricEncryptor.js';
 import { PostgresCustomerRepository } from '../../infrastructure/repositories/PostgresCustomerRepository.js';
 import { db } from '../../infrastructure/database/PostgresPool.js';
+import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 const router = Router();
 const getFaceTemplates = new GetFaceTemplatesUseCase();
 const encryptor = new Aes256GcmBiometricEncryptor();
@@ -42,7 +44,7 @@ router.get('/face/templates', optionalAuthenticate, async (req, res, next) => {
         const formatted = templates.map((t) => {
             let embedding = null;
             try {
-                embedding = encryptor.decrypt128DimEmbedding(t.encryptedPayload.encryptedData, t.encryptedPayload.iv, t.encryptedPayload.authTag, t.customerId, 'f0000000-0000-0000-0000-000000000001');
+                embedding = encryptor.decrypt128DimEmbedding(t.encryptedPayload.encryptedData, t.encryptedPayload.iv, t.encryptedPayload.authTag, t.customerId, t.modelVersionId || 'f0000000-0000-0000-0000-000000000001');
             }
             catch {
                 // In case of test synthetic fixture
@@ -85,7 +87,7 @@ router.post('/face/match', optionalAuthenticate, async (req, res, next) => {
         let bestCustomerId = null;
         for (const t of templates) {
             try {
-                const decrypted = encryptor.decrypt128DimEmbedding(t.encryptedPayload.encryptedData, t.encryptedPayload.iv, t.encryptedPayload.authTag, t.customerId, 'f0000000-0000-0000-0000-000000000001');
+                const decrypted = encryptor.decrypt128DimEmbedding(t.encryptedPayload.encryptedData, t.encryptedPayload.iv, t.encryptedPayload.authTag, t.customerId, t.modelVersionId || 'f0000000-0000-0000-0000-000000000001');
                 const sim = computeCosineSimilarity(embedding, decrypted);
                 if (sim > bestScore) {
                     bestScore = sim;
@@ -97,7 +99,7 @@ router.post('/face/match', optionalAuthenticate, async (req, res, next) => {
             }
         }
         if (bestCustomerId && bestScore >= threshold) {
-            const customer = await customerRepo.findById(bestCustomerId);
+            const customer = await customerRepo.findById(bestCustomerId, organizationId);
             if (customer && customer.organizationId === organizationId) {
                 const confidenceScore = Math.min(99.9, Number((((bestScore - threshold) / (1.0 - threshold)) * 30 + 70).toFixed(1)));
                 res.json({
@@ -125,14 +127,32 @@ router.post('/face/match', optionalAuthenticate, async (req, res, next) => {
         next(err);
     }
 });
-// 3. Dairy Admin Biometric Lifecycle - Real Database Query
+// 3. Dairy Admin Biometric Lifecycle - Real Database Query (Metadata Only, ZERO Raw Vectors)
 router.get('/face/enrollments', optionalAuthenticate, async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'] || req.query['organizationId'];
+        let organizationId = req.user?.organizationId;
+        const queryOrgId = req.query['organizationId'];
+        const headerOrgId = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
+        if (organizationId) {
+            if (queryOrgId && queryOrgId !== organizationId && req.user?.role !== 'SUPER_ADMIN') {
+                res.status(403).json({
+                    success: false,
+                    error: 'Cross-dairy query blocked: Cannot access face enrollments of another dairy.',
+                });
+                return;
+            }
+        }
+        else {
+            organizationId = queryOrgId || headerOrgId;
+        }
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;
         }
+        if (req.user) {
+            authorizePermission('customers:read', 'biometrics:manage')(req, res, () => { });
+        }
+        const client = await tenantDbManager.getTenantDb(organizationId).catch(() => db);
         const query = `
       SELECT 
         fe.id,
@@ -153,7 +173,8 @@ router.get('/face/enrollments', optionalAuthenticate, async (req, res, next) => 
       WHERE c.organization_id = $1
       ORDER BY fe.enrolled_at DESC;
     `;
-        const result = await db.query(query, [organizationId]);
+        const result = await client.query(query, [organizationId]);
+        // Note: ZERO raw vectors (Float32/INT8 embeddings) are included here
         const records = result.rows.map((row) => {
             let uiStatus = 'APPROVED';
             if (row.status === 'REVOKED' || row.status === 'PERMANENTLY_ERASED') {
@@ -199,8 +220,13 @@ router.get('/face/enrollments', optionalAuthenticate, async (req, res, next) => 
 // 4. Request Face Re-enrollment
 router.post('/face/enrollments/:id/re-enroll', optionalAuthenticate, async (req, res, next) => {
     try {
+        if (req.user) {
+            authorizePermission('biometrics:manage', 'customers:update')(req, res, () => { });
+        }
         const { id } = req.params;
-        await db.query(`UPDATE face_enrollments SET status = 'SUPERSEDED' WHERE id = $1`, [id]);
+        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'];
+        const client = organizationId ? await tenantDbManager.getTenantDb(organizationId).catch(() => db) : db;
+        await client.query(`UPDATE face_enrollments SET status = 'SUPERSEDED' WHERE id = $1`, [id]);
         res.json({ success: true, message: 'Re-enrollment requested successfully' });
     }
     catch (err) {
@@ -210,9 +236,14 @@ router.post('/face/enrollments/:id/re-enroll', optionalAuthenticate, async (req,
 // 5. Revoke Face Biometric Template
 router.post('/face/enrollments/:id/revoke', optionalAuthenticate, async (req, res, next) => {
     try {
+        if (req.user) {
+            authorizePermission('biometrics:manage', 'customers:update')(req, res, () => { });
+        }
         const { id } = req.params;
         const { reason } = req.body;
-        await db.query(`UPDATE face_enrollments SET status = 'REVOKED', erased_at = NOW(), erasure_reason = $2 WHERE id = $1`, [id, reason || 'Revoked by authorized Dairy Admin']);
+        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'];
+        const client = organizationId ? await tenantDbManager.getTenantDb(organizationId).catch(() => db) : db;
+        await client.query(`UPDATE face_enrollments SET status = 'REVOKED', erased_at = NOW(), erasure_reason = $2 WHERE id = $1`, [id, reason || 'Revoked by authorized Dairy Admin']);
         res.json({ success: true, message: 'Face enrollment revoked and biometric templates purged from active terminals' });
     }
     catch (err) {

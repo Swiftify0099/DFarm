@@ -1,0 +1,142 @@
+{
+  "timestamp": "2026-11-19T08:00:19.583Z",
+  "workflowsVerified": [
+    {
+      "id": "FLOW-01",
+      "name": "Farmer Registration & Approval",
+      "steps": [
+        {
+          "app": "Customer App",
+          "action": "Submit self-registration with mobile OTP & profile details",
+          "api": "POST /customers/register",
+          "status": "PASS"
+        },
+        {
+          "app": "Dairy Admin",
+          "action": "Review pending approvals list & approve farmer",
+          "api": "GET /customers/pending-approvals, POST /customers/:id/approve",
+          "status": "PASS"
+        },
+        {
+          "app": "Customer App",
+          "action": "Fetch approved profile and active membership",
+          "api": "GET /customers/me, GET /customers/memberships",
+          "status": "PASS"
+        }
+      ],
+      "result": "PASSED"
+    },
+    {
+      "id": "FLOW-02",
+      "name": "Milk Collection & Instant Passbook Update",
+      "steps": [
+        {
+          "app": "Dairy Admin",
+          "action": "Configure FAT/SNF rate chart and shift sessions",
+          "api": "POST /rate-charts, POST /sessions/open",
+          "status": "PASS"
+        },
+        {
+          "app": "Collection App",
+          "action": "Weighing scale intake + milk analyzer FAT/SNF capture",
+          "api": "POST /collections/intake",
+          "status": "PASS"
+        },
+        {
+          "app": "Customer App",
+          "action": "Instant collection push notification & passbook ledger credit",
+          "api": "GET /collections/history, GET /ledger/summary",
+          "status": "PASS"
+        }
+      ],
+      "result": "PASSED"
+    },
+    {
+      "id": "FLOW-03",
+      "name": "Offline Intake & Batch Synchronization",
+      "steps": [
+        {
+          "app": "Collection App",
+          "action": "Record collections in offline IndexedDB cache during network outage",
+          "api": "Local Cache",
+          "status": "PASS"
+        },
+        {
+          "app": "Collection App",
+          "action": "Network restoration trigger push batch",
+          "api": "POST /sync/push",
+          "status": "PASS"
+        },
+        {
+          "app": "Backend",
+          "action": "Execute ProcessOfflineSyncBatchUseCase with idempotency",
+          "api": "Subledger & Ledger update",
+          "status": "PASS"
+        },
+        {
+          "app": "Dairy Admin",
+          "action": "Verify synchronized collections in session summary",
+          "api": "GET /sessions/:id/summary",
+          "status": "PASS"
+        }
+      ],
+      "result": "PASSED"
+    },
+    {
+      "id": "FLOW-04",
+      "name": "Biometric Lifecycle (YuNet + SFace)",
+      "steps": [
+        {
+          "app": "Customer App / Admin",
+          "action": "Capture face photo & extract 128-dim SFace INT8 vector",
+          "api": "Client-side YuNet/SFace",
+          "status": "PASS"
+        },
+        {
+          "app": "Backend",
+          "action": "AES-256-GCM encrypt biometric embedding & store in tenant DB",
+          "api": "POST /customers/:id/biometrics/face",
+          "status": "PASS"
+        },
+        {
+          "app": "Collection App",
+          "action": "Offline downstream pull of active encrypted face vectors",
+          "api": "GET /sync/pull",
+          "status": "PASS"
+        },
+        {
+          "app": "Collection App",
+          "action": "Counter face recognition match (Euclidean distance < 0.36)",
+          "api": "Local SFace Matcher",
+          "status": "PASS"
+        }
+      ],
+      "result": "PASSED"
+    },
+    {
+      "id": "FLOW-05",
+      "name": "10-Day Billing Settlement & Farmer Payout",
+      "steps": [
+        {
+          "app": "Dairy Admin",
+          "action": "Generate finalized bill for 10-day period with cattle feed deductions",
+          "api": "POST /billing/generate",
+          "status": "PASS"
+        },
+        {
+          "app": "Dairy Admin",
+          "action": "Maker-Checker approval and bank payout batch export",
+          "api": "POST /payouts/batches, GET /payouts/export/nach",
+          "status": "PASS"
+        },
+        {
+          "app": "Customer App",
+          "action": "Farmer views billing statement breakdown and bank settlement status",
+          "api": "GET /billing/bills, GET /ledger/passbook",
+          "status": "PASS"
+        }
+      ],
+      "result": "PASSED"
+    }
+  ]
+}

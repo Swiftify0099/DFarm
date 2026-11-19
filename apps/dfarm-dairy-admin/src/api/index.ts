@@ -36,7 +36,8 @@ export const api = {
       })
       const data = await res.json()
       if (!res.ok) {
-        throw new Error(data.message || data.error || 'Failed to dispatch Admin OTP via ExpertSkill')
+        const errorMsg = data.message || (typeof data.error === 'string' ? data.error : data.error?.message) || 'Failed to dispatch Admin OTP via ExpertSkill'
+        throw new Error(errorMsg)
       }
       return data
     },
@@ -49,7 +50,8 @@ export const api = {
       })
       const data = await res.json()
       if (!res.ok) {
-        throw new Error(data.message || data.error || 'Verification failed')
+        const errorMsg = data.message || (typeof data.error === 'string' ? data.error : data.error?.message) || 'Verification failed'
+        throw new Error(errorMsg)
       }
       if (!data.user?.dairyId) {
         throw new Error('This administrator account has no active authorized Dairy membership.')
@@ -188,10 +190,10 @@ export const api = {
         if (Array.isArray(json.data)) {
           return json.data.map((c: any) => ({
             id: c.id,
-            dairyId: c.organizationId || dairyId || '',
+            dairyId: c.organizationId || c.dairyId || dairyId || '',
             candidateName: c.fullName || c.candidateName || 'Applicant',
             mobileNumber: c.mobileNumber || '',
-            submittedAt: c.createdAt || new Date().toISOString(),
+            submittedAt: c.submittedAt || c.createdAt || new Date().toISOString(),
             address: c.address || c.village || 'Local Area',
             village: c.village || 'Local Area',
             preferredCategory: (c.permittedCategories?.[0] || c.preferredCategory || 'COW') as any,
@@ -203,13 +205,13 @@ export const api = {
             faceCapture: {
               templateVersion: c.faceCapture?.templateVersion || 'sface_int8_2021dec',
               modelVersion: 'YuNet-v1.0 + SFace-INT8-v1.0',
-              consentTimestamp: c.faceCapture?.consentTimestamp || c.createdAt || new Date().toISOString(),
+              consentTimestamp: c.faceCapture?.consentTimestamp || c.submittedAt || c.createdAt || new Date().toISOString(),
               consentAgreed: true,
               enrollmentStatus: (c.faceEnrollmentStatus === 'ENROLLED' ? 'APPROVED' : (c.faceEnrollmentStatus || 'PENDING_APPROVAL')) as any,
               qualityScore: Number(c.faceScore || c.faceCapture?.qualityScore || 94.5),
               captureDevice: c.faceCapture?.captureDevice || 'Customer Mobile App (YuNet)',
             },
-            status: (c.registrationStatus === 'PENDING_APPROVAL' ? 'PENDING' : (c.registrationStatus || 'PENDING')) as any,
+            status: (c.status === 'PENDING' || c.registrationStatus === 'PENDING_APPROVAL') ? 'PENDING' : (c.status || c.registrationStatus || 'PENDING'),
             rejectionReason: c.rejectionReason,
             reviewedBy: c.reviewedBy,
             reviewedAt: c.reviewedAt,
@@ -360,6 +362,24 @@ export const api = {
         body: JSON.stringify({ operatorName }),
       })
     },
+    suspend: async (id: string, reason: string, operatorName: string) => {
+      return apiRequest(`/customers/${encodeURIComponent(id)}/suspend`, {
+        method: 'POST',
+        body: JSON.stringify({ reason, operatorName }),
+      })
+    },
+    reactivate: async (id: string, operatorName: string) => {
+      return apiRequest(`/customers/${encodeURIComponent(id)}/reactivate`, {
+        method: 'POST',
+        body: JSON.stringify({ operatorName }),
+      })
+    },
+    updateProfile: async (id: string, updates: any) => {
+      return apiRequest(`/customers/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
+      })
+    },
   },
 
   // Biometric Face Enrollment (YuNet + SFace)
@@ -406,6 +426,12 @@ export const api = {
       return apiRequest('/rfid/mark-lost', {
         method: 'POST',
         body: JSON.stringify({ cardUid, reason, operatorName }),
+      })
+    },
+    unassign: async (cardUid: string, customerId?: string) => {
+      return apiRequest('/rfid/unassign', {
+        method: 'POST',
+        body: JSON.stringify({ cardUid, customerId }),
       })
     },
   },
@@ -495,6 +521,12 @@ export const api = {
       return apiRequest(`/rate-charts/${encodeURIComponent(chartId)}/activate`, {
         method: 'POST',
         body: JSON.stringify({ operatorName }),
+      })
+    },
+    previewRate: async (params: { milkCategory: 'COW' | 'BUFFALO'; fat: number; snf: number; volume?: number }) => {
+      return apiRequest('/rate-charts/preview', {
+        method: 'POST',
+        body: JSON.stringify(params),
       })
     },
   },
@@ -721,6 +753,24 @@ export const api = {
       return apiRequest(`/notifications/${encodeURIComponent(notifId)}/read`, {
         method: 'POST',
       })
+    },
+  },
+
+  // Operational Reports & Exports
+  reports: {
+    getCollections: async (params?: Record<string, string>) => {
+      const q = params ? '?' + new URLSearchParams(params).toString() : ''
+      return apiRequest<any>(`/reports/collections${q}`)
+    },
+    getFeed: async () => {
+      return apiRequest<any>('/reports/feed')
+    },
+    getLedger: async () => {
+      return apiRequest<any>('/reports/ledger')
+    },
+    getExportUrl: (type: string, format: string = 'csv') => {
+      const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:4000/api/v1'
+      return `${baseUrl}/reports/export?type=${encodeURIComponent(type)}&format=${encodeURIComponent(format)}`
     },
   },
 

@@ -135,6 +135,7 @@ export class KioskShiftSession {
     return {
       id: this.props.id,
       sessionCode: this.props.sessionCode,
+      organizationId: this.props.organizationId,
       dairyId: this.props.organizationId,
       centerId: this.props.centerId,
       date: this.props.businessDate,

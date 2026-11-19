@@ -1,0 +1,168 @@
+{
+  "executionReference": "DFARM-MASTER-AUDIT-BASED-ISSUE-FIXING",
+  "generatedAt": "2026-11-18T21:10:00+05:30",
+  "issues": [
+    {
+      "id": "DFARM-AUDIT-001",
+      "application": "Database / Backend Infrastructure",
+      "module": "Database Migrations",
+      "severity": "CRITICAL",
+      "classification": "CONFIRMED DATABASE SCHEMA ISSUE",
+      "rootCause": "Migrations 033, 034, 035 were present in supabase/migrations but missing from MIGRATION_MANIFEST in MigrationRunner.ts and packages/database/src/index.ts. Provisioned databases did not run central policies, tenant reconciliation status hardening, or customer status lifecycle hardening.",
+      "proposedFix": "Add 033, 034, 035 to MIGRATION_MANIFEST in MigrationRunner.ts and packages/database/src/index.ts, and apply additive migrations to active database instances.",
+      "affectedFiles": [
+        "packages/database/src/index.ts",
+        "services/backend/src/infrastructure/database/MigrationRunner.ts",
+        "supabase/migrations/034_tenant_reconciliation_status_hardening.sql",
+        "supabase/migrations/035_customer_lifecycle_and_registration_hardening.sql"
+      ],
+      "verification": "npm run db:test (22/22 passed), node --test services/backend/tests/roadmap-phase-09-financial-calculation-settlement.test.js (38/38 passed)",
+      "status": "FIXED"
+    },
+    {
+      "id": "DFARM-AUDIT-002",
+      "application": "Database Migrations",
+      "module": "Quarantined Migrations",
+      "severity": "HIGH",
+      "classification": "CONFIRMED SECURITY ISSUE",
+      "rootCause": "Migration file supabase/migrations/031_remove_dairy_admin_7507495615.sql contained hardcoded specific phone numbers and operational data modifications inside the primary migration tracking directory.",
+      "proposedFix": "Relocate maintenance data script to scripts/maintenance/031_remove_dairy_admin_7507495615.sql and remove 031_quarantined entry from MIGRATION_MANIFEST.",
+      "affectedFiles": [
+        "scripts/maintenance/031_remove_dairy_admin_7507495615.sql",
+        "packages/database/src/index.ts",
+        "services/backend/src/infrastructure/database/MigrationRunner.ts"
+      ],
+      "verification": "Migration static analysis confirms 0 non-declarative operational scripts in active migration manifests. npm run db:test passes.",
+      "status": "FIXED"
+    },
+    {
+      "id": "DFARM-AUDIT-003",
+      "application": "Super Admin",
+      "module": "API Client & Activation Flow",
+      "severity": "HIGH",
+      "classification": "CONFIRMED FRONTEND DATA MAPPING ISSUE",
+      "rootCause": "In apps/dfarm-super-admin/src/api/client.ts and activationFlow.test.ts, fetch requests leaked to background server on port 4000, creating split-brain state where validateActivationToken hit port 4000 while activatePrimaryAdmin updated mockBackend.",
+      "proposedFix": "In activationFlow.test.ts, stub fetch to isolate unit test execution. In client.ts, ensure error responses do not silently mask failure states.",
+      "affectedFiles": [
+        "apps/dfarm-super-admin/src/test/activationFlow.test.ts",
+        "apps/dfarm-super-admin/src/api/client.ts"
+      ],
+      "verification": "npm run test --workspace=apps/dfarm-super-admin passes all 7 test suites (34/34 tests passed).",
+      "status": "FIXED"
+    },
+    {
+      "id": "DFARM-AUDIT-004",
+      "application": "Collection App / Backend Biometrics",
+      "module": "Biometric Face Recognition",
+      "severity": "HIGH",
+      "classification": "PENDING OWNER DECISION",
+      "rootCause": "Canonical YuNet+SFace 128D cosine distance threshold is set to 0.720 in FaceModelService.ts, but empirical false acceptance vs false rejection benchmarks in real ambient rural lighting conditions require calibrated field datasets.",
+      "proposedFix": "Quarantine threshold tuning as requiring field calibration dataset. Documented exact threshold and model configuration in FaceModelService.ts without arbitrary modifications.",
+      "affectedFiles": [
+        "services/backend/src/modules/identification/face-model.service.ts",
+        "apps/dfarm-collection-app/src/face-ai/dairy-face-matcher.ts"
+      ],
+      "verification": "Face verification tests pass in backend and collection app (8/8 in dairy-face-matcher.test.ts). Documented for hardware field rollout.",
+      "status": "PENDING_FIELD_CALIBRATION_DATASET"
+    },
+    {
+      "id": "DFARM-AUDIT-005",
+      "application": "Collection App",
+      "module": "Hardware Context",
+      "severity": "CRITICAL",
+      "classification": "CONFIRMED DATA INTEGRITY ISSUE",
+      "rootCause": "In HardwareContext.tsx, defaultMeasurements initialized state with synthetic test readings (fat: 4.2, snf: 8.7, weight: 12.5, scaleConnected: true, readingsValid: true), enabling intake submission without live hardware telemetry.",
+      "proposedFix": "Reset defaultMeasurements to zero/null state: fat: 0, snf: 0, clrDensity: 0, weightLiters: 0, analyzerConnected: false, scaleConnected: false, readingsValid: false, with validation errors requiring active hardware connection.",
+      "affectedFiles": [
+        "apps/dfarm-collection-app/src/context/HardwareContext.tsx"
+      ],
+      "verification": "npm run test --workspace=apps/dfarm-collection-app passes all 8 test suites (40/40 tests passed).",
+      "status": "FIXED"
+    },
+    {
+      "id": "DFARM-AUDIT-006",
+      "application": "Backend",
+      "module": "Route Registration",
+      "severity": "HIGH",
+      "classification": "CONFIRMED API CONTRACT ISSUE",
+      "rootCause": "Domain module routers (/billing, /rates, /reconciliation, /identification, /inventory, /employees, /attendance, /payroll, /webhooks/whatsapp) were mounted redundantly in both presentation/routes/index.ts and app.ts, causing route collision and divergent middleware behavior.",
+      "proposedFix": "Consolidate all domain module routes inside cleanApiRouter in presentation/routes/index.ts and remove duplicate mounts from app.ts. Add /accounts/:customerId route to presentation/routes/ledger.routes.ts.",
+      "affectedFiles": [
+        "services/backend/src/presentation/routes/index.ts",
+        "services/backend/src/app.ts",
+        "services/backend/src/presentation/routes/ledger.routes.ts"
+      ],
+      "verification": "npm run test --workspace=services/backend passes clean-architecture.test.js (9/9 passed) and financial calculation test suite (38/38 passed).",
+      "status": "FIXED"
+    },
+    {
+      "id": "DFARM-AUDIT-007",
+      "application": "Frontend Clients (Dairy Admin & Collection App)",
+      "module": "API Client Interceptors",
+      "severity": "MEDIUM",
+      "classification": "CONFIRMED FRONTEND DATA MAPPING ISSUE",
+      "rootCause": "Client request interceptors attached duplicate headers (X-Dairy-Tenant-ID, x-dairy-id, and X-Dairy-Id) simultaneously on outgoing HTTP requests, causing redundant header processing.",
+      "proposedFix": "Standardized on authoritative canonical header X-Dairy-Id and removed duplicate header mutations.",
+      "affectedFiles": [
+        "apps/dfarm-dairy-admin/src/api/client.ts",
+        "apps/dfarm-collection-app/src/api/client.ts"
+      ],
+      "verification": "Dairy Admin and Collection App test suites pass with 100% success (14/14 and 40/40).",
+      "status": "FIXED"
+    },
+    {
+      "id": "DFARM-AUDIT-008",
+      "application": "Customer App",
+      "module": "Collection History & Ledger Hooks",
+      "severity": "HIGH",
+      "classification": "CONFIRMED PERFORMANCE ISSUE",
+      "rootCause": "useCollection.ts and useLedger.ts query hooks executed requests to /collection/history and /ledger/entries without default pagination parameters, risking large payload transfer on farmer accounts with long delivery histories.",
+      "proposedFix": "Added default pagination parameters { page: 1, pageSize: 30 } in useCollection.ts and useLedger.ts.",
+      "affectedFiles": [
+        "apps/dfarm-customer-app/src/features/collection/useCollection.ts",
+        "apps/dfarm-customer-app/src/features/ledger/useLedger.ts"
+      ],
+      "verification": "npm run test --workspace=apps/dfarm-customer-app passes all 5 test suites (20/20 tests passed).",
+      "status": "FIXED"
+    },
+    {
+      "id": "DFARM-AUDIT-009",
+      "application": "Backend / Database",
+      "module": "Offline Collection Sync & Subledger",
+      "severity": "MEDIUM",
+      "classification": "CONFIRMED DATA INTEGRITY ISSUE",
+      "rootCause": "Late offline collections arriving after session close were marked RECONCILIATION_REQUIRED and credited to farmer subledger with audit note, but transaction status required verification against billing exclusions and duplicate credits.",
+      "proposedFix": "Additive migration 034 hardens transaction_status to support RECONCILIATION_REQUIRED across all tenant databases. Confirmed billing service queries exclusively transaction_status = 'COMPLETED', blocking late offline collections from bills until supervisor approves.",
+      "affectedFiles": [
+        "supabase/migrations/034_tenant_reconciliation_status_hardening.sql",
+        "services/backend/src/modules/sync/sync.service.ts",
+        "services/backend/src/modules/billing/billing.service.ts"
+      ],
+      "verification": "Financial settlement tests confirm RECONCILIATION_REQUIRED transactions are quarantined from bill calculation. sync.service safeSavepoints hardened.",
+      "status": "FIXED"
+    },
+    {
+      "id": "DFARM-AUDIT-010",
+      "application": "Frontend Apps (Dairy Admin & Collection App)",
+      "module": "API Architecture",
+      "severity": "MEDIUM",
+      "classification": "CONFIRMED FRONTEND DATA MAPPING ISSUE",
+      "rootCause": "mock-server.ts and mock-backend.ts were positioned inside src/api/ production directory trees, risking dead-code inclusion in production web assets.",
+      "proposedFix": "Relocated mock-server.ts to apps/dfarm-dairy-admin/src/test/mocks/mock-server.ts and mock-backend.ts to apps/dfarm-collection-app/src/test/mocks/mock-backend.ts. Updated test imports.",
+      "affectedFiles": [
+        "apps/dfarm-dairy-admin/src/test/mocks/mock-server.ts",
+        "apps/dfarm-collection-app/src/test/mocks/mock-backend.ts",
+        "apps/dfarm-dairy-admin/src/test/auth.test.ts",
+        "apps/dfarm-dairy-admin/src/test/customer-approvals.test.ts",
+        "apps/dfarm-dairy-admin/src/test/feed-inventory.test.ts",
+        "apps/dfarm-dairy-admin/src/test/ledger-billing.test.ts",
+        "apps/dfarm-dairy-admin/src/test/rate-chart.test.ts",
+        "apps/dfarm-collection-app/src/test/auth.test.ts",
+        "apps/dfarm-collection-app/src/test/collection-transaction.test.ts",
+        "apps/dfarm-collection-app/src/test/rate-calculation.test.ts"
+      ],
+      "verification": "Full production builds (npm run build) across all workspaces succeed cleanly without mock imports in production code.",
+      "status": "FIXED"
+    }
+  ]
+}

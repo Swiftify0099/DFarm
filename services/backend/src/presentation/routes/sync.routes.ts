@@ -11,6 +11,7 @@ import {
   PostgresLedgerRepository,
 } from '../../infrastructure/index.js';
 import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { syncRouter } from '../../modules/sync/sync.routes.js';
 
 const router = Router();
 const customerRepo = new PostgresCustomerRepository();
@@ -28,11 +29,11 @@ const intakeUseCase = new ProcessMilkIntakeUseCase(
 );
 const syncUseCase = new ProcessOfflineSyncBatchUseCase(intakeUseCase);
 
-router.post('/push', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction) => {
+const handleSyncBatch = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { deviceId, transactions } = req.body;
     const operatorId = req.user?.userId || '00000000-0000-0000-0000-000000000003';
-    const operatorName = 'Counter Operator';
+    const operatorName = req.user?.fullName || 'Counter Operator';
 
     const result = await syncUseCase.execute({
       deviceId: deviceId || 'KIOSK_MAIN',
@@ -45,6 +46,12 @@ router.post('/push', optionalAuthenticate, async (req: Request, res: Response, n
   } catch (err) {
     next(err);
   }
-});
+};
+
+router.post('/transactions', optionalAuthenticate, handleSyncBatch);
+router.post('/push', optionalAuthenticate, handleSyncBatch);
+
+// Mount the comprehensive syncRouter for /push, /pull, /acknowledge, /status
+router.use('/', syncRouter);
 
 export const syncRoutes = router;

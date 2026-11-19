@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import type { OfflineQueueItem } from '@/types'
 import { localDB } from '@/services/local-storage'
 import { useHardware } from '@/context/HardwareContext'
+import { syncApi } from '@/api/client'
 import { ClayCard, ClayButton, ClayBadge, ClayTable } from '@/components/ui'
 import { SyncCloudVisual } from '@/assets/illustrations'
 import { RefreshCw, Wifi, WifiOff, CheckCircle2, Clock, Trash2, ArrowUpRight } from 'lucide-react'
@@ -42,14 +43,48 @@ export const OfflineQueueView: React.FC = () => {
 
     try {
       const items = await localDB.getOfflineQueue()
-      for (const item of items) {
-        // Remove successfully flushed items
-        await localDB.removeQueueItem(item.eventId)
+      if (items.length === 0) {
+        setSyncStatusNote('Offline queue is empty. Zero records pending sync.')
+        return
+      }
+
+      // Submit batch to authoritative server sync endpoint
+      const batchPayload = {
+        deviceId: 'KIOSK_MAIN',
+        transactions: items.map((item) => ({
+          clientIntakeUuid: item.transactionId || item.transaction.id,
+          sessionCode: item.transaction.sessionId,
+          customerId: item.transaction.customerId,
+          milkCategory: item.transaction.milkCategory as 'COW' | 'BUFFALO',
+          weightLiters: item.transaction.weightLiters,
+          fatPercentage: item.transaction.fatPercentage,
+          snfPercentage: item.transaction.snfPercentage,
+          clrDensity: item.transaction.clrDensity,
+          identificationMethod: (item.transaction.identificationMethod as any) || 'FACE_YUNET_SFACE',
+          idempotencyKey: `SYNC-${item.transactionId || item.transaction.id}`,
+        })),
+      }
+
+      const syncResult = await syncApi.pushBatch(batchPayload)
+
+      let flushedCount = 0
+      for (const resItem of syncResult.items) {
+        if (resItem.success) {
+          const matching = items.find(
+            (i) => (i.transactionId || i.transaction.id) === resItem.clientIntakeUuid
+          )
+          if (matching) {
+            await localDB.removeQueueItem(matching.eventId)
+            flushedCount++
+          }
+        }
       }
 
       await loadQueue()
       await refreshOfflineCount()
-      setSyncStatusNote(`Successfully flushed ${items.length} queued records to DFarm Cloud!`)
+      setSyncStatusNote(
+        `Sync completed: ${flushedCount} flushed successfully, ${syncResult.failed} failed/requires review.`
+      )
     } catch (err: any) {
       alert(`Sync error: ${err.message || 'Unknown error'}`)
     } finally {

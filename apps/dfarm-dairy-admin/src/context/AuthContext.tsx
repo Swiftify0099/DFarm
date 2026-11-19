@@ -55,7 +55,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const hasPermission = (permission: Permission): boolean => {
     if (!user) return false
-    if (user.role === 'PRIMARY_DAIRY_ADMIN') return true
+    if (user.role === 'PRIMARY_DAIRY_ADMIN' || (user.role as any) === 'SUPER_ADMIN') return true
+    if (user.permissions?.includes('ALL' as any)) return true
     return user.permissions.includes(permission)
   }
 

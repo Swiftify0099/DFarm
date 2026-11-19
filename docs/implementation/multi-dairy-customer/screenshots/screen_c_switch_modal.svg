@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="375" height="812" viewBox="0 0 375 812" fill="none">
+  <!-- Dimmed Background -->
+  <rect width="375" height="812" fill="rgba(0, 0, 0, 0.4)"/>
+  
+  <!-- Claymorphism Bottom Sheet Modal -->
+  <g transform="translate(0, 240)">
+    <rect width="375" height="572" rx="32" fill="#F4F8F3" filter="drop-shadow(0px -10px 24px rgba(0,0,0,0.15))"/>
+    
+    <!-- Drag Handle -->
+    <rect x="165" y="14" width="45" height="5" rx="2.5" fill="#C5D3C7"/>
+    
+    <!-- Title Section -->
+    <text x="24" y="52" font-family="system-ui, sans-serif" font-size="20" font-weight="700" fill="#1C2A1E">डेअरी बदला (Switch Dairy)</text>
+    <text x="24" y="74" font-family="system-ui, sans-serif" font-size="13" fill="#4D6352">निवडलेल्या डेअरीनुसार तुमचे संकलन व पासबुक लोड होईल</text>
+    
+    <!-- Card 1: Currently Active Dairy -->
+    <g transform="translate(24, 96)">
+      <rect width="327" height="96" rx="18" fill="#FFFFFF" stroke="#1B5E20" stroke-width="2" filter="drop-shadow(0px 4px 12px rgba(27,94,32,0.15))"/>
+      <!-- Active Tag -->
+      <rect x="225" y="14" width="88" height="22" rx="11" fill="#1B5E20"/>
+      <text x="269" y="29" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#FFFFFF">✓ सध्या सक्रिय</text>
+      
+      <text x="18" y="32" font-family="system-ui, sans-serif" font-size="15" font-weight="700" fill="#1C2A1E">वारणा सहकारी दूध संस्था</text>
+      <text x="18" y="52" font-family="system-ui, sans-serif" font-size="12" fill="#829787">कोड: WARNA-01 • शेतकरी: C-W101</text>
+      <text x="18" y="74" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#1B5E20">डेटा सध्या लोड केलेला आहे</text>
+    </g>
+    
+    <!-- Card 2: Other Approved Dairy (Available to Switch) -->
+    <g transform="translate(24, 208)">
+      <rect width="327" height="96" rx="18" fill="#FFFFFF" filter="drop-shadow(0px 4px 10px rgba(0,0,0,0.04))"/>
+      <rect x="0.5" y="0.5" width="326" height="95" rx="17.5" stroke="#E0E8E1"/>
+      
+      <!-- Switch Button -->
+      <g transform="translate(225, 32)">
+        <rect width="88" height="34" rx="17" fill="#1B5E20" filter="drop-shadow(0px 4px 8px rgba(27,94,32,0.25))"/>
+        <text x="44" y="22" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#FFFFFF">स्विच करा</text>
+      </g>
+      
+      <text x="18" y="32" font-family="system-ui, sans-serif" font-size="15" font-weight="700" fill="#1C2A1E">कृष्णा व्हॅली दूध संघ</text>
+      <text x="18" y="52" font-family="system-ui, sans-serif" font-size="12" fill="#829787">कोड: KRISHNA-02 • शेतकरी: C-K204</text>
+      <text x="18" y="74" font-family="system-ui, sans-serif" font-size="12" fill="#4D6352">केंद्र: उत्तर केंद्र, सांगली</text>
+    </g>
+    
+    <!-- Card 3: Pending Approval Dairy -->
+    <g transform="translate(24, 320)">
+      <rect width="327" height="84" rx="18" fill="#FFFFFF" opacity="0.8"/>
+      <rect x="0.5" y="0.5" width="326" height="83" rx="17.5" stroke="#FFE082"/>
+      
+      <rect x="205" y="14" width="108" height="22" rx="11" fill="#FFF8E1"/>
+      <text x="259" y="29" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" font-weight="700" fill="#D48B14">मंजुरी प्रलंबित</text>
+      
+      <text x="18" y="32" font-family="system-ui, sans-serif" font-size="15" font-weight="600" fill="#1C2A1E">गोकुळ सहकारी संघ</text>
+      <text x="18" y="52" font-family="system-ui, sans-serif" font-size="12" fill="#829787">पडताळणी पूर्ण झाल्यावर सक्रिय होईल</text>
+    </g>
+    
+    <!-- Register with Another Dairy Link -->
+    <g transform="translate(24, 436)">
+      <rect width="327" height="52" rx="16" fill="#E8F5E9"/>
+      <text x="163" y="32" text-anchor="middle" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1B5E20">➕ नवीन डेअरी जोडा (Add New Dairy)</text>
+    </g>
+  </g>
+</svg>

@@ -56,6 +56,16 @@ export interface DashboardMetrics {
   totalPrimaryAdmins: number
   adminsAwaitingActivation: number
   totalRegisteredHardwareUnits: number
+  allocatedHardwareUnits?: number
+  unallocatedHardwareUnits?: number
+  activeAmcSubscriptions?: number
+  expiringAmcSubscriptions?: number
+  expiredAmcSubscriptions?: number
+  globalRatePoliciesCount?: number
+  globalFatSnfPoliciesCount?: number
+  publishedRateVersionsCount?: number
+  publishedFatSnfVersionsCount?: number
+  activeSupportSessionsCount?: number
   platformSyncHealthStatus: 'healthy' | 'degraded' | 'failing'
   openAlertsCount: number
   criticalAlertsCount: number

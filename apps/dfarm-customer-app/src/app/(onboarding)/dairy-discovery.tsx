@@ -6,6 +6,7 @@ import {
   FlatList,
   Pressable,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -30,6 +31,7 @@ import {
 } from '../../features/dairy/useDairyDiscovery';
 import { Dairy } from '../../types/dairy';
 import { locationService } from '../../services/location-service';
+import { useAuth } from '../../features/auth/useAuth';
 import {
   LocationPinIcon,
   GpsPulseIcon,
@@ -46,10 +48,12 @@ type LocationState =
 export default function DairyDiscoveryScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ mobileNumber?: string }>();
+  const { memberships, switchDairy } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDairy, setSelectedDairy] = useState<Dairy | null>(null);
   const [activeArea, setActiveArea] = useState<string>('gps');
   const [locationState, setLocationState] = useState<LocationState>({ kind: 'detecting' });
+  const [isSwitchingExisting, setIsSwitchingExisting] = useState(false);
 
   // Derive selectedCoords from locationState for query dependency
   const selectedCoords =
@@ -149,8 +153,41 @@ export default function DairyDiscoveryScreen() {
     setSelectedDairy(dairy);
   };
 
-  const handleProceed = () => {
+  const handleProceed = async () => {
     if (!selectedDairy) return;
+    if (selectedDairy.isOperational === false || (selectedDairy as any).provisioningStatus === 'FAILED') {
+      Alert.alert(
+        'Dairy Database Offline',
+        `The selected dairy (${selectedDairy.name}) is currently undergoing database setup and cannot accept producer registrations at this moment. Please choose another nearby operational dairy.`
+      );
+      return;
+    }
+    const existing = memberships.find((m) => m.organizationId === selectedDairy.id);
+
+    if (existing) {
+      if (existing.membershipStatus === 'APPROVED') {
+        try {
+          setIsSwitchingExisting(true);
+          await switchDairy({ dairyId: selectedDairy.id });
+          router.replace('/(main)');
+        } finally {
+          setIsSwitchingExisting(false);
+        }
+        return;
+      }
+      if (existing.membershipStatus === 'PENDING_APPROVAL') {
+        router.push({
+          pathname: '/(onboarding)/pending-approval',
+          params: {
+            dairyName: selectedDairy.name,
+            customerId: existing.tenantCustomerId || existing.id,
+            farmerCode: existing.farmerCode || undefined,
+          },
+        });
+        return;
+      }
+    }
+
     router.push({
       pathname: '/(onboarding)/register',
       params: {
@@ -173,7 +210,10 @@ export default function DairyDiscoveryScreen() {
       locationState.kind === 'ready' || locationState.kind === 'manual'
         ? locationState.label
         : 'this area';
-    return `${areaLabel}: ${dairies.length} registered ${dairies.length === 1 ? 'dairy' : 'dairies'}`;
+    const nearestDist = dairies[0]?.distanceKm !== undefined && dairies[0]?.distanceKm !== null
+      ? (dairies[0].distanceKm < 1 ? `${Math.round(dairies[0].distanceKm * 1000)} m` : `${dairies[0].distanceKm.toFixed(1)} km`)
+      : null;
+    return `${areaLabel}: ${dairies.length} registered ${dairies.length === 1 ? 'dairy' : 'dairies'}${nearestDist ? ` (closest: ${nearestDist})` : ''}`;
   };
 
   const renderLocationBanner = () => {
@@ -310,6 +350,10 @@ export default function DairyDiscoveryScreen() {
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => {
             const isSelected = selectedDairy?.id === item.id;
+            const existing = memberships.find((m) => m.organizationId === item.id);
+            const isApproved = existing?.membershipStatus === 'APPROVED';
+            const isPending = existing?.membershipStatus === 'PENDING_APPROVAL';
+
             return (
               <Pressable
                 onPress={() => handleSelectDairy(item)}
@@ -341,6 +385,24 @@ export default function DairyDiscoveryScreen() {
                           👤 In-charge: {item.associatedPerson}
                         </Text>
                       )}
+
+                      {(!item.isOperational || item.provisioningStatus === 'FAILED') && (
+                        <View style={{ marginTop: 6, alignSelf: 'flex-start' }}>
+                          <ClayBadge
+                            label="Setup In Progress / डेटाबेस तयार नाही"
+                            variant="orange"
+                          />
+                        </View>
+                      )}
+
+                      {existing && (
+                        <View style={{ marginTop: 6, alignSelf: 'flex-start' }}>
+                          <ClayBadge
+                            label={isApproved ? 'Already Registered / नोंदणीकृत' : isPending ? 'Pending Approval / पडताळणी सुरू' : existing.membershipStatus}
+                            variant={isApproved ? 'success' : 'orange'}
+                          />
+                        </View>
+                      )}
                     </View>
                   </View>
 
@@ -350,7 +412,11 @@ export default function DairyDiscoveryScreen() {
                         <Text style={styles.checkIcon}>✓</Text>
                       </View>
                       <Text style={styles.selectedText}>
-                        Selected for Affiliation
+                        {isApproved
+                          ? 'Select to Switch Active Dairy'
+                          : isPending
+                          ? 'Tap to View Application Status'
+                          : 'Selected for Affiliation'}
                       </Text>
                     </View>
                   )}
@@ -364,11 +430,39 @@ export default function DairyDiscoveryScreen() {
       {/* Sticky Proceed Container */}
       {selectedDairy && (
         <View style={styles.proceedSection}>
-          <ClayButton
-            title={`Continue with ${selectedDairy.name}`}
-            onPress={handleProceed}
-            variant="primary"
-          />
+          {(() => {
+            const existing = memberships.find((m) => m.organizationId === selectedDairy.id);
+            const isApproved = existing?.membershipStatus === 'APPROVED';
+            const isPending = existing?.membershipStatus === 'PENDING_APPROVAL';
+
+            const isOffline = selectedDairy.isOperational === false || (selectedDairy as any).provisioningStatus === 'FAILED';
+
+            const buttonTitle = isSwitchingExisting
+              ? 'Switching Dairy...'
+              : isOffline
+              ? `${selectedDairy.name} Setup In Progress`
+              : isApproved
+              ? `Switch to ${selectedDairy.name} / डेअरी बदला`
+              : isPending
+              ? `View Status for ${selectedDairy.name}`
+              : `Continue with ${selectedDairy.name} / नोंदणी करा`;
+
+            return (
+              <View>
+                <ClayButton
+                  title={buttonTitle}
+                  onPress={handleProceed}
+                  variant={isOffline ? 'secondary' : isApproved ? 'secondary' : 'primary'}
+                  disabled={isSwitchingExisting || isOffline}
+                />
+                {isOffline && (
+                  <Text style={{ color: '#D32F2F', fontSize: 12, textAlign: 'center', marginTop: 6 }}>
+                    This dairy is currently undergoing system setup. Please select another nearby dairy.
+                  </Text>
+                )}
+              </View>
+            );
+          })()}
         </View>
       )}
     </SafeAreaView>

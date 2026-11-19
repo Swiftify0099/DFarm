@@ -1,6 +1,14 @@
 import type { Request, Response, NextFunction } from 'express';
 export declare class LedgerController {
     /**
+     * GET /api/v1/ledger/entries (Farmer Passbook Stream)
+     */
+    static getFarmerPassbookEntries(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    /**
+     * GET /api/v1/ledger/summary (Farmer Khata Summary)
+     */
+    static getMySummary(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    /**
      * 1. GET /api/v1/ledger/accounts
      */
     static getAccounts(req: Request, res: Response, next: NextFunction): Promise<Response | void>;

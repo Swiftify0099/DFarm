@@ -18,5 +18,7 @@ export declare class PaymentController {
     static approveBatch(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
     static submitBatch(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
     static reconcileBatch(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    static exportBatch(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    static downloadBatch(req: Request, res: Response, next: NextFunction): Promise<void>;
 }
 //# sourceMappingURL=payment.controller.d.ts.map

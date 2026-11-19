@@ -77,7 +77,7 @@ export function useDairyDiscovery(
         params.lng = currentLng;
         params.latitude = currentLat;
         params.longitude = currentLng;
-        params.radiusKm = 5;
+        params.radiusKm = 50;
       }
 
       try {
@@ -164,6 +164,9 @@ export function useDairyDiscovery(
               latitude: dLat,
               longitude: dLng,
               isActive: item.isActive !== false && item.discoveryStatus !== 'SUSPENDED' && item.discoveryStatus !== 'DISABLED',
+              provisioningStatus: item.provisioningStatus,
+              isOperational: item.isOperational !== false && item.provisioningStatus !== 'FAILED',
+              discoveryStatus: item.discoveryStatus,
             };
           });
 
