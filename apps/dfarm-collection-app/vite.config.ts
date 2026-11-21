@@ -45,9 +45,22 @@ function onnxWasmMiddlewarePlugin(): Plugin {
   }
 }
 
+function cloudflareSpaFallbackPlugin(): Plugin {
+  return {
+    name: 'cloudflare-spa-fallback',
+    closeBundle() {
+      const distIndex = path.resolve(__dirname, './dist/index.html')
+      const dist200 = path.resolve(__dirname, './dist/200.html')
+      if (fs.existsSync(distIndex)) {
+        fs.copyFileSync(distIndex, dist200)
+      }
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [onnxWasmMiddlewarePlugin(), react(), tailwindcss()],
+  plugins: [onnxWasmMiddlewarePlugin(), cloudflareSpaFallbackPlugin(), react(), tailwindcss()],
   assetsInclude: ['**/*.onnx'],
   server: {
     port: 5175,
