@@ -35,10 +35,10 @@ export default defineConfig(({ mode }) => {
         env.VITE_GOOGLE_MAPS_API_KEY || ''
       ),
       'import.meta.env.VITE_API_BASE_URL': JSON.stringify(
-        env.VITE_API_BASE_URL || env.VITE_API_URL || (mode === 'production' ? '' : 'http://localhost:4000/api/v1')
+        env.VITE_API_BASE_URL || env.VITE_API_URL || (mode === 'production' ? 'https://dfarm-backend.onrender.com/api/v1' : 'http://localhost:4000/api/v1')
       ),
       'import.meta.env.VITE_API_URL': JSON.stringify(
-        env.VITE_API_BASE_URL || env.VITE_API_URL || (mode === 'production' ? '' : 'http://localhost:4000/api/v1')
+        env.VITE_API_BASE_URL || env.VITE_API_URL || (mode === 'production' ? 'https://dfarm-backend.onrender.com/api/v1' : 'http://localhost:4000/api/v1')
       ),
     },
     plugins: [

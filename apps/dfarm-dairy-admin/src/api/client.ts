@@ -102,14 +102,8 @@ export const getApiBaseUrl = (): string => {
     return 'http://localhost:4000/api/v1'
   }
 
-  // In production, warn if VITE_API_BASE_URL was omitted during build
-  if (typeof window !== 'undefined' && import.meta.env.PROD) {
-    console.warn(
-      '[DFarm Dairy Admin] VITE_API_BASE_URL is not configured in production. ' +
-      'API requests will fall back to relative path /api/v1.'
-    )
-  }
-  return '/api/v1'
+  // In production, fallback to production backend instead of relative URL on frontend host
+  return 'https://dfarm-backend.onrender.com/api/v1'
 }
 
 export const apiRequest = async <T = any>(endpoint: string, options: RequestInit = {}): Promise<T> => {
