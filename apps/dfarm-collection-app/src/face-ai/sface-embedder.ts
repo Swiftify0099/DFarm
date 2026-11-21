@@ -23,7 +23,7 @@ export class SFaceEmbedder {
       // 1. In browser runtime with onnxruntime-web
       if (typeof window !== 'undefined') {
         try {
-          const ortWeb = await import('onnxruntime-web')
+          const ortWeb = await import('onnxruntime-web/wasm')
           this.ort = ortWeb
           if (ortWeb.env) {
             ortWeb.env.logLevel = 'error'
