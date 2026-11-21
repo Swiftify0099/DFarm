@@ -198,6 +198,27 @@ export class PostgresLedgerRepository {
                     `LEDGER-${newEntry.id}`,
                     createdBy,
                 ]);
+                // 3. Insert balanced double-entry journal lines: SUM(Debit) = SUM(Credit)
+                const insertLineSql = `
+          INSERT INTO ledger_entries (
+            transaction_id, account_id, account_type, entry_type, amount
+          ) VALUES ($1, $2, $3, $4, $5);
+        `;
+                if (direction === 'CREDIT') {
+                    // Milk intake credit:
+                    // Line 1: Credit Customer Payable
+                    await txClient.query(insertLineSql, [newEntry.id, account.id, 'CUSTOMER_PAYABLE', 'CREDIT', amount]);
+                    // Line 2: Debit Milk Purchase Expense
+                    await txClient.query(insertLineSql, [newEntry.id, centerId, 'MILK_PURCHASE_EXPENSE', 'DEBIT', amount]);
+                }
+                else {
+                    // Debit transaction (e.g. Feed purchase / Payout):
+                    // Line 1: Debit Customer Payable
+                    await txClient.query(insertLineSql, [newEntry.id, account.id, 'CUSTOMER_PAYABLE', 'DEBIT', amount]);
+                    // Line 2: Credit Feed Inventory or Cash/Bank
+                    const contraAccount = txnType === 'FEED_PURCHASE_DEBIT' ? 'FEED_INVENTORY' : 'CASH_BANK';
+                    await txClient.query(insertLineSql, [newEntry.id, centerId, contraAccount, 'CREDIT', amount]);
+                }
             }
         });
         // Also update control plane DB if reachable

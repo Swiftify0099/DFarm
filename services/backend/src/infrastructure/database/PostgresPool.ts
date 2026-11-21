@@ -54,7 +54,7 @@ export class PostgresDatabase {
     return PostgresDatabase.instance;
   }
 
-  private async withTimeout<R>(promise: Promise<R>, ms: number = 3000, label: string = 'Operation'): Promise<R> {
+  private async withTimeout<R>(promise: Promise<R>, ms: number = 15000, label: string = 'Operation'): Promise<R> {
     let timer: NodeJS.Timeout;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
@@ -68,7 +68,7 @@ export class PostgresDatabase {
 
   public async checkConnection(): Promise<boolean> {
     try {
-      const client = await this.withTimeout(this.pool.connect(), 3000, 'PostgreSQL checkConnection');
+      const client = await this.withTimeout(this.pool.connect(), 15000, 'PostgreSQL checkConnection');
       try {
         const res = await client.query('SELECT 1 as alive;');
         this.isPostgresConnected = res.rows.length > 0;

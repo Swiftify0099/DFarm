@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     region: singapore
-    buildCommand: npm install && npm run build:backend
+    buildCommand: npm install --include=dev && npm run build:backend
     startCommand: npm run start:backend
     healthCheckPath: /health/live
     autoDeploy: true
@@ -17,6 +17,7 @@ services:
         value: 10000
       - key: CORS_ALLOWED_ORIGINS
         value: "*"
+      # Supabase & Database Configuration
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY
@@ -25,16 +26,51 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      - key: DIRECT_URL
+        sync: false
       - key: DATABASE_TLS_MODE
         value: require
-      - key: TENANT_DB_ENCRYPTION_KEY
-        generateValue: true
+      # Security Keys
       - key: JWT_SECRET
         generateValue: true
       - key: ADMIN_OTP_SECRET
         generateValue: true
+      - key: TENANT_DB_ENCRYPTION_KEY
+        generateValue: true
+      # Admin Configuration
+      - key: ADMIN_PHONE_NUMBER
+        value: "+917755995615,7755995615"
       - key: DEFAULT_PHONE_REGION
         value: "IN"
+      - key: ALLOW_TEST_PREVIEW_OTP
+        value: "true"
+      # Dove SMS Gateway Configuration (Mobicomm)
+      - key: DOVE_SMS_API_URL
+        value: "https://mobicomm.dove-sms.com/submitsms.jsp"
+      - key: DOVE_SMS_USERNAME
+        value: "Experts"
+      - key: DOVE_SMS_AUTHKEY
+        sync: false
+      - key: DOVE_SMS_SENDER_ID
+        value: "EXTSKL"
+      - key: DOVE_SMS_ACCUSAGE
+        value: "1"
+      - key: DOVE_SMS_TEMPLATE
+        value: "Your Verification Code for login is {OTP}. - Expertskill Technology."
+      # Email SMTP Service Configuration
+      - key: SMTP_HOST
+        value: "smtp.gmail.com"
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        value: "d.farm.expart@gmail.com"
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        value: "DFarm Platform <d.farm.expart@gmail.com>"
+      # Rate Limiting
       - key: RATE_LIMIT_WINDOW_MS
         value: "60000"
       - key: RATE_LIMIT_MAX_REQUESTS

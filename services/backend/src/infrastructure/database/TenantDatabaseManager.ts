@@ -358,6 +358,9 @@ export class TenantDatabaseManager {
           provisioned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           last_verified_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+      `);
+
+      await tenantClient.query(`
         INSERT INTO tenant_metadata (dairy_id, dairy_code, dairy_name, database_name, schema_version)
         VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (dairy_id) DO UPDATE SET

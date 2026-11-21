@@ -38,6 +38,7 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/node": "^22.10.1",
     "@types/pdfkit": "^0.17.7",
     "@types/supertest": "^7.2.1",
     "pino-pretty": "^13.2.0",
