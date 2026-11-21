@@ -58,13 +58,19 @@ export const isAndroidEmulator = (): boolean => {
 };
 
 const resolveDefaultBaseUrl = (): string => {
-  const envUrl = (
+  const rawEnv = (
     process.env.EXPO_PUBLIC_API_URL ||
     process.env.EXPO_PUBLIC_API_BASE_URL ||
     process.env.EXPO_PUBLIC_WEB_API_URL ||
     process.env.VITE_API_BASE_URL ||
     ''
   ).trim();
+
+  let envUrl = rawEnv;
+  if (envUrl) {
+    const sanitized = envUrl.replace(/\/+$/, '');
+    envUrl = sanitized.endsWith('/api/v1') ? sanitized : `${sanitized}/api/v1`;
+  }
 
   // 0. Explicit HTTPS remote URL: Always honor it across all platforms, emulators, and release builds
   if (envUrl && envUrl.startsWith('https://')) {
