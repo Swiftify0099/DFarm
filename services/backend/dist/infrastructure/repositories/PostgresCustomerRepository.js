@@ -106,13 +106,20 @@ export class PostgresCustomerRepository {
      * Cross-tenant scatter-gather queries are strictly prohibited.
      */
     async findById(id, organizationId, includeDeleted = false) {
+        if (!id || typeof id !== 'string') {
+            return null;
+        }
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!isUuid.test(id)) {
+            return null;
+        }
         let resolvedOrgId = organizationId;
         if (!resolvedOrgId) {
             // In the absence of an explicit organizationId (e.g. public customer registration status polling),
             // resolve the dairy tenant context from central control plane customer registry
             const controlDb = tenantDbManager.getControlPlaneDb();
             try {
-                const lookupRes = await controlDb.query('SELECT organization_id FROM customer_tenant_lookup WHERE customer_id = $1 LIMIT 1;', [id]);
+                const lookupRes = await controlDb.query('SELECT organization_id FROM customer_tenant_lookup WHERE customer_id = $1 OR global_customer_id = $1 LIMIT 1;', [id]);
                 if (lookupRes.rows.length > 0 && lookupRes.rows[0].organization_id) {
                     resolvedOrgId = lookupRes.rows[0].organization_id;
                 }
@@ -136,7 +143,7 @@ export class PostgresCustomerRepository {
         if (!resolvedOrgId && (process.env.NODE_ENV === 'test' || config.NODE_ENV === 'development' || process.execArgv.includes('--test') || process.argv.some(a => a.includes('test')))) {
             for (const cl of tenantDbManager.getAllTenantDbs()) {
                 try {
-                    const testRow = await cl.query('SELECT organization_id FROM customers WHERE id = $1 LIMIT 1;', [id]);
+                    const testRow = await cl.query('SELECT organization_id FROM customers WHERE id = $1 OR global_customer_id = $1 LIMIT 1;', [id]);
                     if (testRow.rows.length > 0 && testRow.rows[0].organization_id) {
                         resolvedOrgId = testRow.rows[0].organization_id;
                         break;
@@ -151,7 +158,7 @@ export class PostgresCustomerRepository {
             return null;
         }
         const client = await tenantDbManager.getTenantDb(resolvedOrgId);
-        const conditions = ['c.id = $1', 'c.organization_id = $2'];
+        const conditions = ['(c.id = $1 OR c.global_customer_id = $1)', 'c.organization_id = $2'];
         if (!includeDeleted) {
             conditions.push('c.is_deleted = FALSE');
         }
@@ -435,21 +442,32 @@ export class PostgresCustomerRepository {
       `, [cardId, customerId, centerId, operatorId]);
         });
     }
-    async updateFaceEnrollment(customerId, modelVersion, encryptedPayload) {
-        let orgId;
-        // Resolve tenant DB
-        const controlDb = tenantDbManager.getControlPlaneDb();
-        try {
-            const lookup = await controlDb.query('SELECT organization_id FROM customer_tenant_lookup WHERE customer_id = $1 LIMIT 1;', [customerId]);
-            if (lookup.rows.length > 0) {
-                orgId = lookup.rows[0].organization_id;
+    async updateFaceEnrollment(customerId, modelVersion, encryptedPayload, organizationId) {
+        let orgId = organizationId;
+        if (!orgId) {
+            // Resolve tenant DB from central control plane
+            const controlDb = tenantDbManager.getControlPlaneDb();
+            try {
+                const memLookup = await controlDb.query('SELECT organization_id FROM customer_dairy_memberships WHERE tenant_customer_id = $1 OR id = $1 OR global_customer_id = $1 LIMIT 1;', [customerId]);
+                if (memLookup.rows.length > 0 && memLookup.rows[0].organization_id) {
+                    orgId = memLookup.rows[0].organization_id;
+                }
+            }
+            catch { }
+            if (!orgId) {
+                try {
+                    const lookup = await controlDb.query('SELECT organization_id FROM customer_tenant_lookup WHERE customer_id = $1 LIMIT 1;', [customerId]);
+                    if (lookup.rows.length > 0) {
+                        orgId = lookup.rows[0].organization_id;
+                    }
+                }
+                catch { }
             }
         }
-        catch { }
         if (!orgId) {
             for (const tenantDb of tenantDbManager.getAllTenantDbs()) {
                 try {
-                    const res = await tenantDb.query('SELECT organization_id FROM customers WHERE id = $1 LIMIT 1;', [customerId]);
+                    const res = await tenantDb.query('SELECT organization_id FROM customers WHERE id = $1 OR global_customer_id = $1 LIMIT 1;', [customerId]);
                     if (res.rows.length > 0) {
                         orgId = res.rows[0].organization_id;
                         break;
@@ -458,7 +476,10 @@ export class PostgresCustomerRepository {
                 catch { }
             }
         }
-        const client = orgId ? await tenantDbManager.getTenantDb(orgId) : controlDb;
+        if (!orgId) {
+            throw new Error(`Tenant context (organizationId) could not be resolved for customer '${customerId}' biometric enrollment.`);
+        }
+        const client = await tenantDbManager.getTenantDb(orgId);
         // Resolve model version UUID
         let modelVersionId = 'f0000000-0000-0000-0000-000000000001';
         try {
@@ -492,6 +513,25 @@ export class PostgresCustomerRepository {
             if (uRes.rows.length > 0) {
                 enrolledBy = uRes.rows[0].id;
             }
+            else {
+                // Ensure parent organization exists in tenant DB if constrained
+                try {
+                    await client.query(`
+            INSERT INTO organizations (id, name, code, status, business_phone, business_email)
+            VALUES ($1, 'Tenant Dairy', 'DF-TENANT', 'ACTIVE', '9999999999', 'dairy@dfarm.internal')
+            ON CONFLICT (id) DO NOTHING;
+          `, [orgId]);
+                }
+                catch { }
+                // Ensure system operator user exists in tenant db to satisfy foreign key constraint
+                await client.query(`
+          INSERT INTO users (
+            id, organization_id, username, full_name, email, phone_number, role, status
+          ) VALUES (
+            $1, $2, 'kiosk_biometric_service', 'Kiosk Biometric Service', 'kiosk@dfarm.internal', '+919999999999', 'COLLECTION_OPERATOR', 'ACTIVE'
+          ) ON CONFLICT (id) DO NOTHING;
+        `, [enrolledBy, orgId]);
+            }
         }
         catch { }
         const payload = typeof encryptedPayload === 'string' ? JSON.parse(encryptedPayload) : encryptedPayload;
@@ -499,8 +539,9 @@ export class PostgresCustomerRepository {
         const ivB64 = payload.iv || '';
         const authTagB64 = payload.authTag || '';
         const keyRef = payload.keyReference || 'PRIMARY_KEY';
+        // Mark previous ACTIVE enrollment for this customer and model version as SUPERSEDED (audit preservation)
         try {
-            await client.query(`DELETE FROM face_enrollments WHERE customer_id = $1 AND model_version_id = $2;`, [customerId, modelVersionId]);
+            await client.query(`UPDATE face_enrollments SET status = 'SUPERSEDED' WHERE customer_id = $1 AND model_version_id = $2 AND status = 'ACTIVE';`, [customerId, modelVersionId]);
         }
         catch { }
         await client.query(`
@@ -516,6 +557,11 @@ export class PostgresCustomerRepository {
         $7, 'KIOSK_MAIN_01'
       );
     `, [customerId, modelVersionId, encDataB64, ivB64, authTagB64, keyRef, enrolledBy]);
+        // Touch customer updated_at timestamp to signify updated profile state
+        try {
+            await client.query('UPDATE customers SET updated_at = NOW() WHERE id = $1;', [customerId]);
+        }
+        catch { }
     }
 }
 //# sourceMappingURL=PostgresCustomerRepository.js.map

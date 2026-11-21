@@ -1,5 +1,6 @@
 import { db } from '../../../infrastructure/database/PostgresPool.js';
 import { logger } from '../../../shared/logger/index.js';
+import { tenantDbManager } from '../../../infrastructure/database/TenantDatabaseManager.js';
 
 export interface NearbyDairyResult {
   id: string;
@@ -26,6 +27,10 @@ export interface NearbyDairyResult {
   distanceLabel: string | null;
   isActive: boolean;
   discoveryStatus: string;
+  provisioningStatus?: string;
+  isRegistrationEligible?: boolean;
+  registrationBlockReason?: string;
+  isOperational?: boolean;
 }
 
 export interface NearbyDairiesOutput {
@@ -329,9 +334,15 @@ export class GetNearbyDairiesUseCase {
         }
 
         const status = (row.status || '').toUpperCase();
-        // Dairies are discoverable if NOT suspended, deleted, or disabled
-        // Both ACTIVE and onboarding-phase dairies are shown unless explicitly suspended
         const isActive = !['SUSPENDED', 'DELETED', 'DISABLED'].includes(status);
+        const tenantMapping = tenantDbManager.getTenantMapping(row.id);
+        const provisioningStatus = tenantMapping?.provisioningStatus || (isActive ? 'ACTIVE' : 'PENDING');
+        const isRegistrationEligible = isActive && (provisioningStatus === 'ACTIVE' || (provisioningStatus as string) === 'READY');
+        const registrationBlockReason = !isRegistrationEligible
+          ? (provisioningStatus === 'FAILED'
+              ? 'Dairy database setup failed. Please contact dairy support.'
+              : 'Dairy database is currently initializing. Not ready for new registrations.')
+          : undefined;
 
         return {
           id: row.id,
@@ -358,6 +369,10 @@ export class GetNearbyDairiesUseCase {
           distanceLabel,
           isActive,
           discoveryStatus: status,
+          provisioningStatus,
+          isRegistrationEligible,
+          registrationBlockReason,
+          isOperational: isRegistrationEligible,
         };
       });
     } catch (err: any) {

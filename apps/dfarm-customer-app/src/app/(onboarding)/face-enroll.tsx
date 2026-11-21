@@ -22,7 +22,8 @@ import {
 } from '../../design-system';
 import { yuNetDetector } from '../../face-ai/yunet-detector';
 import { sFaceEmbedder } from '../../face-ai/sface-embedder';
-import { checkAlignmentQuality } from '../../face-ai/preprocessor';
+import { checkAlignmentQuality, averageAndNormalizeEmbeddings } from '../../face-ai/preprocessor';
+import { apiClient } from '../../services/api-client';
 import { useRegistration } from '../../features/registration/useRegistration';
 import { FaceOvalGuide, CameraPermissionIllustration } from '../../assets/vectors/BiometricAssets';
 
@@ -70,51 +71,122 @@ export default function FaceEnrollScreen() {
   const handleCaptureAndEnroll = async () => {
     setErrorMessage(null);
     setIsCapturing(true);
-    setProgress(20);
+    setProgress(10);
 
     try {
-      // 1. Run YuNet face detection & landmark alignment
-      setStatusMessage('Detecting face with OpenCV YuNet...');
-      const detectionResult = await yuNetDetector.detectFaces({ width: 640, height: 640 });
-      setProgress(50);
+      const sampleEmbeddings: number[][] = [];
+      const TOTAL_SAMPLES = 5;
 
-      const faces = detectionResult.faces;
-      if (!faces || faces.length === 0) {
-        throw new Error('No face detected in camera viewport. Please ensure good lighting and face the camera directly.');
+      for (let sampleIdx = 1; sampleIdx <= TOTAL_SAMPLES; sampleIdx++) {
+        setStatusMessage(`Capturing sample ${sampleIdx} of ${TOTAL_SAMPLES} with YuNet & SFace...`);
+
+        if (sampleIdx > 1) {
+          await new Promise((r) => setTimeout(r, 180));
+        }
+
+        let embedding: number[] | null = null;
+
+        if (cameraRef.current?.takePictureAsync) {
+          const photo = await cameraRef.current.takePictureAsync({
+            base64: true,
+            quality: 0.85,
+          });
+
+          if (!photo?.base64) {
+            throw new Error(`Sample ${sampleIdx}: Camera photo capture returned empty data.`);
+          }
+
+          const detectRes = await apiClient.post('/identity/face/detect-and-embed', {
+            imageBase64: photo.base64,
+          });
+          const data = detectRes.data;
+
+          if (!data.success || data.faceCount === 0) {
+            throw new Error(
+              `Sample ${sampleIdx}: No face detected in camera viewport. Please ensure good lighting and face the camera directly.`
+            );
+          }
+
+          if (data.faceCount > 1) {
+            throw new Error(
+              `Sample ${sampleIdx}: Multiple faces (${data.faceCount}) detected. Only 1 person is permitted during biometric registration.`
+            );
+          }
+
+          if (!data.isAligned) {
+            throw new Error(
+              `Sample ${sampleIdx}: ${
+                data.reason || 'Face is tilted or misaligned. Please hold your head straight.'
+              }`
+            );
+          }
+
+          if (!data.embedding || data.embedding.length !== 128) {
+            throw new Error(
+              `Sample ${sampleIdx}: Biometric feature extraction failed. Invalid embedding dimension.`
+            );
+          }
+
+          embedding = data.embedding;
+        } else {
+          const detectionResult = await yuNetDetector.detectFaces({ width: 640, height: 640 });
+          const faces = detectionResult.faces;
+          if (!faces || faces.length === 0) {
+            throw new Error(
+              `Sample ${sampleIdx}: No face detected in camera viewport. Please ensure good lighting and face the camera directly.`
+            );
+          }
+
+          if (faces.length > 1) {
+            throw new Error(
+              `Sample ${sampleIdx}: Multiple faces (${faces.length}) detected. Only 1 person is permitted during biometric registration.`
+            );
+          }
+
+          const primaryFace = faces[0];
+          const alignment = checkAlignmentQuality(primaryFace.landmarks);
+          if (!alignment.isAligned) {
+            throw new Error(
+              `Sample ${sampleIdx}: ${
+                alignment.reason || 'Face is tilted or misaligned. Please hold your head straight.'
+              }`
+            );
+          }
+
+          const embeddingResult = await sFaceEmbedder.generateEmbedding(primaryFace.landmarks);
+          if (!embeddingResult.isNormalized || embeddingResult.embedding.length !== 128) {
+            throw new Error(
+              `Sample ${sampleIdx}: Biometric feature extraction failed. Invalid embedding dimension.`
+            );
+          }
+
+          embedding = embeddingResult.embedding;
+        }
+
+        if (!embedding) {
+          throw new Error(`Sample ${sampleIdx}: Failed to extract biometric embedding.`);
+        }
+        sampleEmbeddings.push(embedding);
+        setProgress(Math.round((sampleIdx / TOTAL_SAMPLES) * 80));
       }
 
-      if (faces.length > 1) {
-        throw new Error(`Multiple faces (${faces.length}) detected. Only 1 person is permitted during biometric registration.`);
-      }
-
-      const primaryFace = faces[0];
-      const alignment = checkAlignmentQuality(primaryFace.landmarks);
-      if (!alignment.isAligned) {
-        throw new Error(alignment.reason || 'Face is tilted or misaligned. Please hold your head straight.');
-      }
-
-      // 2. Run SFace INT8 Embedding Inference (128-D)
-      setStatusMessage('Extracting 128-D biometric vector with OpenCV SFace INT8...');
-      setProgress(75);
-
-      const embeddingResult = await sFaceEmbedder.generateEmbedding(primaryFace.landmarks);
-      if (!embeddingResult.isNormalized || embeddingResult.embedding.length !== 128) {
-        throw new Error('Biometric feature extraction failed. Invalid embedding dimension.');
-      }
+      setStatusMessage('Averaging 5 samples & applying L2 unit normalization...');
+      const finalTemplate = averageAndNormalizeEmbeddings(sampleEmbeddings);
 
       // 3. Submit registration package to backend
       setStatusMessage('Encrypting & registering biometric template with backend...');
       setProgress(90);
 
-      const bankDetails = (params.accountNumber && params.ifscCode)
-        ? {
-            bankName: params.bankName || 'Cooperative Bank',
-            accountNumber: params.accountNumber,
-            confirmAccountNumber: params.confirmAccountNumber || params.accountNumber,
-            ifscCode: params.ifscCode,
-            accountHolderName: params.accountHolderName || params.fullName || 'Registered Farmer',
-          }
-        : undefined;
+      const bankDetails =
+        params.accountNumber && params.ifscCode
+          ? {
+              bankName: params.bankName || 'Cooperative Bank',
+              accountNumber: params.accountNumber,
+              confirmAccountNumber: params.confirmAccountNumber || params.accountNumber,
+              ifscCode: params.ifscCode,
+              accountHolderName: params.accountHolderName || params.fullName || 'Registered Farmer',
+            }
+          : undefined;
 
       const registrationResult = await register({
         selectedDairyId: params.dairyId || '00000000-0000-0000-0000-000000000001',
@@ -126,8 +198,8 @@ export default function FaceEnrollScreen() {
         bankDetails,
         faceTemplate: {
           modelVersion: 'sface_int8_2021dec',
-          embedding: embeddingResult.embedding,
-          confidence: primaryFace.confidence || 0.96,
+          embedding: finalTemplate,
+          confidence: 0.98,
         },
       });
 
@@ -282,11 +354,19 @@ export default function FaceEnrollScreen() {
             title={
               isCapturing
                 ? 'Processing Biometrics...'
+                : !permission?.granted
+                ? 'Grant Camera Access'
+                : !modelReady
+                ? 'Loading Face Engine...'
                 : 'Capture & Submit Registration'
             }
-            onPress={handleCaptureAndEnroll}
+            onPress={
+              !permission?.granted
+                ? requestPermission
+                : handleCaptureAndEnroll
+            }
             loading={isCapturing || isRegistering}
-            disabled={!modelReady || isCapturing || !permission?.granted}
+            disabled={isCapturing || isRegistering}
             variant="primary"
             style={styles.captureBtn}
           />

@@ -13,6 +13,7 @@ import { SuspendDairyModal } from './SuspendDairyModal'
 import { ReactivateDairyModal } from './ReactivateDairyModal'
 import { TransferAdminModal } from '../admins/TransferAdminModal'
 import { DairyActivationModal } from './DairyActivationModal'
+import { DeleteDairyModal } from './DeleteDairyModal'
 import { useAuth } from '@/context/AuthContext'
 import { formatDate, formatMobile } from '@/utils/formatters'
 import {
@@ -36,6 +37,7 @@ import {
   XCircle,
   KeyRound,
   Sparkles,
+  Trash2,
 } from 'lucide-react'
 import { DairyLocationPicker } from './DairyLocationPicker'
 
@@ -50,6 +52,7 @@ export const DairyDetailPage: React.FC = () => {
   const [reactivateModalOpen, setReactivateModalOpen] = useState(false)
   const [transferModalOpen, setTransferModalOpen] = useState(false)
   const [activationModalOpen, setActivationModalOpen] = useState(false)
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [configSuccess, setConfigSuccess] = useState(false)
   const [isEditingLocation, setIsEditingLocation] = useState(false)
   const [pendingLocation, setPendingLocation] = useState<{
@@ -274,14 +277,23 @@ export const DairyDetailPage: React.FC = () => {
             </ClayButton>
           ) : (
             <ClayButton
-              variant="danger"
+              variant="outline"
               size="sm"
               onClick={() => setSuspendModalOpen(true)}
-              leftIcon={<XCircle className="w-4 h-4" />}
+              leftIcon={<XCircle className="w-4 h-4 text-amber-600" />}
             >
               Suspend Dairy
             </ClayButton>
           )}
+
+          <ClayButton
+            variant="danger"
+            size="sm"
+            onClick={() => setDeleteModalOpen(true)}
+            leftIcon={<Trash2 className="w-4 h-4" />}
+          >
+            Delete Dairy
+          </ClayButton>
         </div>
       </div>
 
@@ -896,6 +908,13 @@ export const DairyDetailPage: React.FC = () => {
         dairy={dairy}
         primaryAdmin={primaryAdmin}
         onActivated={() => refetchDairy()}
+      />
+
+      <DeleteDairyModal
+        isOpen={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        dairy={dairy}
+        onSuccess={() => navigate('/dairies')}
       />
     </div>
   )

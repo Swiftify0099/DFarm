@@ -7,6 +7,40 @@ import {
   type DetectedFace,
 } from './preprocessor'
 
+function computeIoU(
+  b1: { x: number; y: number; w: number; h: number },
+  b2: { x: number; y: number; w: number; h: number }
+): number {
+  const x1 = Math.max(b1.x, b2.x)
+  const y1 = Math.max(b1.y, b2.y)
+  const x2 = Math.min(b1.x + b1.w, b2.x + b2.w)
+  const y2 = Math.min(b1.y + b1.h, b2.y + b2.h)
+  const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1)
+  const union = b1.w * b1.h + b2.w * b2.h - inter
+  return union > 0 ? inter / union : 0
+}
+
+function nonMaxSuppression<T extends { x: number; y: number; w: number; h: number; score: number }>(
+  boxes: T[],
+  iouThreshold = 0.4
+): T[] {
+  boxes.sort((a, b) => b.score - a.score)
+  const selected: T[] = []
+  const active = new Array(boxes.length).fill(true)
+
+  for (let i = 0; i < boxes.length; i++) {
+    if (!active[i]) continue
+    selected.push(boxes[i])
+    for (let j = i + 1; j < boxes.length; j++) {
+      if (!active[j]) continue
+      if (computeIoU(boxes[i], boxes[j]) > iouThreshold) {
+        active[j] = false
+      }
+    }
+  }
+  return selected
+}
+
 export class YuNetDetector {
   private session: any = null
   private ort: any = null
@@ -22,17 +56,24 @@ export class YuNetDetector {
         try {
           const ortWeb = await import('onnxruntime-web')
           this.ort = ortWeb
+          if (ortWeb.env) {
+            ortWeb.env.logLevel = 'error'
+            if (ortWeb.env.wasm) {
+              ortWeb.env.wasm.wasmPaths = '/'
+            }
+          }
           this.session = await ortWeb.InferenceSession.create(
             FACE_MODEL_MANIFEST.detector.path,
-            { executionProviders: ['wasm'] }
+            { executionProviders: ['wasm'], logSeverityLevel: 3 }
           )
           this.isLoaded = true
+          this.loadError = null
           return true
         } catch (err: any) {
-          console.warn('[YuNetDetector] Browser ONNX Web load notice:', err.message)
-          // Fall back to calibrated detector state
-          this.isLoaded = true
-          return true
+          console.error('[YuNetDetector] Browser ONNX Web load failed:', err.message)
+          this.loadError = err.message
+          this.isLoaded = false
+          return false
         }
       }
 
@@ -59,26 +100,30 @@ export class YuNetDetector {
 
           if (modelPath) {
             this.ort = ortNode
-            this.session = await ortNode.InferenceSession.create(modelPath)
+            this.session = await ortNode.InferenceSession.create(modelPath, { logSeverityLevel: 3 })
             this.isLoaded = true
+            this.loadError = null
             return true
           }
-        } catch {
-          // Graceful fallback for test runners
+        } catch (err: any) {
+          this.loadError = err.message
+          this.isLoaded = false
+          return false
         }
       }
 
-      this.isLoaded = true
-      return true
+      this.isLoaded = false
+      this.loadError = 'YuNet runtime environment unsupported or model missing'
+      return false
     } catch (err: any) {
       this.loadError = err.message
-      this.isLoaded = true
+      this.isLoaded = false
       return false
     }
   }
 
   isModelReady(): boolean {
-    return this.isLoaded
+    return this.isLoaded && this.session !== null
   }
 
   getLoadError(): string | null {
@@ -91,8 +136,11 @@ export class YuNetDetector {
   async detect(
     source: HTMLVideoElement | { tensorData: Float32Array; width: number; height: number }
   ): Promise<DetectedFace[]> {
-    if (!this.isLoaded) {
+    if (!this.isLoaded || !this.session) {
       await this.initialize()
+      if (!this.session) {
+        return []
+      }
     }
 
     let inputTensorData: Float32Array
@@ -113,16 +161,25 @@ export class YuNetDetector {
       origH = source.height
     }
 
-    // 1. Run real ONNX Session when available
+    // Run real ONNX Session
     if (this.session && this.ort) {
       try {
         const inputName = this.session.inputNames[0] || 'input'
         const tensor = new this.ort.Tensor('float32', inputTensorData, [1, 3, 640, 640])
         const results = await this.session.run({ [inputName]: tensor })
 
-        const faces: DetectedFace[] = []
+        const scaleX = origW / 640
+        const scaleY = origH / 640
+        const candidates: Array<{
+          x: number
+          y: number
+          w: number
+          h: number
+          score: number
+          face: DetectedFace
+        }> = []
 
-        // Evaluate output strides 8, 16, 32
+        // Evaluate output strides 8, 16, 32 with proper anchor math
         for (const stride of FACE_MODEL_MANIFEST.detector.strides) {
           const cls = results[`cls_${stride}`]?.data as Float32Array
           const obj = results[`obj_${stride}`]?.data as Float32Array
@@ -131,46 +188,71 @@ export class YuNetDetector {
 
           if (cls && obj && bbox && kps) {
             const count = cls.length
+            const cols = 640 / stride
+
             for (let i = 0; i < count; i++) {
               const score = Math.sqrt(Math.max(0, cls[i]) * Math.max(0, obj[i]))
               if (score >= FACE_MODEL_MANIFEST.detector.scoreThreshold) {
-                // Scale normalized 640x640 coords back to original frame
-                const scaleX = origW / 640
-                const scaleY = origH / 640
+                const row = Math.floor(i / cols)
+                const col = i % cols
+                const px = col * stride
+                const py = row * stride
+                const cx = px + (bbox[i * 4] || 0) * stride
+                const cy = py + (bbox[i * 4 + 1] || 0) * stride
+                const bw = Math.exp(bbox[i * 4 + 2] || 0) * stride
+                const bh = Math.exp(bbox[i * 4 + 3] || 0) * stride
 
-                const x = (bbox[i * 4] || 0) * scaleX
-                const y = (bbox[i * 4 + 1] || 0) * scaleY
-                const w = (bbox[i * 4 + 2] || 0) * scaleX
-                const h = (bbox[i * 4 + 3] || 0) * scaleY
+                const left = (cx - bw / 2) * scaleX
+                const top = (cy - bh / 2) * scaleY
+                const width = bw * scaleX
+                const height = bh * scaleY
 
-                faces.push({
-                  boundingBox: {
-                    x: Math.round(x),
-                    y: Math.round(y),
-                    width: Math.round(w),
-                    height: Math.round(h),
+                candidates.push({
+                  x: left,
+                  y: top,
+                  w: width,
+                  h: height,
+                  score,
+                  face: {
+                    boundingBox: {
+                      x: Math.round(left),
+                      y: Math.round(top),
+                      width: Math.round(width),
+                      height: Math.round(height),
+                      confidence: Math.min(0.99, Number(score.toFixed(4))),
+                    },
+                    landmarks: {
+                      rightEye: {
+                        x: Math.round((px + (kps[i * 10] || 0) * stride) * scaleX),
+                        y: Math.round((py + (kps[i * 10 + 1] || 0) * stride) * scaleY),
+                      },
+                      leftEye: {
+                        x: Math.round((px + (kps[i * 10 + 2] || 0) * stride) * scaleX),
+                        y: Math.round((py + (kps[i * 10 + 3] || 0) * stride) * scaleY),
+                      },
+                      noseTip: {
+                        x: Math.round((px + (kps[i * 10 + 4] || 0) * stride) * scaleX),
+                        y: Math.round((py + (kps[i * 10 + 5] || 0) * stride) * scaleY),
+                      },
+                      rightMouthCorner: {
+                        x: Math.round((px + (kps[i * 10 + 6] || 0) * stride) * scaleX),
+                        y: Math.round((py + (kps[i * 10 + 7] || 0) * stride) * scaleY),
+                      },
+                      leftMouthCorner: {
+                        x: Math.round((px + (kps[i * 10 + 8] || 0) * stride) * scaleX),
+                        y: Math.round((py + (kps[i * 10 + 9] || 0) * stride) * scaleY),
+                      },
+                    },
                     confidence: Math.min(0.99, Number(score.toFixed(4))),
                   },
-                  landmarks: {
-                    rightEye: { x: Math.round((kps[i * 10] || x + w * 0.3) * scaleX), y: Math.round((kps[i * 10 + 1] || y + h * 0.35) * scaleY) },
-                    leftEye: { x: Math.round((kps[i * 10 + 2] || x + w * 0.7) * scaleX), y: Math.round((kps[i * 10 + 3] || y + h * 0.35) * scaleY) },
-                    noseTip: { x: Math.round((kps[i * 10 + 4] || x + w * 0.5) * scaleX), y: Math.round((kps[i * 10 + 5] || y + h * 0.55) * scaleY) },
-                    rightMouthCorner: { x: Math.round((kps[i * 10 + 6] || x + w * 0.35) * scaleX), y: Math.round((kps[i * 10 + 7] || y + h * 0.75) * scaleY) },
-                    leftMouthCorner: { x: Math.round((kps[i * 10 + 8] || x + w * 0.65) * scaleX), y: Math.round((kps[i * 10 + 9] || y + h * 0.75) * scaleY) },
-                  },
-                  confidence: Math.min(0.99, Number(score.toFixed(4))),
                 })
               }
             }
           }
         }
 
-        if (faces.length > 0) {
-          // Sort by confidence descending and return top face
-          faces.sort((a, b) => b.confidence - a.confidence)
-          return faces.slice(0, 1)
-        }
-        return []
+        const filtered = nonMaxSuppression(candidates, FACE_MODEL_MANIFEST.detector.nmsThreshold)
+        return filtered.map((c) => c.face)
       } catch (err: any) {
         console.warn('[YuNetDetector] Real inference exception:', err.message)
         this.loadError = err.message
@@ -178,35 +260,7 @@ export class YuNetDetector {
       }
     }
 
-    // Isolate test fixture strictly to Node.js automated test runner environments
-    const isTestEnv = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') ||
-      (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test')
-
-    if (isTestEnv && !(source instanceof HTMLVideoElement)) {
-      const w = origW || 640
-      const h = origH || 640
-      return [
-        {
-          boundingBox: {
-            x: Math.round(w * 0.25),
-            y: Math.round(h * 0.18),
-            width: Math.round(w * 0.5),
-            height: Math.round(h * 0.6),
-            confidence: 0.98,
-          },
-          landmarks: {
-            rightEye: { x: Math.round(w * 0.38), y: Math.round(h * 0.36) },
-            leftEye: { x: Math.round(w * 0.62), y: Math.round(h * 0.36) },
-            noseTip: { x: Math.round(w * 0.5), y: Math.round(h * 0.5) },
-            rightMouthCorner: { x: Math.round(w * 0.4), y: Math.round(h * 0.66) },
-            leftMouthCorner: { x: Math.round(w * 0.6), y: Math.round(h * 0.66) },
-          },
-          confidence: 0.98,
-        },
-      ]
-    }
-
-    // In production browser runtime, never generate fake bounding boxes
+    // In production, never return synthetic or fake boxes
     return []
   }
 }

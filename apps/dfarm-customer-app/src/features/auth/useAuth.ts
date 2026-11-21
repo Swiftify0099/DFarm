@@ -122,6 +122,7 @@ export function useAuth() {
       });
 
       // Clear all tenant-scoped operational query caches
+      queryClient.removeQueries({ queryKey: ['customers'] });
       queryClient.removeQueries({ queryKey: ['collection'] });
       queryClient.removeQueries({ queryKey: ['ledger'] });
       queryClient.removeQueries({ queryKey: ['bills'] });

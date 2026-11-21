@@ -95,6 +95,17 @@ export class SelectDairyMembershipUseCase {
       actorType: 'CUSTOMER',
     }, 30 * 86400);
 
+    let resolvedCustomerName = membership.customerName;
+    if (!resolvedCustomerName && this.customerRepo) {
+      try {
+        const cust = await this.customerRepo.findById(membership.tenantCustomerId, membership.organizationId);
+        if (cust?.fullName) {
+          resolvedCustomerName = cust.fullName;
+        }
+      } catch {}
+    }
+    const finalCustomerName = resolvedCustomerName || (membership.farmerCode ? `Farmer ${membership.farmerCode}` : 'Valued Farmer');
+
     return {
       accessToken,
       refreshToken,
@@ -116,7 +127,7 @@ export class SelectDairyMembershipUseCase {
         status: membership.membershipStatus,
         farmerCode: membership.farmerCode,
         customerProfile: {
-          name: membership.dairyName,
+          name: finalCustomerName,
           dairyName: membership.dairyName,
         },
       },

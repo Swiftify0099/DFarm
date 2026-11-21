@@ -1,5 +1,6 @@
 import { db } from '../../../infrastructure/database/PostgresPool.js';
 import { logger } from '../../../shared/logger/index.js';
+import { tenantDbManager } from '../../../infrastructure/database/TenantDatabaseManager.js';
 // Default search radius: 50 km (covers typical district & neighboring talukas)
 // Extended to 150 km when no GPS coordinates supplied (regional directory mode)
 const DEFAULT_RADIUS_KM = 50;
@@ -281,9 +282,15 @@ export class GetNearbyDairiesUseCase {
                         : `${(distMeters / 1000).toFixed(1)} km`;
                 }
                 const status = (row.status || '').toUpperCase();
-                // Dairies are discoverable if NOT suspended, deleted, or disabled
-                // Both ACTIVE and onboarding-phase dairies are shown unless explicitly suspended
                 const isActive = !['SUSPENDED', 'DELETED', 'DISABLED'].includes(status);
+                const tenantMapping = tenantDbManager.getTenantMapping(row.id);
+                const provisioningStatus = tenantMapping?.provisioningStatus || (isActive ? 'ACTIVE' : 'PENDING');
+                const isRegistrationEligible = isActive && (provisioningStatus === 'ACTIVE' || provisioningStatus === 'READY');
+                const registrationBlockReason = !isRegistrationEligible
+                    ? (provisioningStatus === 'FAILED'
+                        ? 'Dairy database setup failed. Please contact dairy support.'
+                        : 'Dairy database is currently initializing. Not ready for new registrations.')
+                    : undefined;
                 return {
                     id: row.id,
                     dairyId: row.id,
@@ -309,6 +316,10 @@ export class GetNearbyDairiesUseCase {
                     distanceLabel,
                     isActive,
                     discoveryStatus: status,
+                    provisioningStatus,
+                    isRegistrationEligible,
+                    registrationBlockReason,
+                    isOperational: isRegistrationEligible,
                 };
             });
         }

@@ -75,7 +75,7 @@ router.post('/operator/otp/verify', otpVerifyLimiter, async (req: Request, res: 
 // ============================================================================
 // 2. Customer OTP (Farmer Mobile App)
 // ============================================================================
-router.post('/request-otp', otpRequestLimiter, async (req: Request, res: Response, next: NextFunction) => {
+const requestCustomerOtpHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { mobileNumber, phone } = req.body;
     const result = await requestCustomerOtp.execute(mobileNumber || phone);
@@ -83,9 +83,9 @@ router.post('/request-otp', otpRequestLimiter, async (req: Request, res: Respons
   } catch (err) {
     next(err);
   }
-});
+};
 
-router.post('/verify-otp', otpVerifyLimiter, async (req: Request, res: Response, next: NextFunction) => {
+const verifyCustomerOtpHandler = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { mobileNumber, phone, otp } = req.body;
     const result = await verifyCustomerOtp.execute(mobileNumber || phone, otp);
@@ -93,7 +93,13 @@ router.post('/verify-otp', otpVerifyLimiter, async (req: Request, res: Response,
   } catch (err) {
     next(err);
   }
-});
+};
+
+router.post('/request-otp', otpRequestLimiter, requestCustomerOtpHandler);
+router.post('/customer/request-otp', otpRequestLimiter, requestCustomerOtpHandler);
+
+router.post('/verify-otp', otpVerifyLimiter, verifyCustomerOtpHandler);
+router.post('/customer/verify-otp', otpVerifyLimiter, verifyCustomerOtpHandler);
 
 router.post('/customer/select-dairy', authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {

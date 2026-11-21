@@ -72,13 +72,13 @@ export default function BillsScreen() {
                   <View style={styles.gridItem}>
                     <Text style={styles.gridLabel}>Gross Earnings</Text>
                     <Text style={styles.gridVal}>
-                      ₹{item.grossMilkAmount.toFixed(2)}
+                      ₹{((item.grossMilkAmount ?? 0)).toFixed(2)}
                     </Text>
                   </View>
                   <View style={styles.gridItem}>
                     <Text style={styles.gridLabel}>Deductions</Text>
                     <Text style={styles.gridValDeduct}>
-                      -₹{(item.feedDeductions + item.otherDeductions).toFixed(2)}
+                      -₹{(((item.feedDeductions ?? 0) + (item.otherDeductions ?? 0))).toFixed(2)}
                     </Text>
                   </View>
                 </View>
@@ -87,7 +87,7 @@ export default function BillsScreen() {
                   <View>
                     <Text style={styles.netLabel}>Net Direct Bank Payout</Text>
                     <Text style={styles.netAmount}>
-                      ₹{item.netPayableAmount.toFixed(2)}
+                      ₹{((item.netPayableAmount ?? 0)).toFixed(2)}
                     </Text>
                   </View>
                   {item.disbursedDate && (
@@ -137,25 +137,25 @@ export default function BillsScreen() {
               <View style={styles.row}>
                 <Text style={styles.rowLabel}>Gross Milk Value</Text>
                 <Text style={styles.rowVal}>
-                  ₹{selectedBill.grossMilkAmount.toFixed(2)}
+                  ₹{((selectedBill.grossMilkAmount ?? 0)).toFixed(2)}
                 </Text>
               </View>
               <View style={styles.row}>
                 <Text style={styles.rowLabel}>Cattle Feed Deductions</Text>
                 <Text style={styles.deductVal}>
-                  -₹{selectedBill.feedDeductions.toFixed(2)}
+                  -₹{((selectedBill.feedDeductions ?? 0)).toFixed(2)}
                 </Text>
               </View>
               <View style={styles.row}>
                 <Text style={styles.rowLabel}>Other Deductions / Advances</Text>
                 <Text style={styles.deductVal}>
-                  -₹{selectedBill.otherDeductions.toFixed(2)}
+                  -₹{((selectedBill.otherDeductions ?? 0)).toFixed(2)}
                 </Text>
               </View>
               <View style={[styles.row, styles.netRow]}>
                 <Text style={styles.netRowLabel}>Net Paid to Bank</Text>
                 <Text style={styles.netRowVal}>
-                  ₹{selectedBill.netPayableAmount.toFixed(2)}
+                  ₹{((selectedBill.netPayableAmount ?? 0)).toFixed(2)}
                 </Text>
               </View>
             </View>

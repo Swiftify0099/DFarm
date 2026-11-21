@@ -35,6 +35,12 @@ export declare class GetCustomerCollectionHistoryUseCase {
     private readonly transactionRepo;
     constructor(transactionRepo: ICollectionTransactionRepository);
     execute(customerId: string, limit?: number, offset?: number, organizationId?: string): Promise<{
+        quantityLiters: number;
+        ratePerLiter: number;
+        animalType: "COW" | "BUFFALO";
+        receiptNumber: string;
+        collectionDate: string;
+        collectionTime: string;
         id: string;
         transactionCode: string;
         sessionId: string;

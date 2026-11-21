@@ -2,16 +2,22 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../../services/api-client';
 import { secureStorage } from '../../services/secure-storage';
 import { CustomerProfile } from '../../types/customer';
+import { useAuth } from '../auth/useAuth';
 
 export function useProfile() {
   const queryClient = useQueryClient();
+  const { session } = useAuth();
 
   const profileQuery = useQuery({
-    queryKey: ['customers', 'profile'],
+    queryKey: ['customers', 'profile', session?.dairyId, session?.customerId],
     queryFn: async (): Promise<CustomerProfile> => {
-      const customerId = await secureStorage.getCustomerId();
+      const customerId = session?.customerId || (await secureStorage.getCustomerId());
+      const dairyId = session?.dairyId || (await secureStorage.getDairyId());
       const response = await apiClient.get<CustomerProfile>(
-        `/customers/${customerId || 'me'}`
+        `/customers/${customerId || 'me'}`,
+        {
+          headers: dairyId ? { 'x-dairy-tenant-id': dairyId } : undefined,
+        }
       );
       return response.data;
     },
@@ -24,13 +30,32 @@ export function useProfile() {
       confidence: number;
     }) => {
       const customerId = await secureStorage.getCustomerId();
+      const dairyId = await secureStorage.getDairyId();
+      const isCustIdValid =
+        customerId &&
+        customerId !== 'undefined' &&
+        customerId !== 'null' &&
+        !customerId.startsWith('unregistered:');
+      const targetId = isCustIdValid ? customerId : 'me';
       const response = await apiClient.post(
-        `/customers/${customerId}/biometrics/update`,
+        `/customers/${targetId}/biometrics/update`,
         {
+          customerId: isCustIdValid ? targetId : undefined,
           modelVersion: 'sface_int8_2021dec',
           embedding: payload.embedding,
           confidence: payload.confidence,
+          organizationId: dairyId || undefined,
           timestamp: new Date().toISOString(),
+        },
+        {
+          headers: dairyId
+            ? {
+                'x-organization-id': dairyId,
+                'x-dairy-id': dairyId,
+                'x-dairy-tenant-id': dairyId,
+              }
+            : undefined,
+          params: dairyId ? { organizationId: dairyId } : undefined,
         }
       );
       return response.data;

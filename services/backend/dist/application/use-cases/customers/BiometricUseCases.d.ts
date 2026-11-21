@@ -6,6 +6,7 @@ export declare class GetFaceTemplatesUseCase {
     }): Promise<{
         templateId: any;
         customerId: any;
+        globalCustomerId: any;
         farmerCode: any;
         fullName: any;
         modelName: any;

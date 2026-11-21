@@ -42,12 +42,18 @@ export class ProcessMilkIntakeUseCase {
         customer.validateCanDeliver(dto.milkCategory);
         // 4. Verify Active Session
         const orgId = dto.organizationId || customer.organizationId;
-        let session = dto.sessionCode
-            ? await this.sessionRepo.findByCode(dto.sessionCode, orgId)
+        let session = dto.sessionId
+            ? await this.sessionRepo.findById(dto.sessionId, orgId)
             : null;
-        if (!session && dto.sessionId) {
-            // Find active session for customer's center
-            session = await this.sessionRepo.findActiveSession(customer.centerId, dto.deviceId || 'KIOSK_MAIN', orgId);
+        if (!session && dto.sessionCode) {
+            session = await this.sessionRepo.findByCode(dto.sessionCode, orgId);
+        }
+        // If the referenced session is closed or missing, check if an active OPEN session exists for this center/device
+        if ((!session || !session.isOpen) && (dto.sessionId || customer.centerId)) {
+            const activeOpen = await this.sessionRepo.findActiveSession(customer.centerId, dto.deviceId || 'KIOSK_MAIN', orgId);
+            if (activeOpen && activeOpen.isOpen) {
+                session = activeOpen;
+            }
         }
         if (!session || !session.isOpen) {
             throw new SessionClosedError(dto.sessionCode || dto.sessionId || 'Unknown');
@@ -99,7 +105,7 @@ export class ProcessMilkIntakeUseCase {
         session.recordTransaction(dto.milkCategory, dto.weightLiters, dto.fatPercentage, dto.snfPercentage, totalAmount);
         await this.sessionRepo.save(session);
         // 9. Post Double-Entry Ledger Credit
-        let ledger = await this.ledgerRepo.findByCustomer(customer.id);
+        let ledger = await this.ledgerRepo.findByCustomer(customer.id, customer.organizationId);
         if (!ledger) {
             throw new DomainValidationError(`Customer financial ledger could not be initialized.`);
         }

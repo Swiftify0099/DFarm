@@ -44,6 +44,15 @@ export class PostgresCollectionTransactionRepository {
         const t = transaction.toJSON();
         const tenantDb = await this.getDb(t.dairyId);
         await tenantDb.withTransaction(async (client) => {
+            // 0. Guarantee organization, center, and operator exist in tenant operational database
+            await client.query(`INSERT INTO organizations (id, name, code, status)
+         VALUES ($1, 'Registered Cooperative Dairy', $2, 'ACTIVE')
+         ON CONFLICT (id) DO NOTHING;`, [t.dairyId, `D-${t.dairyId.slice(0, 6).toUpperCase()}`]);
+            if (t.centerId) {
+                await client.query(`INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+           VALUES ($1, $2, 'C-01', 'Main Collection Center', 'Center Road', 'Local', 'District', 'State', '400001', '+919876543210', 'ACTIVE')
+           ON CONFLICT (id) DO NOTHING;`, [t.centerId, t.dairyId]);
+            }
             // 1. Ensure shift exists in collection_shifts for center & shift
             const shiftRes = await client.query(`INSERT INTO collection_shifts (center_id, shift_type, start_time, end_time, grace_period_minutes, is_active)
          VALUES ($1, $2, '05:00:00'::time, '21:00:00'::time, 30, TRUE)
@@ -53,7 +62,22 @@ export class PostgresCollectionTransactionRepository {
             // 2. Generate unique individual intake session ID for this transaction
             const intakeSessionId = crypto.randomUUID();
             const opRes = await client.query(`SELECT opening_operator_id FROM kiosk_shift_sessions WHERE id = $1 LIMIT 1`, [t.sessionId]);
-            const opId = opRes.rows[0]?.opening_operator_id || '00000000-0000-0000-0000-000000000003';
+            const opId = opRes.rows[0]?.opening_operator_id || '00000000-0000-0000-0000-000000000011';
+            // Ensure operator exists in tenant users table
+            const opUsername = `op_${String(opId).replace(/[^a-zA-Z0-9]/g, '').slice(0, 16)}`;
+            try {
+                await client.query(`INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+           VALUES ($1, $2, $3, $4, '+919822114477', 'COLLECTION_OPERATOR', 'ACTIVE')
+           ON CONFLICT (id) DO NOTHING;`, [opId, t.dairyId, opUsername, t.operatorName || 'Counter Operator']);
+            }
+            catch { }
+            // Cleanly map identification method conforming to chk_session_id_method (FACE, RFID, SUPERVISOR_MANUAL)
+            const methodStr = String(t.identificationMethod || '');
+            const mappedIdMethod = methodStr === 'FACE_YUNET_SFACE' || methodStr === 'FACE' || methodStr === 'FACE_RECOGNITION'
+                ? 'FACE'
+                : (methodStr === 'RFID_TAG' || methodStr === 'RFID' || methodStr === 'RFID_CARD'
+                    ? 'RFID'
+                    : 'SUPERVISOR_MANUAL');
             // Ensure collection_sessions row exists
             await client.query(`INSERT INTO collection_sessions (
           id, center_id, customer_id, business_date, shift_id, shift_type,
@@ -73,7 +97,7 @@ export class PostgresCollectionTransactionRepository {
                 shiftId,
                 t.shift,
                 t.milkCategory,
-                t.identificationMethod === 'FACE_YUNET_SFACE' ? 'FACE' : (t.identificationMethod === 'RFID_TAG' ? 'RFID' : 'SUPERVISOR_MANUAL'),
+                mappedIdMethod,
                 opId,
                 t.deviceId,
             ]);
@@ -287,7 +311,7 @@ export class PostgresCollectionTransactionRepository {
       JOIN customers c ON c.id = mc.customer_id
       LEFT JOIN collection_sessions cs ON cs.id = mc.session_id
       LEFT JOIN users u ON u.id = cs.operator_id
-      WHERE mc.customer_id = $1
+      WHERE (mc.customer_id = $1 OR c.global_customer_id = $1)
       ORDER BY mc.business_date DESC, mc.created_at DESC
       LIMIT $2 OFFSET $3;
     `;
@@ -317,24 +341,32 @@ export class PostgresCollectionTransactionRepository {
         }
     }
     async getMonthlySummary(customerId, monthYear, organizationId) {
+        const parts = (monthYear || '').split('-');
+        const year = parseInt(parts[0] || '2026', 10);
+        const month = parseInt(parts[1] || '1', 10);
+        const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+        const lastDay = new Date(year, month, 0).getDate();
+        const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
         const sql = `
       SELECT 
-        COALESCE(SUM(net_weight), 0.00) AS total_liters,
-        COALESCE(SUM(CASE WHEN milk_category = 'COW' THEN net_weight ELSE 0 END), 0.00) AS cow_liters,
-        COALESCE(SUM(CASE WHEN milk_category = 'BUFFALO' THEN net_weight ELSE 0 END), 0.00) AS buffalo_liters,
-        COALESCE(AVG(fat_percentage), 0.00) AS avg_fat,
-        COALESCE(AVG(snf_percentage), 0.00) AS avg_snf,
-        COALESCE(SUM(total_amount), 0.00) AS total_amount,
-        COUNT(id) AS transaction_count
-      FROM milk_collections
-      WHERE customer_id = $1 
-        AND TO_CHAR(business_date, 'YYYY-MM') = $2
-        AND transaction_status = 'COMPLETED';
+        COALESCE(SUM(mc.net_weight), 0.00) AS total_liters,
+        COALESCE(SUM(CASE WHEN mc.milk_category = 'COW' THEN mc.net_weight ELSE 0 END), 0.00) AS cow_liters,
+        COALESCE(SUM(CASE WHEN mc.milk_category = 'BUFFALO' THEN mc.net_weight ELSE 0 END), 0.00) AS buffalo_liters,
+        COALESCE(AVG(mc.fat_percentage), 0.00) AS avg_fat,
+        COALESCE(AVG(mc.snf_percentage), 0.00) AS avg_snf,
+        COALESCE(SUM(mc.total_amount), 0.00) AS total_amount,
+        COUNT(mc.id) AS transaction_count
+      FROM milk_collections mc
+      JOIN customers c ON c.id = mc.customer_id
+      WHERE (mc.customer_id = $1 OR c.global_customer_id = $1) 
+        AND mc.business_date >= $2
+        AND mc.business_date <= $3
+        AND mc.transaction_status = 'COMPLETED';
     `;
         if (organizationId) {
             try {
                 const client = await this.getDb(organizationId);
-                const result = await client.query(sql, [customerId, monthYear]);
+                const result = await client.query(sql, [customerId, startDate, endDate]);
                 if (result.rows.length > 0) {
                     const row = result.rows[0];
                     return {
@@ -353,7 +385,7 @@ export class PostgresCollectionTransactionRepository {
         }
         for (const tenantDb of tenantDbManager.getAllTenantDbs()) {
             try {
-                const result = await tenantDb.query(sql, [customerId, monthYear]);
+                const result = await tenantDb.query(sql, [customerId, startDate, endDate]);
                 if (result.rows.length > 0 && Number(result.rows[0].transaction_count) > 0) {
                     const row = result.rows[0];
                     return {
@@ -371,7 +403,7 @@ export class PostgresCollectionTransactionRepository {
             catch { }
         }
         try {
-            const result = await db.query(sql, [customerId, monthYear]);
+            const result = await db.query(sql, [customerId, startDate, endDate]);
             const row = result.rows[0];
             return {
                 monthYear,

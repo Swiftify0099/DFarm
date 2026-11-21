@@ -4,8 +4,13 @@ import {
   CustomerLedgerEntry,
   CustomerKhataSummary,
 } from '../../types/ledger';
+import { normalizeLedgerEntry } from '../../utils/normalizers';
+import { useAuth } from '../auth/useAuth';
+
+export { normalizeLedgerEntry };
 
 export function useLedger(params?: { page?: number; pageSize?: number }) {
+  const { session } = useAuth();
   const boundedParams = {
     page: 1,
     pageSize: 30,
@@ -13,7 +18,7 @@ export function useLedger(params?: { page?: number; pageSize?: number }) {
   };
 
   const ledgerEntriesQuery = useQuery({
-    queryKey: ['ledger', 'entries', boundedParams],
+    queryKey: ['ledger', 'entries', session?.dairyId, session?.customerId, boundedParams],
     queryFn: async (): Promise<CustomerLedgerEntry[]> => {
       const response = await apiClient.get<any>('/ledger/entries', {
         params: boundedParams,
@@ -22,17 +27,27 @@ export function useLedger(params?: { page?: number; pageSize?: number }) {
         ? response.data
         : Array.isArray(response.data?.data)
         ? response.data.data
+        : Array.isArray(response.data?.data?.items)
+        ? response.data.data.items
         : [];
-      return list;
+      const normalized: CustomerLedgerEntry[] = list.map(normalizeLedgerEntry);
+      return normalized;
     },
     staleTime: 30000,
   });
 
   const khataSummaryQuery = useQuery({
-    queryKey: ['ledger', 'summary'],
+    queryKey: ['ledger', 'summary', session?.dairyId, session?.customerId],
     queryFn: async (): Promise<CustomerKhataSummary> => {
       const response = await apiClient.get<any>('/ledger/summary');
-      return response.data?.data || response.data;
+      const raw = response.data?.data || response.data || {};
+      return {
+        customerId: String(raw.customerId || ''),
+        currentBalance: Number(raw.currentBalance ?? raw.balance ?? 0),
+        totalMilkEarnings: Number(raw.totalMilkEarnings ?? raw.totalEarnings ?? 0),
+        totalDeductions: Number(raw.totalDeductions ?? 0),
+        lastUpdated: String(raw.lastUpdated || new Date().toISOString()),
+      };
     },
     staleTime: 30000,
   });

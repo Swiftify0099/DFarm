@@ -17,7 +17,32 @@ const STORAGE_KEYS = {
   OPERATOR: 'dfarm_collection_operator',
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+/**
+ * Resolves the canonical API base URL with safe normalization.
+ * Handles trailing slashes, ensures /api/v1 prefix, and protects against silent localhost fallbacks.
+ */
+export const getApiBaseUrl = (): string => {
+  const envUrl = ((import.meta as any).env?.VITE_API_BASE_URL || '').trim()
+
+  if (envUrl) {
+    const sanitized = envUrl.replace(/\/+$/, '')
+    return sanitized.endsWith('/api/v1') ? sanitized : `${sanitized}/api/v1`
+  }
+
+  // Local development fallback to Vite dev server proxy '/api/v1'
+  if (import.meta.env.DEV) {
+    return '/api/v1'
+  }
+
+  // In production, warn if VITE_API_BASE_URL was omitted during build
+  if (typeof window !== 'undefined' && import.meta.env.PROD) {
+    console.warn(
+      '[DFarm Collection App] VITE_API_BASE_URL is not configured in production. ' +
+      'API requests will fall back to relative path /api/v1.'
+    )
+  }
+  return '/api/v1'
+}
 
 export const getStoredOperatorAuth = (): {
   token: string | null
@@ -99,9 +124,13 @@ async function apiRequest<T = any>(endpoint: string, options: RequestInit = {}):
   }
   if (dairyId) {
     headers['X-Dairy-Id'] = dairyId
+    headers['X-Dairy-Tenant-Id'] = dairyId
+    headers['X-Organization-Id'] = dairyId
   }
 
-  const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`
+  const baseUrl = getApiBaseUrl()
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+  const url = `${baseUrl}${cleanEndpoint}`
 
   const response = await fetch(url, {
     ...options,
@@ -112,7 +141,10 @@ async function apiRequest<T = any>(endpoint: string, options: RequestInit = {}):
     let errMessage = `HTTP ${response.status} ${response.statusText}`
     try {
       const errJson = await response.json()
-      errMessage = errJson.error || errJson.message || errMessage
+      errMessage =
+        errJson.error?.message ||
+        errJson.message ||
+        (typeof errJson.error === 'string' ? errJson.error : errJson.error ? JSON.stringify(errJson.error) : errMessage)
     } catch {
       // Use status text
     }
@@ -171,11 +203,14 @@ export const authApi = {
 // 2. Customer Directory & Lookup API (Dairy-Scoped)
 // ============================================================================
 export const customersApi = {
-  list: async (params: { search?: string; category?: MilkCategory; limit?: number } = {}): Promise<CustomerIdentity[]> => {
+  list: async (params: { search?: string; category?: MilkCategory; limit?: number; organizationId?: string } = {}): Promise<CustomerIdentity[]> => {
+    const { dairyId } = getStoredOperatorAuth()
+    const targetOrgId = params.organizationId || dairyId
     const searchParams = new URLSearchParams()
     if (params.search) searchParams.append('search', params.search)
     if (params.category) searchParams.append('category', params.category)
     if (params.limit) searchParams.append('limit', String(params.limit))
+    if (targetOrgId) searchParams.append('organizationId', targetOrgId)
 
     const queryString = searchParams.toString()
     const endpoint = `/customers${queryString ? `?${queryString}` : ''}`
@@ -278,52 +313,63 @@ export const customersApi = {
 // 3. Biometric Face Templates & Matching API
 // ============================================================================
 export const identityApi = {
-  getFaceTemplates: async (): Promise<any[]> => {
-    const res = await apiRequest<{ success: boolean; data: any[] }>('/identity/face/templates')
+  getFaceTemplates: async (organizationId?: string): Promise<any[]> => {
+    const { dairyId } = getStoredOperatorAuth()
+    const targetOrgId = organizationId || dairyId
+    const query = targetOrgId ? `?organizationId=${encodeURIComponent(targetOrgId)}` : ''
+    const res = await apiRequest<{ success: boolean; data: any[] }>(`/identity/face/templates${query}`)
     return res.data
   },
 
-  matchFace: async (embedding: number[]): Promise<{
+  matchFace: async (
+    embedding: number[],
+    organizationId?: string
+  ): Promise<{
     isMatch: boolean
     matchedCustomer: CustomerIdentity | null
     similarity: number
     confidenceScore: number
   }> => {
+    const { dairyId } = getStoredOperatorAuth()
+    const targetOrgId = organizationId || dairyId
     const res = await apiRequest<{
       success: boolean
-      isMatch: boolean
+      matched?: boolean
+      isMatch?: boolean
       matchedCustomer: any | null
-      similarity: number
-      confidenceScore: number
+      farmerId?: string
+      farmerCode?: string
+      farmerName?: string
+      similarity?: number
+      similarityScore?: number
+      confidenceScore?: number
     }>('/identity/face/match', {
       method: 'POST',
-      body: JSON.stringify({ embedding }),
+      body: JSON.stringify({
+        embedding,
+        organizationId: targetOrgId,
+        dairyId: targetOrgId,
+      }),
     })
 
-    if (!res.isMatch || !res.matchedCustomer) {
-      return {
-        isMatch: false,
-        matchedCustomer: null,
-        similarity: res.similarity || 0,
-        confidenceScore: res.confidenceScore || 0,
-      }
-    }
+    const isMatch = Boolean(res.matched ?? res.isMatch ?? false)
+    const similarity = Number(res.similarityScore ?? res.similarity ?? 0)
+    const confidenceScore = Number(res.confidenceScore ?? 0)
 
+    let matchedCustomer: CustomerIdentity | null = null
     const c = res.matchedCustomer
-    return {
-      isMatch: true,
-      similarity: res.similarity,
-      confidenceScore: res.confidenceScore,
-      matchedCustomer: {
+
+    if (c) {
+      matchedCustomer = {
         id: c.id,
         customerCode: c.farmerCode || c.customerCode || '',
         farmerCode: c.farmerCode,
         fullName: c.fullName,
-        mobileNumber: c.mobileNumber,
+        mobileNumber: c.mobileNumber || '',
         village: c.village || '',
         preferredCategory: (c.permittedCategories?.[0] as MilkCategory) || 'COW',
         permittedCategories: c.permittedCategories || ['COW'],
-        dairyId: c.organizationId,
+        dairyId: c.organizationId || targetOrgId || '',
         status: c.status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE',
         balanceDue: Number(c.balanceDue || 0),
         rfidCardUid: c.rfidCardUid,
@@ -334,7 +380,28 @@ export const identityApi = {
           consentVerified: true,
         },
         lastDelivery: c.lastDelivery,
-      },
+      }
+    } else if (isMatch && res.farmerId) {
+      matchedCustomer = {
+        id: res.farmerId,
+        customerCode: res.farmerCode || '',
+        farmerCode: res.farmerCode,
+        fullName: res.farmerName || 'Matched Farmer',
+        mobileNumber: '',
+        village: '',
+        preferredCategory: 'COW' as MilkCategory,
+        permittedCategories: ['COW' as MilkCategory],
+        dairyId: targetOrgId || '',
+        status: 'ACTIVE',
+        balanceDue: 0,
+      } as CustomerIdentity
+    }
+
+    return {
+      isMatch,
+      matchedCustomer,
+      similarity,
+      confidenceScore,
     }
   },
 }
@@ -443,6 +510,37 @@ export const sessionsApi = {
       },
     }
   },
+
+  reopenSession: async (sessionCode: string): Promise<ActiveCollectionSession> => {
+    const res = await apiRequest<{ success: boolean; data: any }>('/collections/sessions/reopen', {
+      method: 'POST',
+      body: JSON.stringify({ sessionCode }),
+    })
+    const s = res.data
+    return {
+      id: s.id,
+      sessionCode: s.sessionCode,
+      dairyId: s.organizationId,
+      date: s.businessDate,
+      shift: s.shift as ShiftType,
+      status: s.status as 'OPEN' | 'CLOSED',
+      openedAt: s.openedAt,
+      closedAt: s.closedAt,
+      openingOperatorName: s.openingOperatorName || 'Operator',
+      closingOperatorName: s.closingOperatorName,
+      deviceId: s.deviceIdentifier,
+      deviceName: s.deviceName || 'Counter Kiosk',
+      totals: {
+        totalLiters: Number(s.totalLiters || 0),
+        cowLiters: Number(s.cowLiters || 0),
+        buffaloLiters: Number(s.buffaloLiters || 0),
+        transactionCount: Number(s.transactionCount || 0),
+        totalAmount: Number(s.totalAmount || 0),
+        averageFat: Number(s.averageFat || 0),
+        averageSnf: Number(s.averageSnf || 0),
+      },
+    }
+  },
 }
 
 // ============================================================================
@@ -461,6 +559,7 @@ export const transactionsApi = {
     identificationMethod: string
     operatorName?: string
     isOffline?: boolean
+    idempotencyKey?: string
   }): Promise<CollectionTransaction> => {
     const res = await apiRequest<{
       success: boolean
@@ -480,7 +579,7 @@ export const transactionsApi = {
         clrDensity: data.clrDensity,
         identificationMethod: data.identificationMethod,
         deviceId: 'KIOSK_MAIN',
-        idempotencyKey: `TXN-${crypto.randomUUID()}`,
+        idempotencyKey: data.idempotencyKey || `TXN-${crypto.randomUUID()}`,
       }),
     })
 

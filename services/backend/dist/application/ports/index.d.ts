@@ -21,7 +21,7 @@ export interface ICustomerRepository {
     }): Promise<Customer[]>;
     save(customer: Customer): Promise<void>;
     listPendingRegistrations(organizationId?: string): Promise<Customer[]>;
-    updateFaceEnrollment(customerId: string, modelVersion: string, encryptedPayload: string): Promise<void>;
+    updateFaceEnrollment(customerId: string, modelVersion: string, encryptedPayload: string, organizationId?: string): Promise<void>;
     assignRfidCard(customerId: string, cardUid: string, organizationId?: string): Promise<void>;
 }
 export interface ICustomerMembershipRepository {
@@ -30,12 +30,13 @@ export interface ICustomerMembershipRepository {
     listMembershipsByGlobalId(globalCustomerId: string): Promise<CustomerMembership[]>;
     findMembership(globalCustomerId: string, organizationId: string): Promise<CustomerMembership | null>;
     saveMembership(membership: CustomerMembership): Promise<void>;
-    updateMembershipStatus(organizationId: string, tenantCustomerId: string, status: string, farmerCode?: string): Promise<void>;
+    updateMembershipStatus(organizationId: string, tenantCustomerId: string, status: string, farmerCode?: string, customerName?: string): Promise<void>;
     getMembershipCount(globalCustomerId: string): Promise<number>;
 }
 export interface IShiftSessionRepository {
     findActiveSession(centerId: string, deviceIdentifier: string, organizationId?: string): Promise<KioskShiftSession | null>;
     findByCode(sessionCode: string, organizationId?: string): Promise<KioskShiftSession | null>;
+    findById(sessionId: string, organizationId?: string): Promise<KioskShiftSession | null>;
     save(session: KioskShiftSession): Promise<void>;
 }
 export interface ICollectionTransactionRepository {

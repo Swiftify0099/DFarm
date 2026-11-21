@@ -27,6 +27,7 @@ export interface MatchResult {
     | 'INACTIVE_TEMPLATE'
     | 'NO_TEMPLATES'
     | 'INVALID_PROBE_EMBEDDING_SHAPE'
+    | 'AMBIGUOUS_SEPARATION_BELOW_MARGIN'
 }
 
 export class DairyFaceMatcher {
@@ -58,7 +59,9 @@ export class DairyFaceMatcher {
 
     // 1. Filter templates strictly to the active dairy tenant & active status
     const dairyTemplates = enrolledTemplates.filter(
-      (t) => t.dairyId === activeDairyId && t.status === 'ACTIVE'
+      (t) =>
+        (!t.dairyId || !activeDairyId || t.dairyId.toLowerCase() === activeDairyId.toLowerCase()) &&
+        t.status === 'ACTIVE'
     )
 
     if (dairyTemplates.length === 0) {
@@ -74,23 +77,62 @@ export class DairyFaceMatcher {
 
     let bestSimilarity = -1
     let bestTemplate: EnrolledFaceTemplate | null = null
+    let secondBestSimilarity = -1
+    let secondBestTemplate: EnrolledFaceTemplate | null = null
 
     for (const tmpl of dairyTemplates) {
       // Security check: Never match a template from another dairy
-      if (tmpl.dairyId !== activeDairyId) {
+      if (
+        tmpl.dairyId &&
+        activeDairyId &&
+        tmpl.dairyId.toLowerCase() !== activeDairyId.toLowerCase()
+      ) {
         continue
       }
 
       const sim = computeCosineSimilarity(probeEmbedding, tmpl.embedding)
       if (sim > bestSimilarity) {
+        secondBestSimilarity = bestSimilarity
+        secondBestTemplate = bestTemplate
         bestSimilarity = sim
         bestTemplate = tmpl
+      } else if (sim > secondBestSimilarity) {
+        secondBestSimilarity = sim
+        secondBestTemplate = tmpl
       }
     }
 
     if (bestTemplate && bestSimilarity >= threshold) {
-      // Find customer record
-      const customer = customersMap.get(bestTemplate.customerId) || null
+      // Strict 1:N Candidate Separation Check:
+      // If top two candidates both pass threshold and delta < 0.05, identity is ambiguous
+      if (secondBestTemplate && secondBestSimilarity >= threshold && (bestSimilarity - secondBestSimilarity) < 0.05) {
+        return {
+          isMatch: false,
+          matchedCustomer: null,
+          confidenceScore: Math.min(
+            99.9,
+            Number((((bestSimilarity - threshold) / (1.0 - threshold)) * 30 + 70).toFixed(1))
+          ),
+          similarity: Number(bestSimilarity.toFixed(4)),
+          threshold,
+          rejectionReason: 'AMBIGUOUS_SEPARATION_BELOW_MARGIN',
+        }
+      }
+
+      // Find customer record or synthesize from verified enrolled template metadata
+      const customer = customersMap.get(bestTemplate.customerId) || {
+        id: bestTemplate.customerId,
+        customerCode: bestTemplate.farmerCode,
+        farmerCode: bestTemplate.farmerCode,
+        fullName: bestTemplate.fullName,
+        mobileNumber: '',
+        village: '',
+        preferredCategory: 'COW' as const,
+        permittedCategories: ['COW' as const],
+        dairyId: bestTemplate.dairyId || activeDairyId,
+        status: 'ACTIVE' as const,
+        balanceDue: 0,
+      }
       // Convert cosine similarity to 0-100% confidence display
       const confidenceScore = Math.min(
         99.9,

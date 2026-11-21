@@ -3,6 +3,7 @@ import {
   GetActiveShiftSessionUseCase,
   OpenShiftSessionUseCase,
   CloseShiftSessionUseCase,
+  ReopenShiftSessionUseCase,
   ProcessMilkIntakeUseCase,
   GetCustomerCollectionHistoryUseCase,
   GetMonthlyMilkSummaryUseCase,
@@ -28,6 +29,7 @@ const ledgerRepo = new PostgresLedgerRepository();
 const getActiveSessionUseCase = new GetActiveShiftSessionUseCase(sessionRepo);
 const openSessionUseCase = new OpenShiftSessionUseCase(sessionRepo);
 const closeSessionUseCase = new CloseShiftSessionUseCase(sessionRepo);
+const reopenSessionUseCase = new ReopenShiftSessionUseCase(sessionRepo);
 const processMilkIntakeUseCase = new ProcessMilkIntakeUseCase(
   customerRepo,
   sessionRepo,
@@ -151,7 +153,7 @@ router.get('/sessions/active', optionalAuthenticate, async (req: Request, res: R
 const handleOpenSession = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const centerId = req.user?.centerId || (req.body?.centerId as string) || (req.headers['x-center-id'] as string) || '00000000-0000-0000-0000-000000000002';
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.body?.organizationId as string) || '00000000-0000-0000-0000-000000000001';
+    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.headers['x-organization-id'] as string) || (req.body?.organizationId as string) || '00000000-0000-0000-0000-000000000001';
     const operatorId = req.user?.userId || '00000000-0000-0000-0000-000000000003';
     const deviceId = (req.body?.deviceId as string) || 'KIOSK_MAIN';
     const shift = req.body?.shift || 'MORNING';
@@ -205,11 +207,51 @@ router.patch('/sessions/:sessionId/close', optionalAuthenticate, handleCloseSess
 router.post('/sessions/close', optionalAuthenticate, handleCloseSession);
 router.patch('/sessions/close', optionalAuthenticate, handleCloseSession);
 
+// 3. Reopen Concluded Shift Session
+const handleReopenSession = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const rawCode = req.params['sessionCode'] || req.params['sessionId'] || req.body?.sessionCode || req.body?.sessionId;
+    const sessionCode = Array.isArray(rawCode) ? rawCode[0] : rawCode;
+    const orgId =
+      req.user?.organizationId ||
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.headers['x-dairy-id'] as string) ||
+      (req.headers['x-organization-id'] as string);
+
+    if (!sessionCode) {
+      res.status(400).json({ success: false, error: 'Session code or ID is required to reopen shift session' });
+      return;
+    }
+
+    const session = await reopenSessionUseCase.execute({
+      sessionCode,
+      operatorId: req.user?.userId || '00000000-0000-0000-0000-000000000003',
+      operatorName: req.body?.operatorName || req.user?.fullName || 'Counter Operator',
+      organizationId: orgId,
+    });
+
+    res.json({
+      success: true,
+      message: `Shift session ${sessionCode} reopened successfully.`,
+      data: session.toJSON(),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+router.post('/sessions/:sessionCode/reopen', optionalAuthenticate, handleReopenSession);
+router.patch('/sessions/:sessionCode/reopen', optionalAuthenticate, handleReopenSession);
+router.post('/sessions/reopen', optionalAuthenticate, handleReopenSession);
+
 // 4. Atomic Milk Intake Transaction
 const handleIntakeTransaction = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const body = req.body;
-    const orgId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
+    const orgId =
+      req.user?.organizationId ||
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.headers['x-dairy-id'] as string) ||
+      (req.headers['x-organization-id'] as string);
     const customer = await customerRepo.findById(body.customerId, orgId);
     if (!customer) {
       res.status(404).json({ success: false, error: `Customer ${body.customerId} not found` });
@@ -229,7 +271,7 @@ const handleIntakeTransaction = async (req: Request, res: Response, next: NextFu
       organizationId: orgId,
       sessionId: body.sessionId,
       sessionCode: body.sessionCode,
-      customerId: body.customerId,
+      customerId: customer.id,
       milkCategory: body.milkCategory || body.category,
       weightLiters: Number(body.weightLiters || body.netWeight || body.quantity),
       fatPercentage: Number(body.fatPercentage || body.fat),
@@ -246,6 +288,10 @@ const handleIntakeTransaction = async (req: Request, res: Response, next: NextFu
       success: true,
       data: result.transaction.toJSON(),
       receiptNumber: result.receiptNumber,
+      customerId: customer.id,
+      farmerId: customer.id,
+      farmerCode: customer.farmerCode,
+      farmerName: customer.fullName,
       customerBalanceAfter: result.customerBalanceAfter,
       isIdempotentReplay: result.isIdempotentReplay,
     });
@@ -306,7 +352,7 @@ const handleGetTransactions = async (req: Request, res: Response, next: NextFunc
 
     if (effectiveCustomerId) {
       params.push(effectiveCustomerId);
-      query += ` AND mc.customer_id = $${params.length}`;
+      query += ` AND (mc.customer_id = $${params.length} OR c.global_customer_id = $${params.length})`;
     }
     if (date) {
       params.push(date);
@@ -525,8 +571,9 @@ router.get('/history', authenticate, async (req: Request, res: Response, next: N
       customerId = (req.query['customerId'] as string) || req.user?.userId;
     }
 
-    const limit = req.query['limit'] ? Number(req.query['limit']) : 50;
-    const offset = req.query['offset'] ? Number(req.query['offset']) : 0;
+    const page = Math.max(1, Number(req.query['page'] || 1));
+    const limit = Math.max(1, Number(req.query['limit'] || req.query['pageSize'] || 50));
+    const offset = req.query['offset'] !== undefined ? Number(req.query['offset']) : (page - 1) * limit;
     const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
 
     const data = await getHistoryUseCase.execute(customerId!, limit, offset, organizationId);

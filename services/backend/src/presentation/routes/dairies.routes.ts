@@ -2,13 +2,14 @@ import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'node:crypto';
 import { GetNearbyDairiesUseCase } from '../../application/use-cases/index.js';
 import { db } from '../../infrastructure/database/PostgresPool.js';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
 import { emailService } from '../../infrastructure/email/EmailService.js';
 import { doveOtpService } from '../../infrastructure/otp/DoveOtpService.js';
 import { config } from '../../config/env.js';
 import { logger } from '../../shared/logger/index.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 import { superAdminRepo } from '../../infrastructure/repositories/PostgresSuperAdminRepository.js';
+import { tenantDatabaseRoutes } from './tenant-database.routes.js';
 
 const router = Router();
 const getNearbyDairies = new GetNearbyDairiesUseCase();
@@ -640,6 +641,13 @@ router.get('/nearby', async (req: Request, res: Response, next: NextFunction) =>
         provisioningStatus: provStatus,
         isOperational: !isDbFailed,
         isActive: memStatus !== 'suspended' && memStatus !== 'disabled',
+        isRegistrationEligible: !isDbFailed && memStatus === 'active',
+        registrationBlockReason: isDbFailed
+          ? 'Dairy database provisioning is incomplete or failed'
+          : memStatus !== 'active'
+          ? `Dairy status is ${memStatus.toUpperCase()}`
+          : undefined,
+        databaseHealth: isDbFailed ? 'CONNECTION_FAILED' : 'HEALTHY',
         discoveryStatus: isDbFailed ? 'PROVISIONING_FAILED' : memStatus === 'suspended' ? 'SUSPENDED' : 'ACTIVE',
       };
 
@@ -1795,5 +1803,73 @@ const purgeAdminByPhoneHandler = async (req: Request, res: Response, next: NextF
 
 router.delete('/admin/by-phone/:phone', purgeAdminByPhoneHandler);
 router.delete('/purge/phone/:phone', purgeAdminByPhoneHandler);
+
+/**
+ * Permanent Dairy Deletion & Deprovisioning (Super Admin Only)
+ * Permanently deletes a dairy, deprovisions its physical PostgreSQL tenant database,
+ * purges dairy-scoped memberships and assets, while preserving global customer identities.
+ */
+const deprovisionDairyHandler = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const rawId = req.params.dairyId || req.params.id;
+    const dairyId = (Array.isArray(rawId) ? rawId[0] : rawId) || '';
+    if (!dairyId) {
+      res.status(400).json({ success: false, error: 'dairyId is required.' });
+      return;
+    }
+
+    const isSuperAdmin =
+      req.user?.role === 'SUPER_ADMIN' ||
+      req.user?.role === 'PLATFORM_SUPER_ADMIN' ||
+      req.user?.role === 'DEVELOPER_OVERRIDE' ||
+      (req.user as any)?.role === 'SUPER_ADMIN';
+
+    if (!isSuperAdmin) {
+      res.status(403).json({
+        success: false,
+        error: 'Forbidden: Only Super Administrators can deprovision a Dairy and its physical database.',
+      });
+      return;
+    }
+
+    const { confirmDairyCode } = req.body || {};
+
+    const controlDb = tenantDbManager.getControlPlaneDb();
+    const orgRes = await controlDb.query(
+      'SELECT id, name, code FROM organizations WHERE id = $1 LIMIT 1;',
+      [dairyId]
+    );
+
+    if (orgRes.rows.length === 0) {
+      res.status(404).json({ success: false, error: `Dairy ${dairyId} not found.` });
+      return;
+    }
+
+    const org = orgRes.rows[0];
+    if (confirmDairyCode && confirmDairyCode.trim().toUpperCase() !== org.code.trim().toUpperCase()) {
+      res.status(400).json({
+        success: false,
+        error: `Confirmation code '${confirmDairyCode}' does not match Dairy code '${org.code}'. Permanent deletion rejected.`,
+      });
+      return;
+    }
+
+    const result = await tenantDbManager.deprovisionTenantDatabase(dairyId, { force: true });
+
+    res.json({
+      success: true,
+      message: `Dairy '${org.name}' (${org.code}) and physical database successfully deprovisioned.`,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+router.delete('/:id/deprovision', authenticate, deprovisionDairyHandler);
+router.delete('/:id', authenticate, deprovisionDairyHandler);
+
+// Tenant Database Management & Dynamic Catalog Explorer
+router.use('/:dairyId/database', tenantDatabaseRoutes);
 
 export const dairiesRoutes = router;

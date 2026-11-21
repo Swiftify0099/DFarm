@@ -11,11 +11,13 @@ import { Calculator, ArrowRight, Wallet, Check, AlertCircle } from 'lucide-react
 
 interface TransactionSummaryPanelProps {
   customer: CustomerIdentity | null
+  identificationMethod?: string | null
   onTransactionSaved: () => void
 }
 
 export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = ({
   customer,
+  identificationMethod,
   onTransactionSaved,
 }) => {
   const {
@@ -24,14 +26,31 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
     updateMeasurements,
     isNetworkOnline,
     refreshSession,
+    reopenSession,
     refreshOfflineCount,
     resetIntakeCycle,
     printReceipt,
+    activeAttempt,
+    commitCollectionAttempt,
   } = useHardware()
 
   const { operator } = useAuth()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isReopening, setIsReopening] = useState(false)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+
+  const handleReopen = async () => {
+    if (!activeSession?.sessionCode) return
+    setIsReopening(true)
+    try {
+      await reopenSession(activeSession.sessionCode)
+      await refreshSession()
+    } catch (err: any) {
+      alert(`Reopen failed: ${err.message}`)
+    } finally {
+      setIsReopening(false)
+    }
+  }
 
   // Rate Matrix Real-Time Calculation
   const { ratePerLiter, version } = ratesApi.calculateRate(
@@ -46,7 +65,10 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
   let canSubmit = true
   let lockReason: string | null = null
 
-  if (activeSession && activeSession.status === 'CLOSED') {
+  if (!activeSession) {
+    canSubmit = false
+    lockReason = 'No active shift session. Please wait for session initialization or open a session.'
+  } else if (activeSession.status === 'CLOSED') {
     canSubmit = false
     lockReason = 'Current shift session is CLOSED. Open an active session to accept milk intake.'
   } else if (!customer) {
@@ -90,10 +112,20 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
     setIsSubmitting(true)
     try {
       let res: CollectionTransaction
+      const normalizedMethod: 'FACE_YUNET_SFACE' | 'RFID_TAG' | 'MANUAL_SEARCH' =
+        identificationMethod === 'RFID_CARD' || identificationMethod === 'RFID_TAG'
+          ? 'RFID_TAG'
+          : identificationMethod === 'FACE_RECOGNITION' || identificationMethod === 'FACE_YUNET_SFACE'
+          ? 'FACE_YUNET_SFACE'
+          : 'MANUAL_SEARCH'
+
+      // Acquire stable idempotency attempt key from active collection attempt
+      const attemptId = activeAttempt?.attemptId || `ATT-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+
       if (isNetworkOnline) {
         try {
           res = await transactionsApi.submit({
-            sessionId: activeSession?.id || 'session-current-001',
+            sessionId: activeSession!.id,
             sessionCode: activeSession?.sessionCode,
             customerId: customer.id,
             milkCategory: measurements.milkCategory,
@@ -101,19 +133,20 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
             fat: measurements.fat,
             snf: measurements.snf,
             clrDensity: measurements.clrDensity,
-            identificationMethod: 'FACE_YUNET_SFACE',
+            identificationMethod: normalizedMethod,
             operatorName: operator?.fullName || 'Operator',
             isOffline: false,
+            idempotencyKey: attemptId,
           })
         } catch (apiErr: any) {
-          throw new Error(`Server submission failed: ${apiErr.message || 'Network error'}`)
+          throw new Error(apiErr.message || 'Server submission failed')
         }
       } else {
         // Honest offline persistence: store directly in IndexedDB offline queue without fake mock fallback
         const offlineTxn: CollectionTransaction = {
-          id: `OFFLINE-${crypto.randomUUID()}`,
-          transactionCode: `OFF-${Date.now().toString().slice(-6)}`,
-          sessionId: activeSession?.id || 'offline-session',
+          id: `OFFLINE-${attemptId}`,
+          transactionCode: `OFF-${attemptId.slice(-6).toUpperCase()}`,
+          sessionId: activeSession ? activeSession.id : 'offline-session',
           dairyId: customer.dairyId || operator?.dairyId || '',
           customerId: customer.id,
           customerCode: customer.customerCode,
@@ -129,7 +162,7 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
           appliedRatePerLiter: ratePerLiter,
           rateChartVersion: version,
           totalAmount: totalAmount,
-          identificationMethod: 'FACE_YUNET_SFACE',
+          identificationMethod: normalizedMethod,
           syncStatus: 'PENDING_OFFLINE',
           deviceId: 'KIOSK_MAIN',
           operatorName: operator?.fullName || 'Operator',
@@ -138,6 +171,9 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
         await localDB.saveTransaction(offlineTxn)
         res = offlineTxn
       }
+
+      // Mark transaction committed in state machine
+      commitCollectionAttempt(res)
 
       setSuccessMessage(
         `Intake recorded! Txn #${res.transactionCode} — ${res.weightLiters}L of ${res.milkCategory} milk for ₹${res.totalAmount}`
@@ -237,6 +273,26 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
         <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center space-x-2 text-emerald-800 text-xs animate-fade-in">
           <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />
           <span className="font-medium">{successMessage}</span>
+        </div>
+      )}
+
+      {/* Closed Session Warning & Reopen Action */}
+      {activeSession?.status === 'CLOSED' && (
+        <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-center justify-between text-amber-900 text-xs">
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <div>
+              <p className="font-bold">Shift Session Concluded</p>
+              <p className="text-[11px] text-amber-700">Session '{activeSession.sessionCode}' is concluded.</p>
+            </div>
+          </div>
+          <button
+            onClick={handleReopen}
+            disabled={isReopening}
+            className="px-3 py-1.5 bg-primary-orange text-white font-semibold rounded-lg text-xs hover:bg-orange-600 transition-colors shadow-sm disabled:opacity-50"
+          >
+            {isReopening ? 'Reopening...' : 'Reopen Shift'}
+          </button>
         </div>
       )}
 

@@ -71,6 +71,11 @@ export interface CustomerIdentity {
 // 3. Face Recognition State Machine (OpenCV YuNet + SFace ONNX)
 export type FaceRecognitionStatus =
   | 'IDLE'
+  | 'REQUESTING_PERMISSION'
+  | 'CONNECTING'
+  | 'WAITING_FOR_VIDEO_METADATA'
+  | 'STARTING_PLAYBACK'
+  | 'INITIALIZATION_FAILED'
   | 'CAMERA_PERMISSION_REQUIRED'
   | 'CAMERA_UNAVAILABLE'
   | 'CAMERA_ALREADY_IN_USE'
@@ -199,3 +204,43 @@ export interface RateMatrixConfig {
   baseRatePerLiter: number
   effectiveDate: string
 }
+
+// 10. Single Active Collection State Machine
+export type CollectionWorkflowState =
+  | 'IDLE'
+  | 'SCANNING'
+  | 'CUSTOMER_MATCHED'
+  | 'ANNOUNCING'
+  | 'WAITING_FOR_FAT'
+  | 'FAT_CAPTURED'
+  | 'WAITING_FOR_SNF'
+  | 'SNF_CAPTURED'
+  | 'WAITING_FOR_WEIGHT'
+  | 'WEIGHT_CAPTURED'
+  | 'VALIDATING'
+  | 'SAVING'
+  | 'COMMITTED'
+  | 'WAITING_FOR_FACE_CLEAR'
+
+export interface CollectionAttemptSession {
+  attemptId: string
+  customer: CustomerIdentity
+  identificationMethod: 'FACE_YUNET_SFACE' | 'RFID_TAG' | 'MANUAL_SEARCH'
+  state: CollectionWorkflowState
+  matchedAt: string
+  announced: boolean
+  fat: number | null
+  fatCapturedAt: string | null
+  snf: number | null
+  snfCapturedAt: string | null
+  clrDensity: number | null
+  weightLiters: number | null
+  weightCapturedAt: string | null
+  scaleStable: boolean
+  appliedRatePerLiter: number | null
+  totalAmount: number | null
+  rateChartVersion: number | null
+  errorReason: string | null
+  transaction: CollectionTransaction | null
+}
+

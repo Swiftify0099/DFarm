@@ -84,10 +84,10 @@ export declare const LedgerAccountsQuerySchema: z.ZodObject<{
         CLOSED: "CLOSED";
     }>>;
     balanceFilter: z.ZodDefault<z.ZodEnum<{
+        ALL: "ALL";
         PAYABLE: "PAYABLE";
         RECEIVABLE: "RECEIVABLE";
         ZERO: "ZERO";
-        ALL: "ALL";
     }>>;
 }, z.core.$strip>;
 export declare const ReportFilterSchema: z.ZodObject<{

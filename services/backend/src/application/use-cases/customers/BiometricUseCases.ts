@@ -12,6 +12,7 @@ export class GetFaceTemplatesUseCase {
         fe.model_version_id,
         c.farmer_code,
         c.full_name,
+        c.global_customer_id,
         encode(fe.embedding_encrypted, 'base64') AS encrypted_data,
         encode(fe.embedding_iv, 'base64') AS iv,
         encode(fe.embedding_auth_tag, 'base64') AS auth_tag,
@@ -42,6 +43,7 @@ export class GetFaceTemplatesUseCase {
     return result.rows.map((r: any) => ({
       templateId: r.id,
       customerId: r.customer_id,
+      globalCustomerId: r.global_customer_id,
       farmerCode: r.farmer_code,
       fullName: r.full_name,
       modelName: r.model_name,
@@ -116,22 +118,23 @@ export class UpdateCustomerBiometricsUseCase {
       );
     }
 
-    // Encrypt with AES-256-GCM + AAD
+    // Encrypt with AES-256-GCM + AAD (always bind to canonical customer.id)
     const encrypted = this.encryptor.encrypt128DimEmbedding(
       params.embedding,
-      params.customerId,
+      customer.id,
       modelId
     );
 
     await this.customerRepo.updateFaceEnrollment(
-      params.customerId,
+      customer.id,
       modelVersion,
-      JSON.stringify(encrypted)
+      JSON.stringify(encrypted),
+      customer.organizationId
     );
 
     return {
       success: true,
-      customerId: params.customerId,
+      customerId: customer.id,
       modelVersion,
       status: 'ENROLLED',
       enrolledAt: new Date().toISOString(),

@@ -10,21 +10,31 @@ import { RecentIntakeTable } from '@/components/workspace/RecentIntakeTable'
 import { AlertTriangle } from 'lucide-react'
 
 export const CollectionWorkspace: React.FC = () => {
-  const { faceState, rfidState, hasIdentityConflict, manualCustomer, setManualCustomer } =
-    useHardware()
+  const {
+    faceState,
+    rfidState,
+    hasIdentityConflict,
+    manualCustomer,
+    setManualCustomer,
+    activeAttempt,
+  } = useHardware()
   const { openOverlay } = useKioskOverlay()
   const [identificationMethod, setIdentificationMethod] = useState<string | null>(null)
   const [refreshTxnTrigger, setRefreshTxnTrigger] = useState(0)
 
-  // Active customer is resolved from manual override/code entry, or biometric/RFID if no conflict
+  // Active customer is resolved from state machine attempt, manual override, or biometric/RFID
   const activeCustomer = manualCustomer
     ? manualCustomer
     : hasIdentityConflict
     ? null
-    : faceState.matchedCustomer || rfidState.matchedCustomer
+    : activeAttempt?.customer || faceState.matchedCustomer || rfidState.matchedCustomer
 
   const effectiveMethod = manualCustomer
     ? identificationMethod || 'MANUAL_ENTRY'
+    : activeAttempt?.identificationMethod === 'FACE_YUNET_SFACE'
+    ? 'FACE_RECOGNITION'
+    : activeAttempt?.identificationMethod === 'RFID_TAG'
+    ? 'RFID_CARD'
     : faceState.matchedCustomer
     ? 'FACE_RECOGNITION'
     : rfidState.matchedCustomer
@@ -92,6 +102,7 @@ export const CollectionWorkspace: React.FC = () => {
           {/* 2. Rate Matrix, Financial Breakdown & Record Button */}
           <TransactionSummaryPanel
             customer={activeCustomer}
+            identificationMethod={effectiveMethod}
             onTransactionSaved={handleTransactionSaved}
           />
         </div>

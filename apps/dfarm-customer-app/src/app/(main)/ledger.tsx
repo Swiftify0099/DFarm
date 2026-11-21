@@ -123,8 +123,8 @@ export default function LedgerScreen() {
                       ]}
                     >
                       {isCredit
-                        ? `+₹${item.creditAmount.toFixed(2)}`
-                        : `-₹${item.debitAmount.toFixed(2)}`}
+                        ? `+₹${((item.creditAmount ?? 0)).toFixed(2)}`
+                        : `-₹${((item.debitAmount ?? 0)).toFixed(2)}`}
                     </Text>
                   </View>
                 </View>
@@ -132,7 +132,7 @@ export default function LedgerScreen() {
                 <View style={styles.entryFooter}>
                   <Text style={styles.footerRef}>Ref: #{item.referenceId || item.id}</Text>
                   <Text style={styles.runningBalance}>
-                    Balance: ₹{item.runningBalance.toFixed(2)}
+                    Balance: ₹{((item.runningBalance ?? 0)).toFixed(2)}
                   </Text>
                 </View>
               </ClayCard>

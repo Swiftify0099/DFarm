@@ -17,6 +17,10 @@ export const corsOptions = {
             /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestOrigin)) {
             return callback(null, true);
         }
+        // Permit Cloudflare Pages preview and production projects safely (*.pages.dev for DFarm apps)
+        if (/^https:\/\/([a-zA-Z0-9_-]+\.)?(dfarm-collection|dfarm-dairy-admin|dfarm-super-admin)\.pages\.dev$/.test(requestOrigin)) {
+            return callback(null, true);
+        }
         return callback(new Error(`Origin ${requestOrigin} is not allowed by CORS policy`), false);
     },
     credentials: true,
@@ -27,9 +31,20 @@ export const corsOptions = {
         'X-Request-Id',
         'Accept',
         'X-Dairy-Tenant-ID',
+        'X-Dairy-Tenant-Id',
         'x-dairy-tenant-id',
         'X-Dairy-Id',
         'x-dairy-id',
+        'X-Organization-Id',
+        'x-organization-id',
+        'X-Tenant-Id',
+        'x-tenant-id',
+        'X-Center-Id',
+        'x-center-id',
+        'X-Farmer-Id',
+        'x-farmer-id',
+        'X-Customer-Id',
+        'x-customer-id',
         'X-Client-App',
         'x-client-app',
         'X-Client-Version',
@@ -41,7 +56,7 @@ export const corsOptions = {
         'X-Access-Token',
         'x-access-token'
     ],
-    exposedHeaders: ['X-Request-Id'],
+    exposedHeaders: ['X-Request-Id', 'X-Dairy-Id', 'X-Dairy-Tenant-Id', 'X-Organization-Id'],
     maxAge: 86400, // 24 hours
 };
 //# sourceMappingURL=cors.js.map

@@ -24,6 +24,7 @@ import { GlobalFatSnfPoliciesPage } from '@/features/fat-snf-policies/GlobalFatS
 import { HardwareInventoryPage } from '@/features/hardware/HardwareInventoryPage'
 import { AmcManagementPage } from '@/features/amc/AmcManagementPage'
 import { PlatformSettingsPage } from '@/features/settings/PlatformSettingsPage'
+import { TenantDatabaseManagerPage } from '@/features/databases/TenantDatabaseManagerPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -57,6 +58,8 @@ export const App: React.FC = () => {
               <Route index element={<DashboardPage />} />
               <Route path="dairies" element={<DairyListPage />} />
               <Route path="dairies/:dairyId" element={<DairyDetailPage />} />
+              <Route path="dairies/:dairyId/database" element={<TenantDatabaseManagerPage />} />
+              <Route path="databases" element={<TenantDatabaseManagerPage />} />
               <Route path="admins" element={<AdminListPage />} />
               <Route path="locations" element={<DairyLocationsPage />} />
               <Route path="policies/rate" element={<GlobalRatePoliciesPage />} />

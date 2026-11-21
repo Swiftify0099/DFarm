@@ -29,7 +29,8 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
             }
             customerId = req.user.userId;
         }
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const explicitOrg = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const organizationId = explicitOrg || req.user?.organizationId;
         if (customerId) {
             const limit = req.query['limit'] ? Number(req.query['limit']) : 12;
             const data = await getBillsUseCase.execute(customerId, limit, organizationId);
@@ -89,40 +90,57 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
 router.post('/generate', optionalAuthenticate, async (req, res, next) => {
     try {
         const { customerId, periodStart, periodEnd, cycleName: _cycleName, operatorName: _operatorName } = req.body;
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'];
+        const explicitOrg = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.body.organizationId || req.query?.['organizationId'];
+        const organizationId = explicitOrg || req.user?.organizationId;
         if (!customerId || !organizationId) {
             res.status(400).json({ success: false, error: 'customerId and organizationId are required' });
             return;
         }
-        // Resolve customer and center
-        const custRes = await db.query(`SELECT primary_center_id, farmer_code, full_name FROM customers WHERE id = $1`, [customerId]);
+        const tenantDb = await getTenantDb(organizationId);
+        // Resolve customer and center from tenant DB
+        const custRes = await tenantDb.query(`SELECT id, primary_center_id, farmer_code, full_name FROM customers WHERE (id = $1 OR global_customer_id = $1) LIMIT 1;`, [customerId]);
         if (custRes.rows.length === 0) {
             res.status(404).json({ success: false, error: 'Customer not found' });
             return;
         }
         const customer = custRes.rows[0];
+        const resolvedTenantCustomerId = customer.id;
         const centerId = customer.primary_center_id || '00000000-0000-0000-0000-000000000002';
-        // Sum collections in date range
-        const collRes = await db.query(`SELECT COALESCE(SUM(net_weight), 0) AS total_weight, COALESCE(SUM(total_amount), 0) AS total_amount
+        // Sum collections in date range from tenant DB
+        const collRes = await tenantDb.query(`SELECT COALESCE(SUM(net_weight), 0) AS total_weight, COALESCE(SUM(total_amount), 0) AS total_amount
        FROM milk_collections
-       WHERE customer_id = $1 AND business_date BETWEEN $2 AND $3;`, [customerId, periodStart || '2026-01-01', periodEnd || '2026-12-31']);
+       WHERE (customer_id = $1 OR customer_id = $2) AND business_date BETWEEN $3 AND $4;`, [customerId, resolvedTenantCustomerId, periodStart || '2026-01-01', periodEnd || '2026-12-31']);
         const totalWeight = Number(collRes.rows[0]?.total_weight || 0);
         const totalGross = Number(collRes.rows[0]?.total_amount || 0);
+        // Ensure billing period exists in tenant DB
+        let billingPeriodId;
+        const bpRes = await tenantDb.query(`SELECT id FROM billing_periods WHERE center_id = $1 AND start_date = $2 AND end_date = $3 LIMIT 1;`, [centerId, periodStart || '2026-01-01', periodEnd || '2026-12-31']);
+        if (bpRes.rows.length > 0) {
+            billingPeriodId = bpRes.rows[0].id;
+        }
+        else {
+            const newBp = await tenantDb.query(`INSERT INTO billing_periods (
+          organization_id, center_id, period_name, start_date, end_date, cycle_type, status
+        ) VALUES (
+          $1, $2, $3, $4, $5, 'CALENDAR_MONTH', 'GENERATED'
+        ) RETURNING id;`, [organizationId, centerId, _cycleName || 'Monthly Settlement', periodStart || '2026-01-01', periodEnd || '2026-12-31']);
+            billingPeriodId = newBp.rows[0].id;
+        }
         const billNumber = `BILL-${Date.now().toString().slice(-6)}`;
-        const billRes = await db.query(`INSERT INTO monthly_bills (
+        const billRes = await tenantDb.query(`INSERT INTO monthly_bills (
         billing_period_id, customer_id, center_id, organization_id, bill_number, bill_status,
         total_milk_weight, gross_milk_amount, net_payable_amount
        ) VALUES (
-        gen_random_uuid(), $1, $2, $3, $4, 'GENERATED',
-        $5, $6, $6
-       ) RETURNING id;`, [customerId, centerId, organizationId, billNumber, totalWeight, totalGross]);
+        $1, $2, $3, $4, $5, 'GENERATED',
+        $6, $7, $7
+       ) RETURNING id;`, [billingPeriodId, resolvedTenantCustomerId, centerId, organizationId, billNumber, totalWeight, totalGross]);
         res.status(201).json({
             success: true,
             message: `Bill ${billNumber} generated for ${customer.full_name}`,
             data: {
                 id: billRes.rows[0].id,
                 billNumber,
-                customerId,
+                customerId: resolvedTenantCustomerId,
                 totalMilkWeight: totalWeight,
                 netPayableAmount: totalGross,
             },

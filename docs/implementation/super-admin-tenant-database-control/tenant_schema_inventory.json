@@ -1,0 +1,133 @@
+{
+  "schemaName": "public",
+  "totalExpectedMigrations": 27,
+  "manifestVersion": "v1.0.0",
+  "tables": [
+    {
+      "tableName": "organizations",
+      "category": "CATEGORY_A_OPERATIONAL",
+      "accessMode": "CONTROLLED_CRUD",
+      "primaryKey": ["id"],
+      "columnsCount": 6
+    },
+    {
+      "tableName": "dairy_centers",
+      "category": "CATEGORY_A_OPERATIONAL",
+      "accessMode": "CONTROLLED_CRUD",
+      "primaryKey": ["id"],
+      "columnsCount": 16
+    },
+    {
+      "tableName": "users",
+      "category": "CATEGORY_B_LIFECYCLE",
+      "accessMode": "LIFECYCLE_ACTION_ONLY",
+      "primaryKey": ["id"],
+      "columnsCount": 12
+    },
+    {
+      "tableName": "customers",
+      "category": "CATEGORY_B_LIFECYCLE",
+      "accessMode": "LIFECYCLE_ACTION_ONLY",
+      "primaryKey": ["id"],
+      "columnsCount": 19
+    },
+    {
+      "tableName": "farmer_profiles",
+      "category": "CATEGORY_B_LIFECYCLE",
+      "accessMode": "LIFECYCLE_ACTION_ONLY",
+      "primaryKey": ["id"],
+      "columnsCount": 14
+    },
+    {
+      "tableName": "rfid_cards",
+      "category": "CATEGORY_B_LIFECYCLE",
+      "accessMode": "LIFECYCLE_ACTION_ONLY",
+      "primaryKey": ["id"],
+      "columnsCount": 8
+    },
+    {
+      "tableName": "face_biometric_templates",
+      "category": "CATEGORY_D_SECURITY",
+      "accessMode": "SECURITY_PROTECTED",
+      "primaryKey": ["id"],
+      "columnsCount": 11
+    },
+    {
+      "tableName": "rate_charts",
+      "category": "CATEGORY_A_OPERATIONAL",
+      "accessMode": "CONTROLLED_CRUD",
+      "primaryKey": ["id"],
+      "columnsCount": 10
+    },
+    {
+      "tableName": "kiosk_shift_sessions",
+      "category": "CATEGORY_B_LIFECYCLE",
+      "accessMode": "LIFECYCLE_ACTION_ONLY",
+      "primaryKey": ["id"],
+      "columnsCount": 14
+    },
+    {
+      "tableName": "collection_transactions",
+      "category": "CATEGORY_B_LIFECYCLE",
+      "accessMode": "LIFECYCLE_ACTION_ONLY",
+      "primaryKey": ["id"],
+      "columnsCount": 24
+    },
+    {
+      "tableName": "customer_ledger_accounts",
+      "category": "CATEGORY_C_FINANCIAL",
+      "accessMode": "IMMUTABLE_FINANCIAL",
+      "primaryKey": ["id"],
+      "columnsCount": 11
+    },
+    {
+      "tableName": "ledger_transactions",
+      "category": "CATEGORY_C_FINANCIAL",
+      "accessMode": "IMMUTABLE_FINANCIAL",
+      "primaryKey": ["id"],
+      "columnsCount": 14
+    },
+    {
+      "tableName": "billing_periods",
+      "category": "CATEGORY_C_FINANCIAL",
+      "accessMode": "IMMUTABLE_FINANCIAL",
+      "primaryKey": ["id"],
+      "columnsCount": 16
+    },
+    {
+      "tableName": "monthly_bills",
+      "category": "CATEGORY_C_FINANCIAL",
+      "accessMode": "IMMUTABLE_FINANCIAL",
+      "primaryKey": ["id"],
+      "columnsCount": 20
+    },
+    {
+      "tableName": "customer_payouts",
+      "category": "CATEGORY_C_FINANCIAL",
+      "accessMode": "IMMUTABLE_FINANCIAL",
+      "primaryKey": ["id"],
+      "columnsCount": 15
+    },
+    {
+      "tableName": "feed_products",
+      "category": "CATEGORY_A_OPERATIONAL",
+      "accessMode": "CONTROLLED_CRUD",
+      "primaryKey": ["id"],
+      "columnsCount": 15
+    },
+    {
+      "tableName": "feed_inventory",
+      "category": "CATEGORY_A_OPERATIONAL",
+      "accessMode": "CONTROLLED_CRUD",
+      "primaryKey": ["id"],
+      "columnsCount": 10
+    },
+    {
+      "tableName": "tenant_metadata",
+      "category": "CATEGORY_A_OPERATIONAL",
+      "accessMode": "READ_ONLY",
+      "primaryKey": ["id"],
+      "columnsCount": 7
+    }
+  ]
+}

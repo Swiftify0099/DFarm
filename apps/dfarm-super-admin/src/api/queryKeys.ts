@@ -49,4 +49,11 @@ export const queryKeys = {
   settings: {
     platform: ['settings', 'platform'] as const,
   },
+  tenantDatabase: {
+    overview: (dairyId: string) => ['tenantDatabase', 'overview', dairyId] as const,
+    tables: (dairyId: string) => ['tenantDatabase', 'tables', dairyId] as const,
+    schema: (dairyId: string, tableName: string) => ['tenantDatabase', 'schema', dairyId, tableName] as const,
+    records: (dairyId: string, tableName: string, params?: Record<string, unknown>) => ['tenantDatabase', 'records', dairyId, tableName, params] as const,
+    migrations: (dairyId: string) => ['tenantDatabase', 'migrations', dairyId] as const,
+  },
 }

@@ -39,6 +39,7 @@
     "format": "prettier --write \"**/*.{ts,js,json,md,sql}\"",
     "format:check": "prettier --check \"**/*.{ts,js,json,md,sql}\"",
     "test": "npm run --workspaces test",
+    "db:migrate": "node scripts/migrate.js",
     "db:validate": "npm run --workspace=packages/database test:validate",
     "db:test": "npm run --workspace=packages/database test",
     "db:seed-admin": "node scripts/seed-super-admin.js",

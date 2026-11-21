@@ -122,23 +122,25 @@ export default function CollectionHistoryScreen() {
                   <View style={styles.metricCol}>
                     <Text style={styles.metricLabel}>Quantity</Text>
                     <Text style={styles.metricValBold}>
-                      {item.quantityLiters.toFixed(1)} L
+                      {((item.quantityLiters ?? (item as any).weightLiters ?? 0)).toFixed(1)} L
                     </Text>
                   </View>
                   <View style={styles.metricCol}>
                     <Text style={styles.metricLabel}>FAT / SNF</Text>
                     <Text style={styles.metricVal}>
-                      {item.fatPercentage}% / {item.snfPercentage}%
+                      {((item.fatPercentage ?? 0)).toFixed(1)}% / {((item.snfPercentage ?? 0)).toFixed(1)}%
                     </Text>
                   </View>
                   <View style={styles.metricCol}>
                     <Text style={styles.metricLabel}>Rate</Text>
-                    <Text style={styles.metricVal}>₹{item.ratePerLiter}/L</Text>
+                    <Text style={styles.metricVal}>
+                      ₹{((item.ratePerLiter ?? (item as any).appliedRatePerLiter ?? 0)).toFixed(2)}/L
+                    </Text>
                   </View>
                   <View style={[styles.metricCol, styles.amountCol]}>
                     <Text style={styles.metricLabel}>Total Amount</Text>
                     <Text style={styles.amountBold}>
-                      ₹{item.totalAmount.toFixed(2)}
+                      ₹{((item.totalAmount ?? 0)).toFixed(2)}
                     </Text>
                   </View>
                 </View>
@@ -182,18 +184,22 @@ export default function CollectionHistoryScreen() {
               <View style={styles.tableRow}>
                 <Text style={styles.tableLabel}>Net Measured Quantity</Text>
                 <Text style={styles.tableValBold}>
-                  {selectedRecord.quantityLiters} Liters
+                  {((selectedRecord.quantityLiters ?? (selectedRecord as any).weightLiters ?? 0)).toFixed(1)} Liters
                 </Text>
               </View>
               <View style={styles.tableRow}>
                 <Text style={styles.tableLabel}>Fat Percentage (FAT)</Text>
-                <Text style={styles.tableVal}>{selectedRecord.fatPercentage}%</Text>
+                <Text style={styles.tableVal}>
+                  {((selectedRecord.fatPercentage ?? 0)).toFixed(1)}%
+                </Text>
               </View>
               <View style={styles.tableRow}>
                 <Text style={styles.tableLabel}>Solids-Not-Fat (SNF)</Text>
-                <Text style={styles.tableVal}>{selectedRecord.snfPercentage}%</Text>
+                <Text style={styles.tableVal}>
+                  {((selectedRecord.snfPercentage ?? 0)).toFixed(1)}%
+                </Text>
               </View>
-              {selectedRecord.lactometerReading && (
+              {selectedRecord.lactometerReading != null && (
                 <View style={styles.tableRow}>
                   <Text style={styles.tableLabel}>Lactometer Degree</Text>
                   <Text style={styles.tableVal}>
@@ -204,13 +210,13 @@ export default function CollectionHistoryScreen() {
               <View style={styles.tableRow}>
                 <Text style={styles.tableLabel}>Official Applied Rate</Text>
                 <Text style={styles.tableVal}>
-                  ₹{selectedRecord.ratePerLiter} / Liter
+                  ₹{((selectedRecord.ratePerLiter ?? (selectedRecord as any).appliedRatePerLiter ?? 0)).toFixed(2)} / Liter
                 </Text>
               </View>
               <View style={[styles.tableRow, styles.totalRow]}>
                 <Text style={styles.totalLabel}>Gross Shift Credit</Text>
                 <Text style={styles.totalVal}>
-                  ₹{selectedRecord.totalAmount.toFixed(2)}
+                  ₹{((selectedRecord.totalAmount ?? 0)).toFixed(2)}
                 </Text>
               </View>
             </View>

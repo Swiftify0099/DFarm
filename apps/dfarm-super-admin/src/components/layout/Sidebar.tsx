@@ -20,6 +20,7 @@ import {
   HardDrive,
   ShieldCheck,
   Settings,
+  Database,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 
@@ -48,6 +49,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: <Building2 className="w-4 h-4" />,
       badge: pendingDairiesCount > 0 ? `${pendingDairiesCount} new` : undefined,
       badgeColor: 'bg-amber-100 text-amber-800 border-amber-200',
+    },
+    {
+      to: '/databases',
+      label: 'Tenant Database Manager',
+      icon: <Database className="w-4 h-4" />,
     },
     {
       to: '/admins',

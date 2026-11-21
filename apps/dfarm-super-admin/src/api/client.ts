@@ -27,12 +27,38 @@ import type {
 } from '@/types'
 import type { DashboardMetrics, GlobalAnalytics, DairyListQuery, AdminListQuery } from './contracts'
 
-// Normalized API root URL helper
-const getApiRoot = (): string => {
-  const raw = (import.meta as any).env?.VITE_API_URL || (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:4000/api/v1'
-  const trimmed = raw.replace(/\/+$/, '')
-  return trimmed.endsWith('/api/v1') ? trimmed : `${trimmed}/api/v1`
+/**
+ * Resolves the canonical API base URL with safe normalization.
+ * Handles trailing slashes, ensures /api/v1 prefix, and protects against silent localhost fallbacks.
+ */
+export const getApiBaseUrl = (): string => {
+  const envUrl = (
+    (import.meta as any).env?.VITE_API_BASE_URL ||
+    (import.meta as any).env?.VITE_API_URL ||
+    ''
+  ).trim()
+
+  if (envUrl) {
+    const sanitized = envUrl.replace(/\/+$/, '')
+    return sanitized.endsWith('/api/v1') ? sanitized : `${sanitized}/api/v1`
+  }
+
+  // Local development fallback to default port 4000
+  if (import.meta.env.DEV) {
+    return 'http://localhost:4000/api/v1'
+  }
+
+  // In production, warn if VITE_API_BASE_URL was omitted during build
+  if (typeof window !== 'undefined' && import.meta.env.PROD) {
+    console.warn(
+      '[DFarm Super Admin] VITE_API_BASE_URL is not configured in production. ' +
+      'API requests will fall back to relative path /api/v1.'
+    )
+  }
+  return '/api/v1'
 }
+
+const getApiRoot = getApiBaseUrl
 
 // Authenticated headers helper
 const getAuthHeaders = (): Record<string, string> => {
@@ -387,6 +413,30 @@ export const apiClient = {
 
   async updateDairyConfig(payload: UpdateDairyConfigPayload, actor: SuperAdminUser): Promise<DairyTenant> {
     return mockBackend.updateDairyConfig(payload, actor)
+  },
+
+  async deprovisionDairy(
+    payload: { dairyId: string; confirmDairyCode: string; reason: string },
+    actor: SuperAdminUser
+  ): Promise<{ success: boolean; message: string }> {
+    const apiRoot = getApiRoot()
+    const res = await fetch(`${apiRoot}/dairies/${encodeURIComponent(payload.dairyId)}/deprovision`, {
+      method: 'DELETE',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        confirmDairyCode: payload.confirmDairyCode,
+        reason: payload.reason,
+        actorId: actor.id,
+      }),
+    })
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}))
+      throw new Error(errBody.error || `Failed to deprovision dairy (${res.status})`)
+    }
+    return await res.json()
   },
 
   // ============================================================================
@@ -1027,5 +1077,158 @@ export const apiClient = {
       if (res.ok && body.data) return body.data
     } catch {}
     return mockBackend.getPlatformSettings()
+  },
+
+  // ============================================================================
+  // 18. Super Admin Tenant Database Control
+  // ============================================================================
+  async getTenantDatabaseOverview(dairyId: string): Promise<any> {
+    const apiRoot = getApiRoot()
+    const res = await safeFetch(`${apiRoot}/super-admin/tenants/${encodeURIComponent(dairyId)}/database/overview`, {
+      headers: getAuthHeaders(),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error || 'Failed to fetch database overview')
+    return body.data
+  },
+
+  async getTenantTables(dairyId: string): Promise<any[]> {
+    const apiRoot = getApiRoot()
+    const res = await safeFetch(`${apiRoot}/super-admin/tenants/${encodeURIComponent(dairyId)}/database/tables`, {
+      headers: getAuthHeaders(),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error || 'Failed to fetch tenant tables')
+    return body.data || []
+  },
+
+  async getTableSchema(dairyId: string, tableName: string): Promise<any> {
+    const apiRoot = getApiRoot()
+    const res = await safeFetch(`${apiRoot}/super-admin/tenants/${encodeURIComponent(dairyId)}/database/tables/${encodeURIComponent(tableName)}/schema`, {
+      headers: getAuthHeaders(),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error || 'Failed to fetch table schema')
+    return body.data
+  },
+
+  async getTableRecords(
+    dairyId: string,
+    tableName: string,
+    params: {
+      page?: number
+      limit?: number
+      search?: string
+      sortBy?: string
+      sortOrder?: string
+      filterField?: string
+      filterValue?: string
+    } = {}
+  ): Promise<any> {
+    const apiRoot = getApiRoot()
+    const query = new URLSearchParams()
+    if (params.page) query.set('page', String(params.page))
+    if (params.limit) query.set('limit', String(params.limit))
+    if (params.search) query.set('search', params.search)
+    if (params.sortBy) query.set('sortBy', params.sortBy)
+    if (params.sortOrder) query.set('sortOrder', params.sortOrder)
+    if (params.filterField) query.set('filterField', params.filterField)
+    if (params.filterValue) query.set('filterValue', params.filterValue)
+
+    const res = await safeFetch(`${apiRoot}/super-admin/tenants/${encodeURIComponent(dairyId)}/database/tables/${encodeURIComponent(tableName)}/records?${query.toString()}`, {
+      headers: getAuthHeaders(),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error || 'Failed to fetch table records')
+    return body
+  },
+
+  async getRecordById(dairyId: string, tableName: string, recordId: string): Promise<any> {
+    const apiRoot = getApiRoot()
+    const res = await safeFetch(`${apiRoot}/super-admin/tenants/${encodeURIComponent(dairyId)}/database/tables/${encodeURIComponent(tableName)}/records/${encodeURIComponent(recordId)}`, {
+      headers: getAuthHeaders(),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error || 'Failed to fetch record detail')
+    return body.data
+  },
+
+  async insertRecord(dairyId: string, tableName: string, data: any, reason?: string): Promise<any> {
+    const apiRoot = getApiRoot()
+    const res = await safeFetch(`${apiRoot}/super-admin/tenants/${encodeURIComponent(dairyId)}/database/tables/${encodeURIComponent(tableName)}/records`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ data, reason: reason || 'Super Admin Controlled CRUD' }),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error || 'Failed to insert record')
+    return body.data
+  },
+
+  async updateRecord(dairyId: string, tableName: string, recordId: string, updates: any, reason?: string): Promise<any> {
+    const apiRoot = getApiRoot()
+    const res = await safeFetch(`${apiRoot}/super-admin/tenants/${encodeURIComponent(dairyId)}/database/tables/${encodeURIComponent(tableName)}/records/${encodeURIComponent(recordId)}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ updates, reason: reason || 'Super Admin Controlled Update' }),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error || 'Failed to update record')
+    return body.data
+  },
+
+  async deleteRecord(dairyId: string, tableName: string, recordId: string, reason?: string): Promise<any> {
+    const apiRoot = getApiRoot()
+    const res = await safeFetch(`${apiRoot}/super-admin/tenants/${encodeURIComponent(dairyId)}/database/tables/${encodeURIComponent(tableName)}/records/${encodeURIComponent(recordId)}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ reason: reason || 'Super Admin Controlled Deletion' }),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error || 'Failed to delete record')
+    return body
+  },
+
+  async verifyConnection(dairyId: string): Promise<any> {
+    const apiRoot = getApiRoot()
+    const res = await safeFetch(`${apiRoot}/super-admin/tenants/${encodeURIComponent(dairyId)}/database/actions/verify-connection`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error || 'Failed to verify connection')
+    return body.data
+  },
+
+  async validateSchema(dairyId: string): Promise<any> {
+    const apiRoot = getApiRoot()
+    const res = await safeFetch(`${apiRoot}/super-admin/tenants/${encodeURIComponent(dairyId)}/database/actions/validate-schema`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error || 'Failed to validate schema')
+    return body.data
+  },
+
+  async getMigrationHistory(dairyId: string): Promise<any> {
+    const apiRoot = getApiRoot()
+    const res = await safeFetch(`${apiRoot}/super-admin/tenants/${encodeURIComponent(dairyId)}/database/migrations`, {
+      headers: getAuthHeaders(),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error || 'Failed to fetch migration history')
+    return body.data
+  },
+
+  async reconcileMapping(dairyId: string): Promise<any> {
+    const apiRoot = getApiRoot()
+    const res = await safeFetch(`${apiRoot}/super-admin/tenants/${encodeURIComponent(dairyId)}/database/actions/reconcile-mapping`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    })
+    const body = await res.json()
+    if (!res.ok) throw new Error(body.error || 'Failed to reconcile mapping')
+    return body.data
   },
 }

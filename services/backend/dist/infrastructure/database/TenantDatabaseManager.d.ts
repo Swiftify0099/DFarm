@@ -40,6 +40,7 @@ export declare class TenantDatabaseManager {
     private constructor();
     static getInstance(): TenantDatabaseManager;
     private isTestEnvironment;
+    private getSslConfig;
     getControlPlaneDb(): IDatabaseClient;
     setControlPlaneDb(db: IDatabaseClient): void;
     initialize(controlPlaneDb?: IDatabaseClient): Promise<void>;
@@ -79,6 +80,24 @@ export declare class TenantDatabaseManager {
     closeTenantPool(dairyId: string): Promise<void>;
     evictTenantPool(dairyId: string): Promise<void>;
     closeAllPools(): Promise<void>;
+    /**
+     * Permanently deprovisions a dairy tenant:
+     * 1. Closes and evicts active connection pools.
+     * 2. Drops physical PostgreSQL database (or evicts test in-memory instance).
+     * 3. Cleans up customer_dairy_memberships for this organization from central control-plane DB.
+     * 4. Deletes entry from central dairy_database_mappings.
+     * 5. Marks dairy organization status = 'DELETED' (and is_deleted = TRUE).
+     * 6. Deletes dairy-scoped users from central users table.
+     */
+    deprovisionTenantDatabase(dairyId: string, options?: {
+        force?: boolean;
+    }): Promise<{
+        success: boolean;
+        dairyId: string;
+        databaseName?: string;
+        deprovisionedAt: string;
+        details: string;
+    }>;
     getSafeHealthStatus(): Promise<{
         status: 'READY' | 'DEGRADED';
         totalActiveTenants: number;

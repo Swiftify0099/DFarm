@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { superAdminRepo } from '../../infrastructure/repositories/PostgresSuperAdminRepository.js';
 import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { tenantDatabaseRoutes } from './tenant-database.routes.js';
 const router = Router();
 function getParamId(req, paramName = 'id') {
     const raw = req.params[paramName];
@@ -623,5 +624,9 @@ router.get('/settings', async (_req, res, next) => {
         next(err);
     }
 });
+// ============================================================================
+// 15. Tenant Database Management & Control Explorer
+// ============================================================================
+router.use('/tenants/:dairyId/database', tenantDatabaseRoutes);
 export const superAdminRoutes = router;
 //# sourceMappingURL=super-admin.routes.js.map

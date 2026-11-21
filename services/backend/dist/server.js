@@ -14,9 +14,10 @@ export function startServer() {
         }
         process.exit(1);
     });
-    server.listen(config.PORT, () => {
+    server.listen(config.PORT, '0.0.0.0', () => {
         logger.info({
             port: config.PORT,
+            host: '0.0.0.0',
             env: config.NODE_ENV,
             apiBase: config.API_BASE_URL,
         }, 'DFarm Smart Dairy Backend Server started successfully');

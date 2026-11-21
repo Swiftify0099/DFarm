@@ -40,7 +40,8 @@ export class GetCustomerBillsUseCase {
         mb.approved_at as paid_at
       FROM monthly_bills mb
       LEFT JOIN billing_periods bp ON bp.id = mb.billing_period_id
-      WHERE mb.customer_id = $1
+      LEFT JOIN customers c ON c.id = mb.customer_id
+      WHERE (mb.customer_id = $1 OR c.global_customer_id = $1)
       ORDER BY mb.created_at DESC
       LIMIT $2;
     `;
@@ -54,19 +55,31 @@ export class GetCustomerBillsUseCase {
         const result = await client.query(sql, [customerId, limit]);
         return result.rows.map((row) => ({
             id: row.id,
+            billId: row.id,
             billNumber: row.bill_number,
+            cycleStartDate: row.billing_period_start instanceof Date
+                ? row.billing_period_start.toISOString().split('T')[0]
+                : String(row.billing_period_start),
+            cycleEndDate: row.billing_period_end instanceof Date
+                ? row.billing_period_end.toISOString().split('T')[0]
+                : String(row.billing_period_end),
             periodStart: row.billing_period_start instanceof Date
                 ? row.billing_period_start.toISOString().split('T')[0]
                 : String(row.billing_period_start),
             periodEnd: row.billing_period_end instanceof Date
                 ? row.billing_period_end.toISOString().split('T')[0]
                 : String(row.billing_period_end),
+            cycleLabel: `Billing Period (${row.bill_number})`,
             totalLiters: Number(row.total_liters),
             grossAmount: Number(row.gross_amount),
+            grossMilkAmount: Number(row.gross_amount),
             deductionsAmount: Number(row.deductions_amount),
+            feedDeductions: Number(row.deductions_amount),
+            otherDeductions: 0,
             netPayableAmount: Number(row.net_payable_amount),
-            status: row.status,
+            status: row.status === 'PAID' ? 'DISBURSED' : (row.status || 'PENDING'),
             paidAt: row.paid_at?.toISOString?.() || row.paid_at,
+            disbursedDate: row.paid_at ? new Date(row.paid_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : undefined,
         }));
     }
 }

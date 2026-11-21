@@ -19,6 +19,7 @@ import {
   ClayHeader,
 } from '../../../design-system';
 import { runFaceDiagnostics } from '../../../face-ai/diagnostics';
+import { useProfile } from '../../../features/profile/useProfile';
 import { FaceDiagnosticsReport } from '../../../types/face';
 import { FaceOvalGuide, CameraPermissionIllustration } from '../../../assets/vectors/BiometricAssets';
 
@@ -28,11 +29,37 @@ export default function FaceDiagnosticsScreen() {
   const [isRunning, setIsRunning] = useState(false);
   const [report, setReport] = useState<FaceDiagnosticsReport | null>(null);
   const cameraRef = useRef<any>(null);
+  const { profile } = useProfile();
 
   const handleRunDiagnostics = async () => {
+    if (!permission?.granted) {
+      await requestPermission();
+      return;
+    }
+
     setIsRunning(true);
     try {
-      const res = await runFaceDiagnostics();
+      let imageBase64: string | undefined = undefined;
+      if (cameraRef.current) {
+        try {
+          const photo = await cameraRef.current.takePictureAsync({
+            base64: true,
+            quality: 0.6,
+            shutterSound: false,
+          });
+          if (photo?.base64) {
+            imageBase64 = photo.base64;
+          }
+        } catch (camErr) {
+          console.warn('[FaceDiagnostics] Failed to capture camera photo:', camErr);
+        }
+      }
+      const res = await runFaceDiagnostics({
+        cameraPermissionGranted: Boolean(permission?.granted),
+        customerId: profile?.id,
+        dairyId: profile?.dairyId,
+        imageBase64,
+      });
       setReport(res);
     } finally {
       setIsRunning(false);
@@ -101,10 +128,65 @@ export default function FaceDiagnosticsScreen() {
             <View style={styles.reportHeader}>
               <Text style={styles.reportTitle}>Diagnostic Telemetry</Text>
               <ClayBadge
-                label={report.status}
-                variant={report.status === 'OPTIMAL' ? 'success' : 'warning'}
+                label={report.discreteStatus || report.status}
+                variant={
+                  report.discreteStatus === 'FACE_MATCHED'
+                    ? 'success'
+                    : report.discreteStatus === 'ENROLLMENT_NOT_FOUND'
+                    ? 'warning'
+                    : report.discreteStatus === 'FACE_NOT_MATCHED'
+                    ? 'error'
+                    : report.status === 'OPTIMAL'
+                    ? 'success'
+                    : 'warning'
+                }
               />
             </View>
+
+            {/* Discrete Status Result Hero Banner */}
+            {report.discreteStatus && (
+              <View
+                style={[
+                  styles.statusHeroBanner,
+                  report.discreteStatus === 'FACE_MATCHED'
+                    ? styles.statusHeroSuccess
+                    : report.discreteStatus === 'ENROLLMENT_NOT_FOUND'
+                    ? styles.statusHeroWarning
+                    : styles.statusHeroError,
+                ]}
+              >
+                <Text style={styles.statusHeroTitle}>
+                  {report.discreteStatus === 'FACE_MATCHED'
+                    ? '✅ FACE MATCHED (चेहरा ओळखला)'
+                    : report.discreteStatus === 'FACE_NOT_MATCHED'
+                    ? '❌ FACE NOT MATCHED (चेहरा जुळला नाही)'
+                    : report.discreteStatus === 'ENROLLMENT_NOT_FOUND'
+                    ? '⚠️ ENROLLMENT NOT FOUND (बायोमेट्रिक नोंदणी आढळली नाही)'
+                    : report.discreteStatus === 'NO_FACE_DETECTED'
+                    ? '👤 NO FACE DETECTED (चेहरा आढळला नाही)'
+                    : report.discreteStatus === 'MULTIPLE_FACES_DETECTED'
+                    ? '👥 MULTIPLE FACES DETECTED (एकाधिक चेहरे आढळले)'
+                    : report.discreteStatus === 'MODEL_LOAD_FAILED'
+                    ? '⚠️ MODEL LOAD FAILED (मॉडेल लोड अयशस्वी)'
+                    : report.discreteStatus === 'NETWORK_ERROR'
+                    ? '📡 NETWORK ERROR (नेटवर्क त्रुटी)'
+                    : 'FACE DETECTED'}
+                </Text>
+
+                {report.matchedFarmerName ? (
+                  <Text style={styles.statusHeroFarmer}>
+                    Farmer: {report.matchedFarmerName}{' '}
+                    {report.farmerCode ? `(${report.farmerCode})` : ''}
+                  </Text>
+                ) : null}
+
+                {typeof report.matchScore === 'number' ? (
+                  <Text style={styles.statusHeroScore}>
+                    Cosine Similarity: {(report.matchScore * 100).toFixed(1)}% (Threshold: 36.3%)
+                  </Text>
+                ) : null}
+              </View>
+            )}
 
             <View style={styles.telemetryGrid}>
               <View style={styles.telemetryItem}>
@@ -154,7 +236,39 @@ export default function FaceDiagnosticsScreen() {
                   variant={report.embeddingValid128D ? 'success' : 'error'}
                 />
               </View>
+
+              {report.matchStatus && (
+                <View style={styles.telemetryItem}>
+                  <Text style={styles.telemetryLabel}>Template Match Verification</Text>
+                  <ClayBadge
+                    label={
+                      report.matchStatus === 'MATCH_VERIFIED'
+                        ? `Verified (${report.matchedFarmerName || 'Farmer Match'})`
+                        : report.matchStatus === 'NOT_ENROLLED'
+                        ? 'Not Enrolled'
+                        : report.matchStatus === 'MATCH_FAILED'
+                        ? 'Template Mismatch'
+                        : report.matchStatus === 'BACKEND_ERROR'
+                        ? 'Server Offline'
+                        : 'Skipped'
+                    }
+                    variant={
+                      report.matchStatus === 'MATCH_VERIFIED'
+                        ? 'success'
+                        : report.matchStatus === 'NOT_ENROLLED'
+                        ? 'warning'
+                        : 'error'
+                    }
+                  />
+                </View>
+              )}
             </View>
+
+            {report.statusMessage ? (
+              <View style={styles.statusMessageBox}>
+                <Text style={styles.statusMessageText}>{report.statusMessage}</Text>
+              </View>
+            ) : null}
           </ClayCard>
         ) : null}
 
@@ -278,5 +392,52 @@ const styles = StyleSheet.create({
   },
   actionCard: {
     padding: 16,
+  },
+  statusMessageBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: DFARM_RADIUS.sm,
+    backgroundColor: DFARM_COLORS.surfaceInset,
+    borderLeftWidth: 4,
+    borderLeftColor: DFARM_COLORS.primaryOrange,
+  },
+  statusMessageText: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    color: DFARM_COLORS.primaryText,
+    fontWeight: '500',
+  },
+  statusHeroBanner: {
+    padding: 12,
+    borderRadius: DFARM_RADIUS.md,
+    marginBottom: 14,
+    borderWidth: 1.5,
+  },
+  statusHeroSuccess: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#10B981',
+  },
+  statusHeroWarning: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#F59E0B',
+  },
+  statusHeroError: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#EF4444',
+  },
+  statusHeroTitle: {
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryText,
+    marginBottom: 4,
+  },
+  statusHeroFarmer: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    fontWeight: '600',
+    color: '#065F46',
+    marginBottom: 2,
+  },
+  statusHeroScore: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    color: DFARM_COLORS.secondaryText,
   },
 });

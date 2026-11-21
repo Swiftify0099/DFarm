@@ -25,6 +25,10 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      - key: DATABASE_TLS_MODE
+        value: require
+      - key: TENANT_DB_ENCRYPTION_KEY
+        generateValue: true
       - key: JWT_SECRET
         generateValue: true
       - key: ADMIN_OTP_SECRET

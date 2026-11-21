@@ -41,6 +41,21 @@ export interface FaceDiagnosticsReport {
   embeddingValid128D: boolean;
   status: 'OPTIMAL' | 'POOR_LIGHTING' | 'NO_FACE' | 'MULTIPLE_FACES' | 'MISALIGNED' | 'ERROR';
   statusMessage: string;
+  matchStatus?: 'MATCH_VERIFIED' | 'MATCH_FAILED' | 'NOT_ENROLLED' | 'SKIPPED' | 'BACKEND_ERROR';
+  matchScore?: number;
+  matchedFarmerName?: string;
+  farmerCode?: string;
+  discreteStatus?:
+    | 'FACE_DETECTED'
+    | 'VERIFYING_IDENTITY'
+    | 'FACE_MATCHED'
+    | 'FACE_NOT_MATCHED'
+    | 'UNKNOWN_PERSON'
+    | 'NO_FACE_DETECTED'
+    | 'MULTIPLE_FACES_DETECTED'
+    | 'MODEL_LOAD_FAILED'
+    | 'NETWORK_ERROR'
+    | 'ENROLLMENT_NOT_FOUND';
 }
 
 export interface FaceEnrollmentPayload {

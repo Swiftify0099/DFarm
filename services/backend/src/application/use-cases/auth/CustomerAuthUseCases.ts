@@ -115,6 +115,7 @@ export class VerifyCustomerOtpUseCase {
           organizationId: legacyCustomer.organizationId,
           tenantCustomerId: legacyCustomer.id,
           farmerCode: legacyCustomer.farmerCode,
+          customerName: legacyCustomer.fullName,
           membershipStatus: (legacyCustomer.registrationStatus as any) || (legacyCustomer.status === 'ACTIVE' ? 'APPROVED' : 'PENDING_APPROVAL'),
           dairyName,
           dairyCode,
@@ -164,6 +165,17 @@ export class VerifyCustomerOtpUseCase {
     // Pick active membership: prefer first APPROVED, otherwise first available
     const activeMembership = memberships.find((m) => m.isApproved) || memberships[0]!;
 
+    let resolvedCustomerName = activeMembership.customerName;
+    if (!resolvedCustomerName && this.customerRepository) {
+      try {
+        const cust = await this.customerRepository.findById(activeMembership.tenantCustomerId, activeMembership.organizationId);
+        if (cust?.fullName) {
+          resolvedCustomerName = cust.fullName;
+        }
+      } catch {}
+    }
+    const finalCustomerName = resolvedCustomerName || (activeMembership.farmerCode ? `Farmer ${activeMembership.farmerCode}` : 'Valued Farmer');
+
     const token = this.tokenService.signToken({
       userId: activeMembership.tenantCustomerId,
       organizationId: activeMembership.organizationId,
@@ -202,7 +214,7 @@ export class VerifyCustomerOtpUseCase {
         status: statusMapping,
         selectedDairyId: activeMembership.organizationId,
         customerProfile: {
-          name: activeMembership.farmerCode || activeMembership.dairyName,
+          name: finalCustomerName,
           dairyName: activeMembership.dairyName,
           village: activeMembership.dairyAddress || undefined,
         },
@@ -211,7 +223,7 @@ export class VerifyCustomerOtpUseCase {
       customer: {
         id: activeMembership.tenantCustomerId,
         farmerCode: activeMembership.farmerCode || undefined,
-        fullName: activeMembership.dairyName,
+        fullName: finalCustomerName,
         mobileNumber: phone.e164,
         registrationStatus: activeMembership.membershipStatus,
         organizationId: activeMembership.organizationId,

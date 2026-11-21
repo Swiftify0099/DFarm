@@ -4,6 +4,7 @@ export class CustomerMembership {
         this.props = {
             ...props,
             farmerCode: props.farmerCode ?? null,
+            customerName: props.customerName ?? null,
             dairyCode: props.dairyCode ?? null,
             dairyAddress: props.dairyAddress ?? null,
             centerId: props.centerId ?? null,
@@ -27,6 +28,9 @@ export class CustomerMembership {
     }
     get farmerCode() {
         return this.props.farmerCode;
+    }
+    get customerName() {
+        return this.props.customerName;
     }
     get membershipStatus() {
         return this.props.membershipStatus;
@@ -65,6 +69,7 @@ export class CustomerMembership {
             dairyId: this.organizationId,
             tenantCustomerId: this.tenantCustomerId,
             farmerCode: this.farmerCode,
+            customerName: this.customerName,
             membershipStatus: this.membershipStatus,
             status: this.membershipStatus,
             dairyName: this.dairyName,

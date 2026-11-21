@@ -71,6 +71,34 @@ export default function DashboardScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* Biometric Enrollment Action Banner (When Approved but not yet enrolled) */}
+        {profile && !profile?.biometricStatus?.isEnrolled && (
+          <ClayCard variant="highlight" style={styles.enrollmentBanner}>
+            <View style={styles.enrollmentBannerHeader}>
+              <View style={styles.enrollmentBannerIconBox}>
+                <Text style={styles.enrollmentBannerEmoji}>📸</Text>
+              </View>
+              <View style={styles.enrollmentBannerTextBox}>
+                <Text style={styles.enrollmentBannerTitle}>
+                  Face Biometrics Not Enrolled / चेहरा नोंदणी अपूर्ण
+                </Text>
+                <Text style={styles.enrollmentBannerSubtitle}>
+                  Please enroll your face (5 quality-checked samples) to enable seamless, instant
+                  milk collection recognition at the center.
+                </Text>
+              </View>
+            </View>
+            <Pressable
+              onPress={() => router.push('/(main)/profile/update-face')}
+              style={({ pressed }) => [styles.enrollmentActionBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.enrollmentActionBtnText}>
+                Enroll Face Biometrics Now (५ नमुने) →
+              </Text>
+            </Pressable>
+          </ClayCard>
+        )}
+
         {/* Today's Milk Collection Card (Hero Clay Surface) */}
         <ClayCard variant="highlight" style={styles.heroCard}>
           <View style={styles.heroHeader}>
@@ -87,10 +115,10 @@ export default function DashboardScreen() {
 
             {todayRecord && (
               <ClayBadge
-                label={todayRecord.animalType}
-                variant={todayRecord.animalType === 'BUFFALO' ? 'buffalo' : 'cow'}
+                label={todayRecord.animalType || (todayRecord as any).milkCategory || 'COW'}
+                variant={(todayRecord.animalType || (todayRecord as any).milkCategory) === 'BUFFALO' ? 'buffalo' : 'cow'}
                 icon={
-                  todayRecord.animalType === 'BUFFALO' ? (
+                  (todayRecord.animalType || (todayRecord as any).milkCategory) === 'BUFFALO' ? (
                     <BuffaloIcon size={14} />
                   ) : (
                     <CowIcon size={14} />
@@ -106,7 +134,7 @@ export default function DashboardScreen() {
                 <View style={styles.metricItem}>
                   <Text style={styles.metricLabel}>Milk Volume</Text>
                   <Text style={styles.metricValueLarge}>
-                    {todayRecord.quantityLiters.toFixed(1)}
+                    {((todayRecord.quantityLiters ?? (todayRecord as any).weightLiters ?? 0)).toFixed(1)}
                     <Text style={styles.unitText}> L</Text>
                   </Text>
                 </View>
@@ -116,7 +144,7 @@ export default function DashboardScreen() {
                 <View style={styles.metricItem}>
                   <Text style={styles.metricLabel}>Today's Value</Text>
                   <Text style={styles.metricValueLarge}>
-                    ₹{todayRecord.totalAmount.toFixed(2)}
+                    ₹{((todayRecord.totalAmount ?? 0)).toFixed(2)}
                   </Text>
                 </View>
               </View>
@@ -125,15 +153,21 @@ export default function DashboardScreen() {
               <View style={styles.qualityContainer}>
                 <View style={styles.qualityPill}>
                   <Text style={styles.qualityLabel}>FAT / फॅट</Text>
-                  <Text style={styles.qualityValue}>{todayRecord.fatPercentage}%</Text>
+                  <Text style={styles.qualityValue}>
+                    {((todayRecord.fatPercentage ?? (todayRecord as any).fat ?? 0)).toFixed(1)}%
+                  </Text>
                 </View>
                 <View style={styles.qualityPill}>
                   <Text style={styles.qualityLabel}>SNF / एस.एन.एफ</Text>
-                  <Text style={styles.qualityValue}>{todayRecord.snfPercentage}%</Text>
+                  <Text style={styles.qualityValue}>
+                    {((todayRecord.snfPercentage ?? (todayRecord as any).snf ?? 0)).toFixed(1)}%
+                  </Text>
                 </View>
                 <View style={styles.qualityPill}>
                   <Text style={styles.qualityLabel}>RATE / दर</Text>
-                  <Text style={styles.qualityValue}>₹{todayRecord.ratePerLiter}/L</Text>
+                  <Text style={styles.qualityValue}>
+                    ₹{((todayRecord.ratePerLiter ?? (todayRecord as any).appliedRatePerLiter ?? 0)).toFixed(2)}/L
+                  </Text>
                 </View>
               </View>
             </>
@@ -339,6 +373,57 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     paddingBottom: 28,
+  },
+  enrollmentBanner: {
+    marginBottom: 16,
+    padding: 16,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1.5,
+    borderColor: DFARM_COLORS.primaryOrange,
+  },
+  enrollmentBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 12,
+  },
+  enrollmentBannerIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: DFARM_RADIUS.md,
+    backgroundColor: '#FFEDD5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  enrollmentBannerEmoji: {
+    fontSize: 20,
+  },
+  enrollmentBannerTextBox: {
+    flex: 1,
+  },
+  enrollmentBannerTitle: {
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryText,
+    marginBottom: 4,
+  },
+  enrollmentBannerSubtitle: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    color: DFARM_COLORS.secondaryText,
+    lineHeight: 16,
+  },
+  enrollmentActionBtn: {
+    backgroundColor: DFARM_COLORS.primaryOrange,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: DFARM_RADIUS.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  enrollmentActionBtnText: {
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   heroCard: {
     marginBottom: 16,

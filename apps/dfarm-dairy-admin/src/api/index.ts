@@ -1,7 +1,7 @@
 // DFarm Dairy Admin Web — API Bridge
 // Provides typed asynchronous API services with backend contracts and local in-memory fallback.
 
-import { getStoredAuth, setStoredAuth, clearStoredAuth, createHeaders, apiRequest } from './client'
+import { getStoredAuth, setStoredAuth, clearStoredAuth, createHeaders, apiRequest, getApiBaseUrl } from './client'
 import type {
   Customer,
   CustomerRegistrationRequest,
@@ -28,7 +28,7 @@ export const api = {
   // Auth
   auth: {
     sendOtp: async (mobile: string) => {
-      const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:4000/api/v1'
+      const baseUrl = getApiBaseUrl()
       const res = await fetch(`${baseUrl}/auth/admin/otp/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -42,7 +42,7 @@ export const api = {
       return data
     },
     verifyOtp: async (mobile: string, otp: string) => {
-      const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:4000/api/v1'
+      const baseUrl = getApiBaseUrl()
       const res = await fetch(`${baseUrl}/auth/admin/otp/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -725,6 +725,33 @@ export const api = {
         return []
       }
     },
+    getCenters: async (): Promise<{ id: string; code: string; name: string }[]> => {
+      try {
+        const res = await apiRequest<{ success: boolean; data: { id: string; code: string; name: string }[] }>('/staff/centers')
+        return Array.isArray(res.data) ? res.data : []
+      } catch {
+        return []
+      }
+    },
+    create: async (data: {
+      fullName: string
+      mobileNumber: string
+      role: string
+      centerId?: string
+      counterName?: string
+      email?: string
+    }): Promise<{ success: boolean; data?: StaffMember; message?: string; error?: string }> => {
+      return apiRequest<{ success: boolean; data?: StaffMember; message?: string; error?: string }>('/staff', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      })
+    },
+    updateStatus: async (id: string, status: 'ACTIVE' | 'SUSPENDED'): Promise<any> => {
+      return apiRequest(`/staff/${id}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      })
+    },
   },
 
   // Audit Logs
@@ -769,7 +796,7 @@ export const api = {
       return apiRequest<any>('/reports/ledger')
     },
     getExportUrl: (type: string, format: string = 'csv') => {
-      const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:4000/api/v1'
+      const baseUrl = getApiBaseUrl()
       return `${baseUrl}/reports/export?type=${encodeURIComponent(type)}&format=${encodeURIComponent(format)}`
     },
   },
@@ -777,7 +804,7 @@ export const api = {
   // Primary Dairy Admin Activation
   activation: {
     validateToken: async (token: string) => {
-      const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:4000/api/v1'
+      const baseUrl = getApiBaseUrl()
       const res = await fetch(`${baseUrl}/dairies/invitations/validate?token=${encodeURIComponent(token)}`)
       const data = await res.json().catch(() => null)
       if (res.ok && data) {
@@ -789,7 +816,7 @@ export const api = {
       throw new Error(data?.error || 'This activation link is invalid or unavailable.')
     },
     requestOtp: async (token: string) => {
-      const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:4000/api/v1'
+      const baseUrl = getApiBaseUrl()
       const res = await fetch(`${baseUrl}/dairies/invitations/otp/request`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -802,7 +829,7 @@ export const api = {
       throw new Error(data?.error || data?.message || 'Failed to dispatch activation OTP.')
     },
     activate: async (token: string, otp: string, confirmed: boolean = true) => {
-      const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:4000/api/v1'
+      const baseUrl = getApiBaseUrl()
       const res = await fetch(`${baseUrl}/dairies/invitations/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

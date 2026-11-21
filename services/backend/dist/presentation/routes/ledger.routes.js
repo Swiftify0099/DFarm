@@ -39,7 +39,11 @@ const handleGetBalanceSummary = async (req, res, next) => {
             res.status(400).json({ success: false, error: 'customerId is required' });
             return;
         }
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const organizationId = req.user?.organizationId ||
+            req.headers['x-dairy-tenant-id'] ||
+            req.headers['x-dairy-id'] ||
+            req.headers['x-organization-id'] ||
+            req.query['organizationId'];
         const data = await getKhataSummary.execute(customerId, organizationId);
         res.json({ success: true, data, balance: data.currentBalance, currentBalance: data.currentBalance });
     }
@@ -66,7 +70,11 @@ router.get('/entries', optionalAuthenticate, async (req, res, next) => {
         else {
             customerId = req.query['customerId'] || req.user?.userId;
         }
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const organizationId = req.user?.organizationId ||
+            req.headers['x-dairy-tenant-id'] ||
+            req.headers['x-dairy-id'] ||
+            req.headers['x-organization-id'] ||
+            req.query['organizationId'];
         if (customerId) {
             const limit = req.query['limit'] ? Number(req.query['limit']) : 50;
             const offset = req.query['offset'] ? Number(req.query['offset']) : 0;

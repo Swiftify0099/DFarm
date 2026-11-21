@@ -44,7 +44,12 @@ const handleGetBalanceSummary = async (req: Request, res: Response, next: NextFu
       res.status(400).json({ success: false, error: 'customerId is required' });
       return;
     }
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+    const organizationId =
+      req.user?.organizationId ||
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.headers['x-dairy-id'] as string) ||
+      (req.headers['x-organization-id'] as string) ||
+      (req.query['organizationId'] as string);
     const data = await getKhataSummary.execute(customerId, organizationId);
     res.json({ success: true, data, balance: data.currentBalance, currentBalance: data.currentBalance });
   } catch (err) {
@@ -72,7 +77,12 @@ router.get('/entries', optionalAuthenticate, async (req: Request, res: Response,
       customerId = (req.query['customerId'] as string) || req.user?.userId;
     }
 
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+    const organizationId =
+      req.user?.organizationId ||
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.headers['x-dairy-id'] as string) ||
+      (req.headers['x-organization-id'] as string) ||
+      (req.query['organizationId'] as string);
 
     if (customerId) {
       const limit = req.query['limit'] ? Number(req.query['limit']) : 50;

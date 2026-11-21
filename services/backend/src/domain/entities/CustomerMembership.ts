@@ -11,6 +11,7 @@ export interface CustomerMembershipProps {
   organizationId: string;
   tenantCustomerId: string;
   farmerCode?: string | null;
+  customerName?: string | null;
   membershipStatus: MembershipStatus;
   dairyName: string;
   dairyCode?: string | null;
@@ -29,6 +30,7 @@ export class CustomerMembership {
     this.props = {
       ...props,
       farmerCode: props.farmerCode ?? null,
+      customerName: props.customerName ?? null,
       dairyCode: props.dairyCode ?? null,
       dairyAddress: props.dairyAddress ?? null,
       centerId: props.centerId ?? null,
@@ -57,6 +59,10 @@ export class CustomerMembership {
 
   public get farmerCode(): string | null | undefined {
     return this.props.farmerCode;
+  }
+
+  public get customerName(): string | null | undefined {
+    return this.props.customerName;
   }
 
   public get membershipStatus(): MembershipStatus {
@@ -104,6 +110,7 @@ export class CustomerMembership {
       dairyId: this.organizationId,
       tenantCustomerId: this.tenantCustomerId,
       farmerCode: this.farmerCode,
+      customerName: this.customerName,
       membershipStatus: this.membershipStatus,
       status: this.membershipStatus,
       dairyName: this.dairyName,

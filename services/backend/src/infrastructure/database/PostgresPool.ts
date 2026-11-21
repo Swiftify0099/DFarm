@@ -16,13 +16,30 @@ export class PostgresDatabase {
 
   private constructor() {
     const connectionString = config.CENTRAL_DATABASE_URL || config.DATABASE_URL;
+    const conn = connectionString || '';
+
+    const isRemote =
+      conn.length > 0 &&
+      !conn.includes('127.0.0.1') &&
+      !conn.includes('localhost');
+
+    const shouldEnableSsl =
+      config.DATABASE_TLS_MODE === 'disable'
+        ? false
+        : config.DATABASE_TLS_MODE === 'require' ||
+          isRemote ||
+          conn.includes('sslmode=require') ||
+          conn.includes('supabase.co') ||
+          conn.includes('pooler.supabase.com') ||
+          conn.includes('neon.tech') ||
+          config.NODE_ENV === 'production';
 
     this.pool = new Pool({
       connectionString,
       max: 15,
       idleTimeoutMillis: config.TENANT_POOL_IDLE_TIMEOUT_MS || 30000,
       connectionTimeoutMillis: config.TENANT_POOL_CONNECTION_TIMEOUT_MS || 30000,
-      ssl: config.DATABASE_TLS_MODE === 'require' ? { rejectUnauthorized: false } : undefined,
+      ssl: shouldEnableSsl ? { rejectUnauthorized: false } : undefined,
     });
 
     this.pool.on('error', (err) => {
@@ -135,6 +152,31 @@ export class PostgresDatabase {
     });
 
     db.public.registerFunction({
+      name: 'to_char',
+      args: [db.public.getType('timestamp' as any), db.public.getType('text' as any)],
+      returns: db.public.getType('text' as any),
+      implementation: (date: any, format: string) => {
+        if (!date) return '';
+        const d = date instanceof Date ? date : new Date(date);
+        if (format === 'YYYY-MM') return d.toISOString().substring(0, 7);
+        if (format === 'YYYYMMDD') return d.toISOString().substring(0, 10).replace(/-/g, '');
+        return d.toISOString();
+      },
+    });
+    db.public.registerFunction({
+      name: 'to_char',
+      args: [db.public.getType('date' as any), db.public.getType('text' as any)],
+      returns: db.public.getType('text' as any),
+      implementation: (date: any, format: string) => {
+        if (!date) return '';
+        const d = date instanceof Date ? date : new Date(date);
+        if (format === 'YYYY-MM') return d.toISOString().substring(0, 7);
+        if (format === 'YYYYMMDD') return d.toISOString().substring(0, 10).replace(/-/g, '');
+        return d.toISOString();
+      },
+    });
+
+    db.public.registerFunction({
       name: 'length',
       args: [db.public.getType('text' as any)],
       returns: intType,
@@ -147,6 +189,31 @@ export class PostgresDatabase {
       returns: floatType,
       implementation: (v: number) => (Number(v) * Math.PI) / 180,
     });
+    db.public.registerFunction({
+      name: 'to_char',
+      args: [db.public.getType('timestamp' as any), db.public.getType('text' as any)],
+      returns: db.public.getType('text' as any),
+      implementation: (date: any, format: string) => {
+        if (!date) return '';
+        const d = date instanceof Date ? date : new Date(date);
+        if (format === 'YYYY-MM') return d.toISOString().substring(0, 7);
+        if (format === 'YYYYMMDD') return d.toISOString().substring(0, 10).replace(/-/g, '');
+        return d.toISOString();
+      },
+    });
+    db.public.registerFunction({
+      name: 'to_char',
+      args: [db.public.getType('date' as any), db.public.getType('text' as any)],
+      returns: db.public.getType('text' as any),
+      implementation: (date: any, format: string) => {
+        if (!date) return '';
+        const d = date instanceof Date ? date : new Date(date);
+        if (format === 'YYYY-MM') return d.toISOString().substring(0, 7);
+        if (format === 'YYYYMMDD') return d.toISOString().substring(0, 10).replace(/-/g, '');
+        return d.toISOString();
+      },
+    });
+
     db.public.registerFunction({
       name: 'length',
       args: [db.public.getType('text' as any)],
@@ -329,6 +396,7 @@ export class PostgresDatabase {
           organization_id UUID,
           tenant_customer_id UUID,
           farmer_code VARCHAR(30),
+          customer_name VARCHAR(150),
           membership_status VARCHAR(50) DEFAULT 'PENDING_APPROVAL',
           dairy_name VARCHAR(150),
           dairy_code VARCHAR(30),
@@ -358,14 +426,69 @@ export class PostgresDatabase {
         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, code = EXCLUDED.code;
       `);
       db.public.none(`
-        INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, status)
-        VALUES ('38918630-4fee-4cec-96ea-a3a899aae701', '38918630-4fee-4cec-96ea-a3a899aae7bc', 'C-01', 'Warna Main Center', 'Main Road', 'Kavathe Piran', 'sangli', 'Maharashtra', '416417', 'ACTIVE')
+        INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+        VALUES ('38918630-4fee-4cec-96ea-a3a899aae701', '38918630-4fee-4cec-96ea-a3a899aae7bc', 'C-01', 'Warna Main Center', 'Main Road', 'Kavathe Piran', 'sangli', 'Maharashtra', '416417', '+919834388787', 'ACTIVE')
         ON CONFLICT DO NOTHING;
       `);
       db.public.none(`
         INSERT INTO users (id, organization_id, username, full_name, email, phone_number, mobile_number, normalized_mobile_number, role, user_role, status, activated_at)
         VALUES ('37b8de06-0023-4935-b1bb-3d7152065e6e', '38918630-4fee-4cec-96ea-a3a899aae7bc', 'admin_9834388787', 'popat yewale', 'pankajye5656@gmail.com', '+919834388787', '+919834388787', '+919834388787', 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'ACTIVE', NOW())
         ON CONFLICT (id) DO UPDATE SET organization_id = EXCLUDED.organization_id, status = 'ACTIVE';
+      `);
+      db.public.none(`
+        INSERT INTO user_center_assignments (id, user_id, center_id, is_primary)
+        VALUES ('38918630-4fee-4cec-96ea-a3a899aae702', '37b8de06-0023-4935-b1bb-3d7152065e6e', '38918630-4fee-4cec-96ea-a3a899aae701', TRUE)
+        ON CONFLICT DO NOTHING;
+      `);
+      db.public.none('ALTER TABLE customers ADD COLUMN IF NOT EXISTS mobile_number VARCHAR(20);');
+      db.public.none(`
+        INSERT INTO global_customer_identities (id, normalized_mobile_number, phone_verified_at, created_at, updated_at)
+        VALUES ('ccd1cd2d-64f9-4650-9d38-d3373aa89ec0', '+917755995615', NOW(), NOW(), NOW())
+        ON CONFLICT (id) DO NOTHING;
+      `);
+      db.public.none(`
+        INSERT INTO customer_dairy_memberships (
+          id, global_customer_id, organization_id, tenant_customer_id, farmer_code,
+          membership_status, dairy_name, dairy_code, dairy_address, center_id, center_name,
+          created_at, updated_at
+        ) VALUES (
+          'ccd1cd2d-64f9-4650-9d38-d3373aa89ec1', 'ccd1cd2d-64f9-4650-9d38-d3373aa89ec0',
+          '38918630-4fee-4cec-96ea-a3a899aae7bc', 'ccd1cd2d-64f9-4650-9d38-d3373aa89eca',
+          'F-101', 'APPROVED', 'Warna Milk''s', 'DF-SAN-2395', 'Kavathe Piran',
+          '38918630-4fee-4cec-96ea-a3a899aae701', 'Warna Main Center', NOW(), NOW()
+        ) ON CONFLICT (id) DO NOTHING;
+      `);
+      db.public.none(`
+        CREATE TABLE IF NOT EXISTS customer_tenant_lookup (
+          customer_id UUID PRIMARY KEY,
+          organization_id UUID NOT NULL,
+          normalized_mobile_number VARCHAR(30),
+          registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+      db.public.none(`
+        INSERT INTO customer_tenant_lookup (customer_id, organization_id, normalized_mobile_number)
+        VALUES (
+          'ccd1cd2d-64f9-4650-9d38-d3373aa89eca', '38918630-4fee-4cec-96ea-a3a899aae7bc', '+917755995615'
+        ) ON CONFLICT (customer_id) DO NOTHING;
+      `);
+      db.public.none(`
+        INSERT INTO customers (
+          id, organization_id, primary_center_id, farmer_code, full_name,
+          normalized_mobile_number, status, registration_status,
+          is_deleted, global_customer_id, created_at, updated_at
+        ) VALUES (
+          'ccd1cd2d-64f9-4650-9d38-d3373aa89eca', '38918630-4fee-4cec-96ea-a3a899aae7bc',
+          '38918630-4fee-4cec-96ea-a3a899aae701', 'F-101', 'Pandurang Patil',
+          '+917755995615', 'ACTIVE', 'APPROVED',
+          FALSE, 'ccd1cd2d-64f9-4650-9d38-d3373aa89ec0', NOW(), NOW()
+        ) ON CONFLICT (id) DO NOTHING;
+      `);
+      db.public.none(`
+        INSERT INTO customer_milk_categories (customer_id, milk_category, is_authorized, authorized_by)
+        VALUES ('ccd1cd2d-64f9-4650-9d38-d3373aa89eca', 'COW', TRUE, '00000000-0000-0000-0000-000000000099'),
+               ('ccd1cd2d-64f9-4650-9d38-d3373aa89eca', 'BUFFALO', TRUE, '00000000-0000-0000-0000-000000000099')
+        ON CONFLICT (customer_id, milk_category) DO NOTHING;
       `);
     } catch {}
 
@@ -383,12 +506,22 @@ export class PostgresDatabase {
         VALUES ('${operatorAId}', '${dairyAId}', 'operator_kiosk', 'Sachin Patil Kiosk', '+919822114477', 'COLLECTION_OPERATOR', 'ACTIVE')
         ON CONFLICT DO NOTHING;
       `);
+      db.public.none(`
+        INSERT INTO user_center_assignments (id, user_id, center_id, is_primary)
+        VALUES ('00000000-0000-0000-0000-000000000012', '${operatorAId}', '${centerAId}', TRUE)
+        ON CONFLICT DO NOTHING;
+      `);
     } catch {}
 
     try {
       db.public.none(`
         INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
         VALUES ('00000000-0000-0000-0000-000000000099', '${dairyAId}', 'pankaj.yewale', 'Pankaj Popat Yewale', '+917755995615', 'SUPER_ADMIN', 'ACTIVE')
+        ON CONFLICT DO NOTHING;
+      `);
+      db.public.none(`
+        INSERT INTO user_center_assignments (id, user_id, center_id, is_primary)
+        VALUES ('00000000-0000-0000-0000-000000000098', '00000000-0000-0000-0000-000000000099', '${centerAId}', TRUE)
         ON CONFLICT DO NOTHING;
       `);
     } catch {}

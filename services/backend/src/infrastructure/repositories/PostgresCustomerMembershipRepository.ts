@@ -69,6 +69,7 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
           m.organization_id,
           m.tenant_customer_id,
           m.farmer_code,
+          m.customer_name,
           m.membership_status,
           COALESCE(m.dairy_name, o.name, 'Cooperative Dairy') AS dairy_name,
           COALESCE(m.dairy_code, o.code, 'DFARM') AS dairy_code,
@@ -95,6 +96,7 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
         organizationId: row.organization_id,
         tenantCustomerId: row.tenant_customer_id,
         farmerCode: row.farmer_code,
+        customerName: row.customer_name,
         membershipStatus: row.membership_status as MembershipStatus,
         dairyName: row.dairy_name,
         dairyCode: row.dairy_code,
@@ -120,6 +122,7 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
           m.organization_id,
           m.tenant_customer_id,
           m.farmer_code,
+          m.customer_name,
           m.membership_status,
           COALESCE(m.dairy_name, o.name, 'Cooperative Dairy') AS dairy_name,
           COALESCE(m.dairy_code, o.code, 'DFARM') AS dairy_code,
@@ -144,6 +147,7 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
         organizationId: row.organization_id,
         tenantCustomerId: row.tenant_customer_id,
         farmerCode: row.farmer_code,
+        customerName: row.customer_name,
         membershipStatus: row.membership_status as MembershipStatus,
         dairyName: row.dairy_name,
         dairyCode: row.dairy_code,
@@ -164,12 +168,13 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
     const sql = `
       INSERT INTO customer_dairy_memberships (
         id, global_customer_id, organization_id, tenant_customer_id,
-        farmer_code, membership_status, dairy_name, dairy_code,
+        farmer_code, customer_name, membership_status, dairy_name, dairy_code,
         dairy_address, center_id, center_name, created_at, updated_at, last_synchronized_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW(), NOW())
       ON CONFLICT (organization_id, global_customer_id) DO UPDATE SET
         tenant_customer_id = EXCLUDED.tenant_customer_id,
         farmer_code = COALESCE(EXCLUDED.farmer_code, customer_dairy_memberships.farmer_code),
+        customer_name = COALESCE(EXCLUDED.customer_name, customer_dairy_memberships.customer_name),
         membership_status = EXCLUDED.membership_status,
         dairy_name = COALESCE(EXCLUDED.dairy_name, customer_dairy_memberships.dairy_name),
         dairy_code = COALESCE(EXCLUDED.dairy_code, customer_dairy_memberships.dairy_code),
@@ -185,6 +190,7 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
       membership.organizationId,
       membership.tenantCustomerId,
       membership.farmerCode || null,
+      membership.customerName || null,
       membership.membershipStatus,
       membership.dairyName,
       membership.dairyCode || null,
@@ -194,7 +200,7 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
     ]);
   }
 
-  public async updateMembershipStatus(organizationId: string, tenantCustomerId: string, status: string, farmerCode?: string): Promise<void> {
+  public async updateMembershipStatus(organizationId: string, tenantCustomerId: string, status: string, farmerCode?: string, customerName?: string): Promise<void> {
     const client = this.getDb();
     try {
       const sql = `
@@ -202,11 +208,12 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
         SET 
           membership_status = $1,
           farmer_code = COALESCE($2, farmer_code),
+          customer_name = COALESCE($3, customer_name),
           updated_at = NOW(),
           last_synchronized_at = NOW()
-        WHERE organization_id = $3 AND tenant_customer_id = $4;
+        WHERE organization_id = $4 AND tenant_customer_id = $5;
       `;
-      await client.query(sql, [status, farmerCode || null, organizationId, tenantCustomerId]);
+      await client.query(sql, [status, farmerCode || null, customerName || null, organizationId, tenantCustomerId]);
     } catch {
       // Ignore if table not present in test doubles
     }

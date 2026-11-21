@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useHardware } from '@/context/HardwareContext'
+import { useAuth } from '@/context/AuthContext'
 import { ClayCard, ClayButton, ClayBadge } from '@/components/ui'
 import { FaceScannerReticle, RfidWaveVisual } from '@/assets/illustrations'
 import {
@@ -33,10 +34,16 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
     rfidState,
     enrolledTemplates,
     customersMap,
-    simulateFaceDetection,
     resetFaceState,
     simulateRfidScan,
     resetRfidState,
+    updateFaceState,
+    refreshCustomersAndTemplates,
+    isRecognitionLocked,
+    handleFacePresence,
+    startCollectionAttempt,
+    collectionWorkflowState,
+    cancelCollectionAttempt,
   } = useHardware()
 
   const [searchInput, setSearchInput] = useState('')
@@ -45,7 +52,35 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
   const [isSearching, setIsSearching] = useState(false)
   const [isSimulating, setIsSimulating] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const { dairyId } = getStoredOperatorAuth()
+
+  const { dairyId: authDairyId } = useAuth()
+  const { dairyId: storedDairyId } = getStoredOperatorAuth()
+  const activeDairyId = authDairyId || storedDairyId || '00000000-0000-0000-0000-000000000001'
+
+  // Dynamic refresh of customers & face templates when dairy context is established
+  useEffect(() => {
+    if (activeDairyId) {
+      refreshCustomersAndTemplates(activeDairyId)
+    }
+  }, [activeDairyId, refreshCustomersAndTemplates])
+
+  // FIX: Stable callbacks to prevent useCamera frame-loop restarts on each render.
+  const handleCustomerMatchedCamera = useCallback(
+    (customer: CustomerIdentity) => {
+      const res = startCollectionAttempt(customer, 'FACE_YUNET_SFACE')
+      if (res.success) {
+        onCustomerSelected(customer, 'FACE_RECOGNITION')
+      }
+    },
+    [startCollectionAttempt, onCustomerSelected]
+  )
+
+  const handleFaceStateChange = useCallback(
+    (state: Partial<import('@/types').FaceRecognitionState>) => {
+      updateFaceState(state)
+    },
+    [updateFaceState]
+  )
 
   // Real Hardware Camera Hook
   const {
@@ -59,14 +94,16 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
     latencyMs: cameraLatency,
     startCamera,
     stopCamera,
+    retryCamera,
     resetMatch: resetCameraMatch,
   } = useCamera({
-    activeDairyId: dairyId || '00000000-0000-0000-0000-000000000001',
+    activeDairyId,
     enrolledTemplates,
     customersMap,
-    onCustomerMatched: (customer) => {
-      onCustomerSelected(customer, 'FACE_RECOGNITION')
-    },
+    onCustomerMatched: handleCustomerMatchedCamera,
+    onFaceStateChange: handleFaceStateChange,
+    isRecognitionLocked,
+    onFacePresence: handleFacePresence,
   })
 
   // Canvas Overlay Rendering for Real-time YuNet Bounding Box & 5-point Landmarks
@@ -134,27 +171,35 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
         customersMap.get(query.toLowerCase())
 
       if (directMatch) {
-        onCustomerSelected(directMatch, 'DIRECT_CODE_ENTRY')
-        setSearchInput('')
-        setSearchResults([])
-        setSearchError(null)
-        voiceAnnouncer.speakCustomerIdentified(directMatch.fullName)
+        const res = startCollectionAttempt(directMatch, 'MANUAL_SEARCH')
+        if (res.success) {
+          onCustomerSelected(directMatch, 'DIRECT_CODE_ENTRY')
+          setSearchInput('')
+          setSearchResults([])
+          setSearchError(null)
+        } else {
+          setSearchError(res.error || 'Cannot start collection')
+        }
         return
       }
 
       // 2. Query customer directory with search string
-      const list = await customersApi.list({ search: query })
+      const list = await customersApi.list({ search: query, organizationId: activeDairyId || undefined })
       if (!list || list.length === 0) {
         setSearchError(`No patron found matching "${query}". Press F2 for directory.`)
         return
       }
 
       if (list.length === 1) {
-        onCustomerSelected(list[0], 'DIRECT_CODE_ENTRY')
-        setSearchInput('')
-        setSearchResults([])
-        setSearchError(null)
-        voiceAnnouncer.speakCustomerIdentified(list[0].fullName)
+        const res = startCollectionAttempt(list[0], 'MANUAL_SEARCH')
+        if (res.success) {
+          onCustomerSelected(list[0], 'DIRECT_CODE_ENTRY')
+          setSearchInput('')
+          setSearchResults([])
+          setSearchError(null)
+        } else {
+          setSearchError(res.error || 'Cannot start collection')
+        }
       } else {
         // Multiple matches: show interactive selection pills
         setSearchResults(list)
@@ -167,19 +212,14 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
   }
 
   const handleSelectSearchResult = (cust: CustomerIdentity) => {
-    onCustomerSelected(cust, 'MANUAL_SEARCH')
-    setSearchInput('')
-    setSearchResults([])
-    setSearchError(null)
-    voiceAnnouncer.speakCustomerIdentified(cust.fullName)
-  }
-
-  const handleSimulateFace = async (code?: string) => {
-    setIsSimulating(true)
-    const matched = await simulateFaceDetection(code)
-    setIsSimulating(false)
-    if (matched) {
-      onCustomerSelected(matched, 'FACE_RECOGNITION')
+    const res = startCollectionAttempt(cust, 'MANUAL_SEARCH')
+    if (res.success) {
+      onCustomerSelected(cust, 'MANUAL_SEARCH')
+      setSearchInput('')
+      setSearchResults([])
+      setSearchError(null)
+    } else {
+      setSearchError(res.error || 'Cannot start collection')
     }
   }
 
@@ -193,6 +233,7 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
   }
 
   const handleResetAll = () => {
+    cancelCollectionAttempt('Manual reset')
     resetCameraMatch()
     resetFaceState()
     resetRfidState()
@@ -202,7 +243,12 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
   }
 
   const activeCustomer = cameraCustomer || faceState.matchedCustomer || rfidState.matchedCustomer
-  const effectiveStatus = isCameraActive ? cameraStatus : faceState.status
+  const effectiveStatus =
+    collectionWorkflowState !== 'IDLE' && collectionWorkflowState !== 'SCANNING'
+      ? collectionWorkflowState
+      : isCameraActive
+      ? cameraStatus
+      : faceState.status
 
   return (
     <ClayCard className="flex flex-col h-full overflow-hidden p-3 md:p-4 bg-cream">
@@ -265,6 +311,12 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  handleFarmerLookup()
+                }
+              }}
               placeholder="Enter Farmer Code (e.g. C-101), Mobile, or RFID & [Enter]..."
               className="w-full bg-cream-dark border-2 border-border-subtle focus:border-primary-orange rounded-xl px-3 py-2 text-xs font-semibold text-text-primary placeholder:text-text-muted focus:outline-none transition-colors shadow-inner"
               autoFocus
@@ -383,7 +435,7 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
             </div>
             <p className="text-xs font-bold text-rose-300">Camera Warning</p>
             <p className="text-[11px] text-stone-300 leading-tight">{cameraError}</p>
-            <ClayButton variant="secondary" size="sm" onClick={startCamera} className="text-xs mt-1">
+            <ClayButton variant="secondary" size="sm" onClick={retryCamera} className="text-xs mt-1">
               Retry Camera
             </ClayButton>
           </div>
@@ -479,28 +531,6 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
         </div>
 
         <div className="grid grid-cols-2 gap-1.5">
-          <ClayButton
-            variant="secondary"
-            size="sm"
-            onClick={() => handleSimulateFace('C-101')}
-            disabled={isSimulating}
-            className="flex items-center justify-center space-x-1 text-xs py-1"
-          >
-            <Camera className="w-3 h-3 text-primary-orange" />
-            <span>Face C-101</span>
-          </ClayButton>
-
-          <ClayButton
-            variant="secondary"
-            size="sm"
-            onClick={() => handleSimulateFace('C-102')}
-            disabled={isSimulating}
-            className="flex items-center justify-center space-x-1 text-xs py-1"
-          >
-            <Camera className="w-3 h-3 text-primary-orange" />
-            <span>Face C-102</span>
-          </ClayButton>
-
           <ClayButton
             variant="outline"
             size="sm"

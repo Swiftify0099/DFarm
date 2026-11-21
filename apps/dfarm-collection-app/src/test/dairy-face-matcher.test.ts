@@ -174,4 +174,31 @@ describe('DairyFaceMatcher & OpenCV SFace INT8 Biometric Isolation', () => {
     expect(cosineSimilarity(vecA, vecB)).toBeCloseTo(1.0, 5)
     expect(cosineSimilarity(vecA, vecC)).toBeCloseTo(0.0, 5)
   })
+
+  it('rejects ambiguous matches where top two candidates are separated by less than 0.05 margin', () => {
+    const probe = [...CANONICAL_SFACE_128D_FIXTURE]
+    const template1 = {
+      templateId: 'tmpl-1',
+      customerId: 'cust-1',
+      dairyId: DAIRY_A_ID,
+      farmerCode: 'WAR-001',
+      fullName: 'Farmer One',
+      embedding: probe,
+      status: 'ACTIVE' as const,
+    }
+    const slightlyAltered = probe.map((v, i) => (i === 0 ? v + 0.05 : v))
+    const norm = Math.sqrt(slightlyAltered.reduce((a, b) => a + b * b, 0))
+    const template2 = {
+      templateId: 'tmpl-2',
+      customerId: 'cust-2',
+      dairyId: DAIRY_A_ID,
+      farmerCode: 'WAR-002',
+      fullName: 'Farmer Two',
+      embedding: slightlyAltered.map((v) => v / norm),
+      status: 'ACTIVE' as const,
+    }
+    const match = DairyFaceMatcher.match(probe, DAIRY_A_ID, [template1, template2], customersMap)
+    expect(match.isMatch).toBe(false)
+    expect(match.rejectionReason).toBe('AMBIGUOUS_SEPARATION_BELOW_MARGIN')
+  })
 })

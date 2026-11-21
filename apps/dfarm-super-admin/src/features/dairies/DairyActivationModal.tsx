@@ -81,7 +81,7 @@ export const DairyActivationModal: React.FC<DairyActivationModalProps> = ({
         }
       } catch (err: any) {
         if (isMounted) {
-          const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5174'
+          const origin = (import.meta as any).env?.VITE_DAIRY_ADMIN_URL || (typeof window !== 'undefined' ? window.location.origin : '')
           const fallbackToken = 'f0beef6f13794b864a3f5285bf354264644dc71e1d8aafbeadd71927f1a9c59d'
           setInviteLink(`${origin}/activate?token=${fallbackToken}&dairyCode=${dairy.code}`)
           setRawToken(fallbackToken)

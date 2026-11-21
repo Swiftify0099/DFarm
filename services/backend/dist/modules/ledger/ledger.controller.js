@@ -12,17 +12,35 @@ export class LedgerController {
                 throw new UnauthorizedError('Authentication required');
             const customerId = req.auth.customerProfile?.customerId || req.auth.userId;
             const txns = await pool.query(`SELECT * FROM ledger_transactions WHERE customer_id = $1 ORDER BY created_at DESC;`, [customerId]);
-            const mapped = txns.rows.map((tx) => ({
-                id: tx.id,
-                transactionType: tx.transaction_type,
-                direction: tx.direction,
-                amount: parseFloat(tx.amount),
-                balanceAfter: parseFloat(tx.balance_after),
-                referenceEntity: tx.reference_entity,
-                referenceId: tx.reference_id,
-                description: tx.description,
-                createdAt: tx.created_at,
-            }));
+            const mapped = txns.rows.map((tx) => {
+                const isCredit = tx.direction === 'CREDIT' || tx.transaction_type === 'MILK_COLLECTION';
+                const amt = parseFloat(tx.amount) || 0;
+                const balance = parseFloat(tx.balance_after) || 0;
+                return {
+                    id: tx.id,
+                    transactionType: tx.transaction_type,
+                    type: isCredit
+                        ? 'MILK_CREDIT'
+                        : tx.transaction_type === 'FEED_PURCHASE'
+                            ? 'FEED_DEBIT'
+                            : tx.transaction_type === 'CASH_ADVANCE'
+                                ? 'CASH_ADVANCE_DEBIT'
+                                : tx.transaction_type === 'PAYOUT' || tx.transaction_type === 'BANK_TRANSFER'
+                                    ? 'BANK_PAYOUT'
+                                    : 'ADJUSTMENT',
+                    transactionDate: tx.created_at ? new Date(tx.created_at).toISOString() : new Date().toISOString(),
+                    direction: tx.direction,
+                    amount: amt,
+                    creditAmount: isCredit ? amt : 0,
+                    debitAmount: !isCredit ? amt : 0,
+                    balanceAfter: balance,
+                    runningBalance: balance,
+                    referenceEntity: tx.reference_entity,
+                    referenceId: tx.reference_id,
+                    description: tx.description || (isCredit ? 'Milk Collection Credit' : 'Deduction'),
+                    createdAt: tx.created_at,
+                };
+            });
             return ApiResponse.success(res, mapped, 200);
         }
         catch (err) {

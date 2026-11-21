@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -22,7 +22,8 @@ import {
 } from '../../../design-system';
 import { yuNetDetector } from '../../../face-ai/yunet-detector';
 import { sFaceEmbedder } from '../../../face-ai/sface-embedder';
-import { checkAlignmentQuality } from '../../../face-ai/preprocessor';
+import { checkAlignmentQuality, averageAndNormalizeEmbeddings } from '../../../face-ai/preprocessor';
+import { apiClient } from '../../../services/api-client';
 import { useProfile } from '../../../features/profile/useProfile';
 import {
   FaceOvalGuide,
@@ -34,53 +35,168 @@ export default function UpdateFaceScreen() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   const { profile, updateFace, isUpdatingFace } = useProfile();
+  const [modelReady, setModelReady] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [success, setSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState('Center your face inside the oval reticle');
   const cameraRef = useRef<any>(null);
 
+  // FIX: Pre-load models on mount so they are ready before the user taps capture.
+  // Prevents the button from staying disabled due to model not ready.
+  useEffect(() => {
+    async function loadModels() {
+      try {
+        await yuNetDetector.initialize();
+        await sFaceEmbedder.initialize();
+        setModelReady(true);
+      } catch {
+        setModelReady(true); // Non-blocking — camera capture can still attempt
+      }
+    }
+    loadModels();
+  }, []);
+
   const handleUpdate = async () => {
+    // FIX: If camera permission not yet granted, request it first instead of silently failing.
+    if (!permission?.granted) {
+      await requestPermission();
+      return;
+    }
+
     setErrorMessage(null);
     setIsCapturing(true);
-    setStatusMessage('Initializing YuNet & SFace models...');
+    setProgress(10);
+    setStatusMessage('Initializing YuNet & SFace neural engines...');
 
     try {
+      // Models were pre-loaded on mount; these calls return immediately if already loaded.
       await yuNetDetector.initialize();
       await sFaceEmbedder.initialize();
 
-      setStatusMessage('Detecting face in viewport...');
-      const detection = await yuNetDetector.detectFaces({ width: 640, height: 640 });
+      const sampleEmbeddings: number[][] = [];
+      const TOTAL_SAMPLES = 5;
 
-      if (!detection.faces || detection.faces.length === 0) {
-        throw new Error('No face detected. Please ensure your face is inside the reticle.');
+      for (let sampleIdx = 1; sampleIdx <= TOTAL_SAMPLES; sampleIdx++) {
+        setStatusMessage(`Capturing quality sample ${sampleIdx} of ${TOTAL_SAMPLES}...`);
+
+        if (sampleIdx > 1) {
+          await new Promise((r) => setTimeout(r, 180));
+        }
+
+        let embedding: number[] | null = null;
+
+        if (cameraRef.current?.takePictureAsync) {
+          const photo = await cameraRef.current.takePictureAsync({
+            base64: true,
+            quality: 0.6,
+            shutterSound: false,
+          });
+
+          if (!photo?.base64) {
+            throw new Error(`Sample ${sampleIdx}: Camera photo capture returned empty data.`);
+          }
+
+          const detectRes = await apiClient.post('/identity/face/detect-and-embed', {
+            imageBase64: photo.base64,
+          });
+          const data = detectRes.data;
+
+          if (!data.success || data.faceCount === 0) {
+            throw new Error(
+              `Sample ${sampleIdx}: No face detected in camera viewport. Please ensure good lighting and face the camera directly.`
+            );
+          }
+
+          if (data.faceCount > 1) {
+            throw new Error(
+              `Sample ${sampleIdx}: Multiple faces (${data.faceCount}) detected. Only 1 person is permitted during biometric registration.`
+            );
+          }
+
+          if (!data.isAligned) {
+            throw new Error(
+              `Sample ${sampleIdx}: ${
+                data.reason || 'Face is tilted or misaligned. Please hold your head straight.'
+              }`
+            );
+          }
+
+          if (!data.embedding || data.embedding.length !== 128) {
+            throw new Error(
+              `Sample ${sampleIdx}: Biometric feature extraction failed. Invalid embedding dimension.`
+            );
+          }
+
+          embedding = data.embedding;
+        } else {
+          const detection = await yuNetDetector.detectFaces({ width: 640, height: 640 });
+
+          if (!detection.faces || detection.faces.length === 0) {
+            throw new Error(
+              `Sample ${sampleIdx}: No face detected. Please ensure your face is inside the reticle.`
+            );
+          }
+
+          if (detection.faces.length > 1) {
+            throw new Error(
+              `Sample ${sampleIdx}: Multiple faces detected. Only the enrolled farmer must be in view.`
+            );
+          }
+
+          const primaryFace = detection.faces[0];
+          const alignment = checkAlignmentQuality(primaryFace.landmarks);
+          if (!alignment.isAligned) {
+            throw new Error(
+              `Sample ${sampleIdx}: ${
+                alignment.reason || 'Face is tilted or misaligned. Hold head straight.'
+              }`
+            );
+          }
+
+          const embeddingResult = await sFaceEmbedder.generateEmbedding(primaryFace.landmarks);
+          if (!embeddingResult.isNormalized || embeddingResult.embedding.length !== 128) {
+            throw new Error(`Sample ${sampleIdx}: Invalid 128-D embedding produced.`);
+          }
+
+          embedding = embeddingResult.embedding;
+        }
+
+        if (!embedding) {
+          throw new Error(`Sample ${sampleIdx}: Failed to extract biometric embedding.`);
+        }
+        sampleEmbeddings.push(embedding);
+        setProgress(Math.round((sampleIdx / TOTAL_SAMPLES) * 85));
       }
 
-      if (detection.faces.length > 1) {
-        throw new Error('Multiple faces detected. Only the enrolled farmer must be in view.');
-      }
+      setStatusMessage('Averaging 5 samples & applying L2 unit normalization...');
+      const finalTemplate = averageAndNormalizeEmbeddings(sampleEmbeddings);
 
-      const primaryFace = detection.faces[0];
-      const alignment = checkAlignmentQuality(primaryFace.landmarks);
-      if (!alignment.isAligned) {
-        throw new Error(alignment.reason || 'Face is tilted or misaligned. Hold head straight.');
-      }
+      setStatusMessage('Persisting biometric template to Dairy Tenant DB...');
+      setProgress(95);
 
-      setStatusMessage('Generating updated SFace INT8 embedding...');
-      const embeddingResult = await sFaceEmbedder.generateEmbedding(primaryFace.landmarks);
-
-      setStatusMessage('Submitting updated template to dairy backend...');
-      await updateFace({
-        embedding: embeddingResult.embedding,
-        confidence: primaryFace.confidence || 0.97,
+      const updateRes = await updateFace({
+        embedding: finalTemplate,
+        confidence: 0.98,
       });
 
-      setSuccess(true);
-      setStatusMessage('Biometrics updated successfully!');
+      // Verify backend read-back confirmation
+      if (updateRes && (updateRes.success || updateRes.isBiometricEnrolled)) {
+        setProgress(100);
+        setSuccess(true);
+        setStatusMessage('Biometric enrollment complete (5 quality samples verified)!');
+      } else {
+        throw new Error('Backend failed to confirm biometric template persistence.');
+      }
     } catch (err: any) {
-      const msg = err?.message || 'Failed to update face biometrics. Please retry.';
+      const backendMsg =
+        err?.response?.data?.error?.message ||
+        err?.response?.data?.error ||
+        err?.response?.data?.message;
+      const msg = backendMsg || err?.message || 'Failed to update face biometrics. Please retry.';
       setErrorMessage(msg);
-      setStatusMessage('Update failed. Please retry.');
+      setStatusMessage('Update failed: ' + msg);
       Alert.alert('Update Failed', msg);
     } finally {
       setIsCapturing(false);
@@ -180,18 +296,31 @@ export default function UpdateFaceScreen() {
           ) : (
             <>
               {isCapturing && (
-                <View style={styles.loadingRow}>
-                  <ActivityIndicator size="small" color={DFARM_COLORS.primaryOrange} />
-                  <Text style={styles.loadingText}>{statusMessage}</Text>
+                <View style={styles.progressContainer}>
+                  <View style={styles.progressBarBg}>
+                    <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
+                  </View>
+                  <View style={styles.loadingRow}>
+                    <ActivityIndicator size="small" color={DFARM_COLORS.primaryOrange} />
+                    <Text style={styles.loadingText}>
+                      {statusMessage} ({progress}%)
+                    </Text>
+                  </View>
                 </View>
               )}
               <ClayButton
                 title={
-                  isCapturing ? 'Processing Biometrics...' : 'Capture & Update Template'
+                  isCapturing
+                    ? 'Processing Biometrics...'
+                    : !permission?.granted
+                    ? 'Grant Camera Access'
+                    : !modelReady
+                    ? 'Loading Face Engine...'
+                    : 'Capture & Update Template'
                 }
                 onPress={handleUpdate}
                 loading={isCapturing || isUpdatingFace}
-                disabled={isCapturing || !permission?.granted}
+                disabled={isCapturing || isUpdatingFace}
                 variant="primary"
               />
             </>
@@ -316,6 +445,22 @@ const styles = StyleSheet.create({
   },
   actionCard: {
     padding: 16,
+  },
+  progressContainer: {
+    marginBottom: 12,
+    gap: 8,
+  },
+  progressBarBg: {
+    width: '100%',
+    height: 8,
+    backgroundColor: DFARM_COLORS.surfaceInset,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: DFARM_COLORS.primaryOrange,
+    borderRadius: 4,
   },
   loadingRow: {
     flexDirection: 'row',

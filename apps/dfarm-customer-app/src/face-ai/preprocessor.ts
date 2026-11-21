@@ -18,6 +18,27 @@ export function normalizeL2(vector: number[]): number[] {
 }
 
 /**
+ * Averages multiple quality-checked 128-D embedding vectors and applies L2 unit normalization
+ * Formulates the stable master biometric template
+ */
+export function averageAndNormalizeEmbeddings(vectors: number[][]): number[] {
+  if (!Array.isArray(vectors) || vectors.length === 0) {
+    return new Array(128).fill(0);
+  }
+  const dim = vectors[0].length;
+  const accumulator = new Array(dim).fill(0);
+
+  for (const vec of vectors) {
+    for (let i = 0; i < dim; i++) {
+      accumulator[i] += vec[i] || 0;
+    }
+  }
+
+  const averaged = accumulator.map((val) => val / vectors.length);
+  return normalizeL2(averaged);
+}
+
+/**
  * Validates that all elements of an embedding are finite numbers (no NaN or Infinity)
  */
 export function isFiniteEmbedding(vector: number[]): boolean {

@@ -1,5 +1,6 @@
 export * from './database/PostgresPool.js';
 export * from './database/TenantDatabaseManager.js';
+export * from './database/TenantDatabaseControlService.js';
 export * from './database/InMemoryDairyStore.js';
 export * from './database/MigrationRunner.js';
 export * from './security/CredentialEncryption.js';

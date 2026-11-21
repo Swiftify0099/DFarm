@@ -2,9 +2,10 @@
 // Official model: face_recognition_sface_2021dec_int8.onnx
 // Generates unit-length 128-dimensional embedding vector
 
-import { FACE_MODEL_MANIFEST, CANONICAL_SFACE_128D_FIXTURE } from './manifest'
+import { FACE_MODEL_MANIFEST } from './manifest'
 import {
   normalizeL2,
+  isFiniteEmbedding,
   captureSFaceInputTensor,
   type DetectedFace,
 } from './preprocessor'
@@ -24,16 +25,24 @@ export class SFaceEmbedder {
         try {
           const ortWeb = await import('onnxruntime-web')
           this.ort = ortWeb
+          if (ortWeb.env) {
+            ortWeb.env.logLevel = 'error'
+            if (ortWeb.env.wasm) {
+              ortWeb.env.wasm.wasmPaths = '/'
+            }
+          }
           this.session = await ortWeb.InferenceSession.create(
             FACE_MODEL_MANIFEST.recognizer.path,
-            { executionProviders: ['wasm'] }
+            { executionProviders: ['wasm'], logSeverityLevel: 3 }
           )
           this.isLoaded = true
+          this.loadError = null
           return true
         } catch (err: any) {
-          console.warn('[SFaceEmbedder] Browser ONNX Web load notice:', err.message)
-          this.isLoaded = true
-          return true
+          console.error('[SFaceEmbedder] Browser ONNX Web load failed:', err.message)
+          this.loadError = err.message
+          this.isLoaded = false
+          return false
         }
       }
 
@@ -60,26 +69,30 @@ export class SFaceEmbedder {
 
           if (modelPath) {
             this.ort = ortNode
-            this.session = await ortNode.InferenceSession.create(modelPath)
+            this.session = await ortNode.InferenceSession.create(modelPath, { logSeverityLevel: 3 })
             this.isLoaded = true
+            this.loadError = null
             return true
           }
-        } catch {
-          // Graceful fallback for test runners
+        } catch (err: any) {
+          this.loadError = err.message
+          this.isLoaded = false
+          return false
         }
       }
 
-      this.isLoaded = true
-      return true
+      this.isLoaded = false
+      this.loadError = 'SFace runtime environment unsupported or model missing'
+      return false
     } catch (err: any) {
       this.loadError = err.message
-      this.isLoaded = true
+      this.isLoaded = false
       return false
     }
   }
 
   isModelReady(): boolean {
-    return this.isLoaded
+    return this.isLoaded && this.session !== null
   }
 
   getLoadError(): string | null {
@@ -98,8 +111,11 @@ export class SFaceEmbedder {
   }> {
     const startTime = Date.now()
 
-    if (!this.isLoaded) {
+    if (!this.isLoaded || !this.session) {
       await this.initialize()
+      if (!this.session) {
+        throw new Error(`MODEL_NOT_LOADED: ${this.loadError || 'SFace session uninitialized'}`)
+      }
     }
 
     let inputData: Float32Array
@@ -110,55 +126,28 @@ export class SFaceEmbedder {
       inputData = videoOrTensor
     }
 
-    let rawVector: number[]
+    const inputName = this.session.inputNames[0] || 'data'
+    const tensor = new this.ort.Tensor('float32', inputData, [1, 3, 112, 112])
+    const results = await this.session.run({ [inputName]: tensor })
+    const outputName = this.session.outputNames[0] || 'fc1'
+    const outputTensor = results[outputName]
 
-    // 1. Run real ONNX Session when available
-    if (this.session && this.ort) {
-      try {
-        const inputName = this.session.inputNames[0] || 'data'
-        const tensor = new this.ort.Tensor('float32', inputData, [1, 3, 112, 112])
-        const results = await this.session.run({ [inputName]: tensor })
-        const outputName = this.session.outputNames[0] || 'fc1'
-        const outputTensor = results[outputName]
-
-        if (outputTensor?.data) {
-          rawVector = Array.from(outputTensor.data as Float32Array)
-        } else {
-          throw new Error('SFace output tensor contains no data')
-        }
-      } catch (err: any) {
-        console.warn('[SFaceEmbedder] Real inference exception:', err.message)
-        this.loadError = err.message
-        throw err
-      }
-    } else {
-      // Isolate test fixture strictly to Node.js automated test runner environments
-      const isTestEnv = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') ||
-        (typeof import.meta !== 'undefined' && (import.meta as any).env?.MODE === 'test')
-
-      if (isTestEnv) {
-        rawVector = [...CANONICAL_SFACE_128D_FIXTURE]
-        if (face?.landmarks) {
-          const dy = face.landmarks.leftEye.y - face.landmarks.rightEye.y
-          const dx = face.landmarks.leftEye.x - face.landmarks.rightEye.x
-          const tilt = Math.atan2(dy, dx) * 0.05
-          rawVector = rawVector.map((val, idx) => val + (idx % 2 === 0 ? tilt : -tilt) * 0.01)
-        }
-      } else {
-        throw new Error('SFace ONNX inference session is not ready in production runtime')
-      }
+    if (!outputTensor?.data) {
+      throw new Error('SFace inference produced empty output tensor')
     }
 
-    // Enforce exact 128 dimensions
+    const rawVector = Array.from(outputTensor.data as Float32Array)
+
     if (rawVector.length !== 128) {
-      rawVector = rawVector.slice(0, 128)
-      while (rawVector.length < 128) rawVector.push(0)
+      throw new Error(`Invalid SFace output dimension: ${rawVector.length} (expected 128)`)
     }
 
-    // Unit length L2 normalization
     const normalized = normalizeL2(rawVector)
-    const latencyMs = Math.max(12, Date.now() - startTime)
+    if (!isFiniteEmbedding(normalized)) {
+      throw new Error('SFace generated non-finite embedding vector')
+    }
 
+    const latencyMs = Math.max(12, Date.now() - startTime)
     return {
       embedding: normalized,
       latencyMs,

@@ -7,6 +7,8 @@ import type {
   MilkMeasurements,
   CustomerIdentity,
   ShiftType,
+  CollectionWorkflowState,
+  CollectionAttemptSession,
 } from '@/types'
 import {
   sessionsApi,
@@ -17,6 +19,7 @@ import {
 import { localDB } from '@/services/local-storage'
 import {
   voiceAnnouncer,
+  buzzerDriver,
   rfidReaderDriver,
   scaleDriver,
   milkAnalyzerDriver,
@@ -24,10 +27,10 @@ import {
 } from '@/drivers'
 import {
   DairyFaceMatcher,
-  CANONICAL_SFACE_128D_FIXTURE,
   type EnrolledFaceTemplate,
 } from '@/face-ai'
 import type { CollectionTransaction } from '@/types'
+import { collectionStateMachine } from '@/services/CollectionStateMachine'
 
 interface HardwareContextType {
   devices: HardwareDevice[]
@@ -43,14 +46,27 @@ interface HardwareContextType {
   customersList: CustomerIdentity[]
   customersMap: Map<string, CustomerIdentity>
   enrolledTemplates: EnrolledFaceTemplate[]
+  collectionWorkflowState: CollectionWorkflowState
+  activeAttempt: CollectionAttemptSession | null
+  isRecognitionLocked: boolean
+  isWaitingForFaceClear: boolean
+  handleFacePresence: (facesCount: number) => boolean
+  startCollectionAttempt: (
+    customer: CustomerIdentity,
+    method?: 'FACE_YUNET_SFACE' | 'RFID_TAG' | 'MANUAL_SEARCH'
+  ) => { success: boolean; attempt?: CollectionAttemptSession; error?: string }
+  commitCollectionAttempt: (txn: CollectionTransaction) => boolean
+  cancelCollectionAttempt: (reason?: string) => void
   setNetworkOnline: (online: boolean) => void
   refreshDevices: () => Promise<void>
   refreshSession: () => Promise<void>
   openSession: (params?: { shift?: ShiftType; businessDate?: string }) => Promise<ActiveCollectionSession>
   closeSession: (sessionCode: string) => Promise<ActiveCollectionSession>
+  reopenSession: (sessionCode: string) => Promise<ActiveCollectionSession>
   refreshOfflineCount: () => Promise<void>
-  refreshCustomersAndTemplates: () => Promise<void>
-  simulateFaceDetection: (customerCode?: string) => Promise<CustomerIdentity | null>
+  refreshCustomersAndTemplates: (dairyIdOverride?: string) => Promise<void>
+  updateFaceState: (updates: Partial<FaceRecognitionState>) => void
+  selectManualCustomer: (customer: CustomerIdentity) => void
   resetFaceState: () => void
   simulateRfidScan: (cardUid: string) => Promise<CustomerIdentity | null>
   resetRfidState: () => void
@@ -111,12 +127,42 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [customersList, setCustomersList] = useState<CustomerIdentity[]>([])
   const [enrolledTemplates, setEnrolledTemplates] = useState<EnrolledFaceTemplate[]>([])
 
+  // Single Active Collection State Machine integration
+  const [collectionWorkflowState, setCollectionWorkflowState] =
+    useState<CollectionWorkflowState>(collectionStateMachine.getState())
+  const [activeAttempt, setActiveAttempt] =
+    useState<CollectionAttemptSession | null>(collectionStateMachine.getCurrentAttempt())
+
+  useEffect(() => {
+    return collectionStateMachine.subscribe((st, att) => {
+      setCollectionWorkflowState(st)
+      setActiveAttempt(att)
+    })
+  }, [])
+
+  const isRecognitionLocked = collectionStateMachine.isRecognitionLocked()
+  const isWaitingForFaceClear = collectionStateMachine.isWaitingForFaceClear()
+
   const customersMap = useMemo(() => {
     const map = new Map<string, CustomerIdentity>()
     for (const c of customersList) {
       map.set(c.id, c)
-      if (c.customerCode) map.set(c.customerCode, c)
-      if (c.farmerCode) map.set(c.farmerCode, c)
+      if (c.customerCode) {
+        map.set(c.customerCode, c)
+        map.set(c.customerCode.toUpperCase(), c)
+        map.set(c.customerCode.toLowerCase(), c)
+      }
+      if (c.farmerCode) {
+        map.set(c.farmerCode, c)
+        map.set(c.farmerCode.toUpperCase(), c)
+        map.set(c.farmerCode.toLowerCase(), c)
+      }
+      if (c.mobileNumber) {
+        map.set(c.mobileNumber, c)
+      }
+      if (c.fullName) {
+        map.set(c.fullName.toLowerCase(), c)
+      }
     }
     return map
   }, [customersList])
@@ -177,6 +223,12 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return closed
   }, [])
 
+  const reopenSession = useCallback(async (sessionCode: string): Promise<ActiveCollectionSession> => {
+    const reopened = await sessionsApi.reopenSession(sessionCode)
+    setActiveSession(reopened)
+    return reopened
+  }, [])
+
   const refreshOfflineCount = useCallback(async () => {
     try {
       const queue = await localDB.getOfflineQueue()
@@ -186,23 +238,29 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [])
 
-  const refreshCustomersAndTemplates = useCallback(async () => {
+  const updateFaceState = useCallback((updates: Partial<FaceRecognitionState>) => {
+    setFaceState((prev) => ({ ...prev, ...updates }))
+  }, [])
+
+  const refreshCustomersAndTemplates = useCallback(async (dairyIdOverride?: string) => {
+    const { dairyId: storedDairyId } = getStoredOperatorAuth()
+    const activeDairyId = dairyIdOverride || storedDairyId
     try {
-      const custList = await customersApi.list()
+      const custList = await customersApi.list({ organizationId: activeDairyId || undefined })
       setCustomersList(custList || [])
     } catch {
       setCustomersList([])
     }
 
     try {
-      const rawTemplates = await identityApi.getFaceTemplates()
+      const rawTemplates = await identityApi.getFaceTemplates(activeDairyId || undefined)
       if (rawTemplates && rawTemplates.length > 0) {
         const validTemplates: EnrolledFaceTemplate[] = rawTemplates
           .filter((t: any) => t.embedding && Array.isArray(t.embedding) && t.embedding.length === 128)
           .map((t: any) => ({
             templateId: t.templateId || t.id,
             customerId: t.customerId || t.customer_id,
-            dairyId: t.dairyId || t.organization_id,
+            dairyId: t.dairyId || t.organization_id || activeDairyId,
             farmerCode: t.farmerCode || t.farmer_code,
             fullName: t.fullName || t.full_name,
             embedding: t.embedding,
@@ -245,7 +303,7 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           cardUid: evt.cardUid,
           matchedCustomer: target,
         })
-        voiceAnnouncer.speakCustomerIdentified(target.fullName)
+        collectionStateMachine.matchCustomer(target, 'RFID_TAG')
         setMeasurements((prev) => ({
           ...prev,
           milkCategory: target.preferredCategory,
@@ -276,6 +334,7 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         merged.validationErrors = errors
         return merged
       })
+      collectionStateMachine.handleScaleReading(reading.weight, reading.isStable)
     })
 
     const unsubAnalyzer = milkAnalyzerDriver.onReading((reading) => {
@@ -297,6 +356,7 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         merged.validationErrors = errors
         return merged
       })
+      collectionStateMachine.handleAnalyzerReading(reading.fat, reading.snf, reading.clrDensity)
     })
 
     return () => {
@@ -309,89 +369,9 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [refreshDevices, refreshSession, refreshOfflineCount, refreshCustomersAndTemplates])
 
-  // Face Recognition Matching with OpenCV YuNet + SFace INT8 and Dairy-Scope Validation
-  const simulateFaceDetection = async (customerCode?: string): Promise<CustomerIdentity | null> => {
-    const { dairyId } = getStoredOperatorAuth()
-    const activeDairy = dairyId || '00000000-0000-0000-0000-000000000001'
-
-    // 1. FACE_DETECTED
-    setFaceState((prev) => ({
-      ...prev,
-      status: 'FACE_DETECTED',
-      boundingBox: {
-        x: 120,
-        y: 80,
-        width: 180,
-        height: 220,
-        confidence: 0.98,
-        landmarks: [
-          [160, 150],
-          [240, 150],
-          [200, 195],
-          [170, 240],
-          [230, 240],
-        ],
-      },
-      latencyMs: 12,
-    }))
-
-    await new Promise((resolve) => setTimeout(resolve, 150))
-
-    setFaceState((prev) => ({
-      ...prev,
-      status: 'EMBEDDING_GENERATED',
-      latencyMs: 14,
-    }))
-
-    // Build probe embedding vector
-    let probe = [...CANONICAL_SFACE_128D_FIXTURE]
-    if (customerCode === 'UNKNOWN') {
-      // Generate orthogonal/unmatched vector
-      probe = probe.map((v) => -v)
-    }
-
-    // Run dairy-scoped match
-    const matchRes = DairyFaceMatcher.match(
-      probe,
-      activeDairy,
-      enrolledTemplates,
-      customersMap
-    )
-
-    let target: CustomerIdentity | null = null
-    if (customerCode && customerCode !== 'UNKNOWN') {
-      const specific = customersList.find((c) => c.customerCode === customerCode || c.farmerCode === customerCode)
-      if (specific && (!specific.dairyId || specific.dairyId === activeDairy)) {
-        target = specific
-      }
-    } else if (matchRes.isMatch && matchRes.matchedCustomer) {
-      target = matchRes.matchedCustomer
-    }
-
-    if (target && (!target.dairyId || target.dairyId === activeDairy)) {
-      setFaceState((prev) => ({
-        ...prev,
-        status: 'CUSTOMER_MATCHED',
-        confidenceScore: 98.4,
-        matchedCustomer: target,
-        unknownPersonAlert: false,
-      }))
-      voiceAnnouncer.speakCustomerIdentified(target.fullName)
-      setMeasurements((prev) => ({
-        ...prev,
-        milkCategory: target!.preferredCategory,
-      }))
-      return target
-    } else {
-      setFaceState((prev) => ({
-        ...prev,
-        status: 'UNKNOWN_PERSON',
-        confidenceScore: 32.1,
-        matchedCustomer: null,
-        unknownPersonAlert: true,
-      }))
-      return null
-    }
+  // Manual customer selection fallback (Directory / Supervisor Lookup)
+  const selectManualCustomer = (customer: CustomerIdentity) => {
+    startCollectionAttempt(customer, 'MANUAL_SEARCH')
   }
 
   const resetFaceState = () => {
@@ -413,11 +393,7 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         cardUid,
         matchedCustomer: target,
       })
-      voiceAnnouncer.speakCustomerIdentified(target.fullName)
-      setMeasurements((prev) => ({
-        ...prev,
-        milkCategory: target.preferredCategory,
-      }))
+      startCollectionAttempt(target, 'RFID_TAG')
       return target
     } else {
       setRfidState({
@@ -454,6 +430,22 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       merged.readingsValid = errors.length === 0
       merged.validationErrors = errors
+
+      // Forward manual/override updates to the state machine
+      if (updates.fat !== undefined || updates.snf !== undefined) {
+        collectionStateMachine.handleAnalyzerReading(
+          updates.fat ?? merged.fat,
+          updates.snf ?? merged.snf,
+          updates.clrDensity ?? merged.clrDensity
+        )
+      }
+      if (updates.weightLiters !== undefined) {
+        collectionStateMachine.handleScaleReading(
+          updates.weightLiters,
+          updates.scaleStable ?? merged.scaleStable
+        )
+      }
+
       return merged
     })
   }
@@ -472,14 +464,67 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     resetRfidState()
     milkAnalyzerDriver.clearLastReading()
     voiceAnnouncer.resetAnnouncer()
-    setMeasurements((prev) => ({
-      ...prev,
-      weightLiters: 0.0,
-      scaleStable: true,
+    collectionStateMachine.cancelCollection('Cycle reset')
+    setMeasurements({
+      milkCategory: 'COW',
+      fat: 0,
+      snf: 0,
+      clrDensity: 0,
+      temperatureCelsius: 0,
+      weightLiters: 0,
+      analyzerConnected: false,
+      scaleConnected: false,
+      scaleStable: false,
+      opticalLactometerOk: false,
       readingsValid: false,
-      validationErrors: ['Awaiting weight reading'],
-    }))
+      validationErrors: ['Scale not connected', 'Milk analyzer not connected'],
+    })
   }
+
+  const startCollectionAttempt = useCallback(
+    (
+      customer: CustomerIdentity,
+      method: 'FACE_YUNET_SFACE' | 'RFID_TAG' | 'MANUAL_SEARCH' = 'FACE_YUNET_SFACE'
+    ) => {
+      const res = collectionStateMachine.matchCustomer(customer, method)
+      if (res.success) {
+        if (method === 'FACE_YUNET_SFACE') {
+          setFaceState((prev) => ({
+            ...prev,
+            status: 'CUSTOMER_MATCHED',
+            matchedCustomer: customer,
+          }))
+        } else if (method === 'RFID_TAG') {
+          setRfidState((prev) => ({
+            ...prev,
+            status: 'MATCHED',
+            matchedCustomer: customer,
+          }))
+        } else {
+          setManualCustomer(customer)
+        }
+        setMeasurements((prev) => ({
+          ...prev,
+          milkCategory: customer.preferredCategory,
+        }))
+      }
+      return res
+    },
+    []
+  )
+
+  const commitCollectionAttempt = useCallback((txn: CollectionTransaction) => {
+    return collectionStateMachine.commitTransaction(txn)
+  }, [])
+
+  const cancelCollectionAttempt = useCallback((reason?: string) => {
+    collectionStateMachine.cancelCollection(reason)
+    resetIntakeCycle()
+  }, [])
+
+  const handleFacePresence = useCallback((facesCount: number) => {
+    return collectionStateMachine.handleFacePresence(facesCount)
+  }, [])
 
   // Hardware connection methods
   const connectScale = async (baudRate = 4800): Promise<boolean> => {
@@ -542,14 +587,24 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         customersList,
         customersMap,
         enrolledTemplates,
+        collectionWorkflowState,
+        activeAttempt,
+        isRecognitionLocked,
+        isWaitingForFaceClear,
+        handleFacePresence,
+        startCollectionAttempt,
+        commitCollectionAttempt,
+        cancelCollectionAttempt,
         setNetworkOnline: setIsNetworkOnline,
         refreshDevices,
         refreshSession,
         openSession,
         closeSession,
+        reopenSession,
         refreshOfflineCount,
         refreshCustomersAndTemplates,
-        simulateFaceDetection,
+        updateFaceState,
+        selectManualCustomer,
         resetFaceState,
         simulateRfidScan,
         resetRfidState,

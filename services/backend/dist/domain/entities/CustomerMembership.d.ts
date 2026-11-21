@@ -5,6 +5,7 @@ export interface CustomerMembershipProps {
     organizationId: string;
     tenantCustomerId: string;
     farmerCode?: string | null;
+    customerName?: string | null;
     membershipStatus: MembershipStatus;
     dairyName: string;
     dairyCode?: string | null;
@@ -23,6 +24,7 @@ export declare class CustomerMembership {
     get organizationId(): string;
     get tenantCustomerId(): string;
     get farmerCode(): string | null | undefined;
+    get customerName(): string | null | undefined;
     get membershipStatus(): MembershipStatus;
     get dairyName(): string;
     get dairyCode(): string | null | undefined;
@@ -38,6 +40,7 @@ export declare class CustomerMembership {
         dairyId: string;
         tenantCustomerId: string;
         farmerCode: string | null | undefined;
+        customerName: string | null | undefined;
         membershipStatus: MembershipStatus;
         status: MembershipStatus;
         dairyName: string;

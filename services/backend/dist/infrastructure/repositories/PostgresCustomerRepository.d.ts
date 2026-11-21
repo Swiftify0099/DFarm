@@ -30,6 +30,6 @@ export declare class PostgresCustomerRepository implements ICustomerRepository {
     save(customer: Customer): Promise<void>;
     listPendingRegistrations(organizationId?: string): Promise<Customer[]>;
     assignRfidCard(customerId: string, cardUid: string, organizationId?: string): Promise<void>;
-    updateFaceEnrollment(customerId: string, modelVersion: string, encryptedPayload: string): Promise<void>;
+    updateFaceEnrollment(customerId: string, modelVersion: string, encryptedPayload: string, organizationId?: string): Promise<void>;
 }
 //# sourceMappingURL=PostgresCustomerRepository.d.ts.map

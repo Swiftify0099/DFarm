@@ -66,7 +66,7 @@ export default function MainTabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="profile/index"
+        name="profile"
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, focused }) => (
@@ -74,19 +74,6 @@ export default function MainTabsLayout() {
               <NavProfileIcon size={22} color={color ? String(color) : DFARM_COLORS.secondaryText} />
             </TabIconSlot>
           ),
-        }}
-      />
-      {/* Hidden sub-routes inside profile stack */}
-      <Tabs.Screen
-        name="profile/diagnostics"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="profile/update-face"
-        options={{
-          href: null,
         }}
       />
     </Tabs>

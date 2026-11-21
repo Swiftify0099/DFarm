@@ -1,0 +1,87 @@
+{
+  "testRunTimestamp": "2026-11-20T01:18:12.500Z",
+  "suite": "DFarm Multi-Tenant Isolation & Provisioning Test Suite",
+  "totalTests": 15,
+  "passed": 15,
+  "failed": 0,
+  "testCases": [
+    {
+      "test": "Test A: Migration Manifest & Quarantined Migration Exclusion",
+      "status": "PASS",
+      "durationMs": 1.9,
+      "details": "031_remove_dairy_admin_7507495615.sql correctly tagged MANUAL_REVIEW_REQUIRED and excluded from automatic execution"
+    },
+    {
+      "test": "Test B: AES-256-GCM Envelope Credential Encryption",
+      "status": "PASS",
+      "durationMs": 8.9,
+      "details": "Plaintext passwords completely masked. IV:AuthTag:Ciphertext envelope verified."
+    },
+    {
+      "test": "Test C: Tenant Database Provisioning State Machine & Naming Convention",
+      "status": "PASS",
+      "durationMs": 2119.8,
+      "details": "Dedicated physical database dfarm_tenant_gokul_kolhapur_a00000000000 successfully provisioned."
+    },
+    {
+      "test": "Test D: Strict Tenant Data Isolation (Tenant A vs Tenant B)",
+      "status": "PASS",
+      "durationMs": 716.4,
+      "details": "Customer in Tenant A verified completely absent in Tenant B's physical database pool. Zero row leakage."
+    },
+    {
+      "test": "Test E: Cross-Tenant Protection & IDOR Rejection Middleware",
+      "status": "PASS",
+      "durationMs": 69.9,
+      "details": "Client-controlled spoofing of x-dairy-tenant-id strictly rejected with 403 Forbidden."
+    },
+    {
+      "test": "Test F: Tenant Pool Eviction & Clean Lifecycle Management",
+      "status": "PASS",
+      "durationMs": 508.9,
+      "details": "Idle tenant pools evicted cleanly and reconstituted on demand."
+    },
+    {
+      "test": "Super Admin Test 1: GET /overview metadata",
+      "status": "PASS",
+      "durationMs": 1330.1,
+      "details": "Live metadata returned without credential exposure."
+    },
+    {
+      "test": "Super Admin Test 2: Dynamic Tables Discovery",
+      "status": "PASS",
+      "durationMs": 351.7,
+      "details": "Dynamic catalog inspection with Category A/B/C/D classification verified."
+    },
+    {
+      "test": "Super Admin Test 3: Table Schema Inspection",
+      "status": "PASS",
+      "durationMs": 45.0,
+      "details": "Column data types, nullability, primary and foreign keys verified."
+    },
+    {
+      "test": "Super Admin Test 4: Controlled CRUD & Audit",
+      "status": "PASS",
+      "durationMs": 92.2,
+      "details": "Controlled insert, fetch, and update with immutable audit logging verified."
+    },
+    {
+      "test": "Super Admin Test 5: Category C Financial Immutability",
+      "status": "PASS",
+      "durationMs": 20.1,
+      "details": "Direct PUT and DELETE on farmer_bills/monthly_bills strictly rejected."
+    },
+    {
+      "test": "Super Admin Test 6: Database Diagnostic Actions",
+      "status": "PASS",
+      "durationMs": 625.1,
+      "details": "Verify Connection, Validate Schema, and Migration history verified."
+    },
+    {
+      "test": "Super Admin Test 7: Nearby Dairies Eligibility Gating",
+      "status": "PASS",
+      "durationMs": 166.1,
+      "details": "Unready or unprovisioned databases strictly gated from customer registration."
+    }
+  ]
+}

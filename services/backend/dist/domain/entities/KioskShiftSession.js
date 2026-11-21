@@ -83,6 +83,18 @@ export class KioskShiftSession {
         this.props.closingOperatorId = operatorId;
         this.props.closingOperatorName = operatorName;
     }
+    reopen(operatorId, operatorName) {
+        this.props.status = 'OPEN';
+        this.props.closedAt = null;
+        this.props.closingOperatorId = null;
+        this.props.closingOperatorName = null;
+        if (operatorId) {
+            this.props.openingOperatorId = operatorId;
+        }
+        if (operatorName) {
+            this.props.openingOperatorName = operatorName;
+        }
+    }
     toJSON() {
         return {
             id: this.props.id,

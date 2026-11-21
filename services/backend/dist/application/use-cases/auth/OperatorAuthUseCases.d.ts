@@ -23,6 +23,8 @@ export declare class VerifyOperatorOtpUseCase {
             dairyName?: string;
             dairyCode?: string;
             centerId: string;
+            centerName?: string;
+            centerCode?: string;
         };
     }>;
 }

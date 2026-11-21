@@ -48,8 +48,14 @@ BEGIN
     SELECT id INTO v_center_id FROM dairy_centers WHERE organization_id = v_org_id LIMIT 1;
     IF v_center_id IS NULL THEN
         v_center_id := '00000000-0000-0000-0000-000000000002';
-        INSERT INTO dairy_centers (id, organization_id, code, name, status)
-        VALUES (v_center_id, v_org_id, 'C-HQ', 'DFarm Central Platform Hub', 'ACTIVE')
+        INSERT INTO dairy_centers (
+            id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status
+        )
+        VALUES (
+            v_center_id, v_org_id, 'C-HQ', 'DFarm Central Platform Hub',
+            'Main Office, DFarm Center', 'Kavathe Piran', 'Sangli', 'Maharashtra', '416417',
+            '+917755995615', 'ACTIVE'
+        )
         ON CONFLICT (id) DO UPDATE SET status = 'ACTIVE';
     END IF;
 
