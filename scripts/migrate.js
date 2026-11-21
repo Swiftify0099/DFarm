@@ -62,30 +62,45 @@ function loadEnv() {
 
 loadEnv();
 
-const connectionString =
-  (process.env.DIRECT_URL && !process.env.DIRECT_URL.includes('YOUR_PASSWORD_HERE') ? process.env.DIRECT_URL : null) ||
-  (process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('YOUR_PASSWORD_HERE') ? process.env.DATABASE_URL : null) ||
-  process.env.DIRECT_URL ||
-  process.env.DATABASE_URL ||
-  'postgresql://postgres:postgres@127.0.0.1:54322/postgres';
-const ssl = getSslConfig(connectionString);
+const connectionCandidates = [
+  process.env.DIRECT_URL && !process.env.DIRECT_URL.includes('YOUR_PASSWORD_HERE') ? process.env.DIRECT_URL : null,
+  process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('YOUR_PASSWORD_HERE') ? process.env.DATABASE_URL : null,
+  'postgresql://postgres:postgres@127.0.0.1:54322/postgres'
+].filter(Boolean);
 
-console.log('------------------------------------------------------------');
-console.log('DFARM DATABASE MIGRATION ENGINE');
-console.log('Target Connection:', connectionString.replace(/:[^:@]+@/, ':****@'));
-console.log('SSL Mode Enabled:', Boolean(ssl));
-console.log('------------------------------------------------------------');
+let client = null;
+let connectionString = connectionCandidates[0];
 
-const client = new Client({
-  connectionString,
-  ssl,
-  connectionTimeoutMillis: 15000,
-});
+async function createConnectedClient() {
+  for (const uri of connectionCandidates) {
+    const ssl = getSslConfig(uri);
+    console.log('------------------------------------------------------------');
+    console.log('DFARM DATABASE MIGRATION ENGINE');
+    console.log('Target Connection:', uri.replace(/:[^:@]+@/, ':****@'));
+    console.log('SSL Mode Enabled:', Boolean(ssl));
+    console.log('------------------------------------------------------------');
+
+    const testClient = new Client({
+      connectionString: uri,
+      ssl,
+      connectionTimeoutMillis: 30000,
+    });
+
+    try {
+      await testClient.connect();
+      console.log('Connected to PostgreSQL successfully.\n');
+      return testClient;
+    } catch (err) {
+      console.warn(`Connection attempt to ${uri.includes(':5432') ? 'port 5432' : 'port 6543'} failed: ${err.message}`);
+      await testClient.end().catch(() => {});
+    }
+  }
+  throw new Error('All connection attempts timed out. Please check your network or run via Supabase SQL Editor.');
+}
 
 async function run() {
   try {
-    await client.connect();
-    console.log('Connected to PostgreSQL successfully.\n');
+    client = await createConnectedClient();
 
     // 1. Safely ensure auth helper & migration tracking table
     try {

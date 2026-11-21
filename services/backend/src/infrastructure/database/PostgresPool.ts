@@ -68,7 +68,7 @@ export class PostgresDatabase {
 
   public async checkConnection(): Promise<boolean> {
     try {
-      const client = await this.withTimeout(this.pool.connect(), 3000, 'PostgreSQL checkConnection');
+      const client = await this.withTimeout(this.pool.connect(), 8000, 'PostgreSQL checkConnection');
       try {
         const res = await client.query('SELECT 1 as alive;');
         this.isPostgresConnected = res.rows.length > 0;
