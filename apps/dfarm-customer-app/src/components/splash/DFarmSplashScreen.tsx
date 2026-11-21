@@ -30,7 +30,6 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 // Local hero illustration asset
 const HERO_ILLUSTRATION_WEBP = require('../../../assets/images/dfarm-hero-illustration.webp');
-const HERO_ILLUSTRATION_PNG = require('../../../assets/images/dfarm-hero-illustration.png');
 
 export interface DFarmSplashScreenProps {
   onFinish?: () => void;
@@ -311,7 +310,7 @@ export const DFarmSplashScreen: React.FC<DFarmSplashScreenProps> = ({
           <View style={styles.heroImageWrapper}>
             <Image
               source={HERO_ILLUSTRATION_WEBP}
-              defaultSource={HERO_ILLUSTRATION_PNG}
+              defaultSource={HERO_ILLUSTRATION_WEBP}
               style={styles.heroImage}
               contentFit="cover"
               contentPosition="center"
