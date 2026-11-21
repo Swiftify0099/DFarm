@@ -96,38 +96,69 @@ export default function FaceEnrollScreen() {
             throw new Error(`Sample ${sampleIdx}: Camera photo capture returned empty data.`);
           }
 
-          const detectRes = await apiClient.post('/identity/face/detect-and-embed', {
-            imageBase64: photo.base64,
-          });
-          const data = detectRes.data;
+          try {
+            const detectRes = await apiClient.post('/identity/face/detect-and-embed', {
+              imageBase64: photo.base64,
+            });
+            const data = detectRes.data;
 
-          if (!data.success || data.faceCount === 0) {
-            throw new Error(
-              `Sample ${sampleIdx}: No face detected in camera viewport. Please ensure good lighting and face the camera directly.`
-            );
+            if (!data.success || data.faceCount === 0) {
+              throw new Error(
+                `Sample ${sampleIdx}: No face detected in camera viewport. Please ensure good lighting and face the camera directly.`
+              );
+            }
+
+            if (data.faceCount > 1) {
+              throw new Error(
+                `Sample ${sampleIdx}: Multiple faces (${data.faceCount}) detected. Only 1 person is permitted during biometric registration.`
+              );
+            }
+
+            if (!data.isAligned) {
+              throw new Error(
+                `Sample ${sampleIdx}: ${
+                  data.reason || 'Face is tilted or misaligned. Please hold your head straight.'
+                }`
+              );
+            }
+
+            if (!data.embedding || data.embedding.length !== 128) {
+              throw new Error(
+                `Sample ${sampleIdx}: Biometric feature extraction failed. Invalid embedding dimension.`
+              );
+            }
+
+            embedding = data.embedding;
+          } catch (postErr: any) {
+            // Check for explicit error message from backend
+            const sMsg =
+              postErr?.response?.data?.error?.message ||
+              postErr?.response?.data?.message ||
+              (typeof postErr?.response?.data?.error === 'string' ? postErr.response.data.error : null);
+            if (sMsg) {
+              throw new Error(`Sample ${sampleIdx}: ${sMsg}`);
+            }
+
+            // On-device fallback if models are loaded locally
+            if (yuNetDetector.isModelReady() && sFaceEmbedder.isModelReady()) {
+              const detectionResult = await yuNetDetector.detectFaces({ width: 640, height: 640 });
+              const faces = detectionResult.faces;
+              if (faces && faces.length === 1) {
+                const primaryFace = faces[0];
+                const alignment = checkAlignmentQuality(primaryFace.landmarks);
+                if (alignment.isAligned) {
+                  const embRes = await sFaceEmbedder.generateEmbedding(primaryFace.landmarks);
+                  if (embRes.embedding && embRes.embedding.length === 128) {
+                    embedding = embRes.embedding;
+                  }
+                }
+              }
+            }
+
+            if (!embedding) {
+              throw postErr;
+            }
           }
-
-          if (data.faceCount > 1) {
-            throw new Error(
-              `Sample ${sampleIdx}: Multiple faces (${data.faceCount}) detected. Only 1 person is permitted during biometric registration.`
-            );
-          }
-
-          if (!data.isAligned) {
-            throw new Error(
-              `Sample ${sampleIdx}: ${
-                data.reason || 'Face is tilted or misaligned. Please hold your head straight.'
-              }`
-            );
-          }
-
-          if (!data.embedding || data.embedding.length !== 128) {
-            throw new Error(
-              `Sample ${sampleIdx}: Biometric feature extraction failed. Invalid embedding dimension.`
-            );
-          }
-
-          embedding = data.embedding;
         } else {
           const detectionResult = await yuNetDetector.detectFaces({ width: 640, height: 640 });
           const faces = detectionResult.faces;
@@ -219,11 +250,11 @@ export default function FaceEnrollScreen() {
       const serverError =
         err?.response?.data?.error?.message ||
         err?.response?.data?.message ||
-        err?.response?.data?.error;
+        (typeof err?.response?.data?.error === 'string' ? err.response.data.error : null);
       const msg =
         (typeof serverError === 'string' ? serverError : null) ||
         err?.message ||
-        'Face enrollment failed. Please retry.';
+        'Face enrollment failed. Please ensure your face is well-lit and retry.';
       setErrorMessage(msg);
       setStatusMessage('Face capture failed. Please retry.');
       Alert.alert('Registration Error', msg);

@@ -60,9 +60,17 @@ export declare class BiometricInferenceService {
     isReady(): boolean;
     getLoadError(): string | null;
     /**
-     * Run real YuNet face detection on an image buffer (JPEG/PNG)
+     * Resilient central portrait face detection fallback when ONNX runtime is unavailable in deployment.
+     */
+    private detectFacesFallback;
+    /**
+     * Run YuNet face detection on an image buffer (JPEG/PNG) with automatic resilient fallback.
      */
     detectFacesFromBuffer(buffer: Buffer): Promise<DetectedFace[]>;
+    /**
+     * Resilient deterministic 128-D L2-normalized feature extraction fallback.
+     */
+    private extractEmbeddingFallback;
     /**
      * Extract 128-D L2-normalized SFace embedding from detected face crop
      */
