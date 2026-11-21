@@ -3,10 +3,13 @@ import {
   BadRequestError,
   NotFoundError,
   ConflictError,
+  ForbiddenError,
   AppError,
 } from '../../shared/errors/app-error.js';
 import type { AuthContext } from '../../middleware/authenticate.js';
+import { UserRole } from '@dfarm/shared-types';
 import { payoutService } from './payout.service.js';
+import { BankFileService } from './serializers/BankFileService.js';
 import crypto from 'node:crypto';
 
 export interface CreateBatchParams {
@@ -60,6 +63,21 @@ export class BatchService {
     try {
       await client.query('BEGIN');
 
+      // Duplicate Billing Cycle Batch Protection
+      if (params.billingCycleId) {
+        const activeCycleBatch = await client.query(
+          `SELECT id, batch_number, status FROM payment_batches 
+           WHERE billing_cycle_id = $1 AND status NOT IN ('FAILED', 'CANCELLED') LIMIT 1;`,
+          [params.billingCycleId]
+        );
+        if (activeCycleBatch.rows.length > 0) {
+          throw new ConflictError(
+            `An active payout batch (${activeCycleBatch.rows[0].batch_number}, status: ${activeCycleBatch.rows[0].status}) already exists for billing cycle '${params.billingCycleId}'. Duplicate settlement batches are prohibited.`,
+            'DUPLICATE_CYCLE_BATCH_PROHIBITED'
+          );
+        }
+      }
+
       const batchId = crypto.randomUUID();
       const batchNumber = 'BATCH-' + Date.now().toString(36).toUpperCase() + '-' + crypto.randomBytes(3).toString('hex').toUpperCase();
 
@@ -79,9 +97,16 @@ export class BatchService {
       }
 
       if (params.customerIds && params.customerIds.length > 0) {
-        queryArgs.push(params.customerIds);
-        customersQuery += ` AND c.id = ANY($${queryArgs.length}::uuid[])`;
+        const placeholders = params.customerIds
+          .map((id) => {
+            queryArgs.push(id);
+            return `$${queryArgs.length}`;
+          })
+          .join(', ');
+        customersQuery += ` AND c.id IN (${placeholders})`;
       }
+
+      customersQuery += ` ORDER BY c.farmer_code ASC`;
 
       const eligibleRes = await client.query(customersQuery, queryArgs);
 
@@ -235,6 +260,14 @@ export class BatchService {
 
     if (batch.status !== 'DRAFT' && batch.status !== 'PENDING_APPROVAL') {
       throw new BadRequestError(`Batch cannot be approved from status '${batch.status}'`, 'INVALID_BATCH_STATUS');
+    }
+
+    // Enforce Maker-Checker Segregation of Duties: Creator cannot approve their own batch
+    if (batch.created_by === auth.userId) {
+      throw new ForbiddenError(
+        'Maker-Checker segregation of duties violation: The batch creator cannot approve their own batch. An independent supervisor or primary admin must approve it.',
+        'MAKER_CHECKER_SELF_APPROVAL_PROHIBITED'
+      );
     }
 
     const client = await pool.connect();
@@ -430,19 +463,27 @@ export class BatchService {
     };
   }
 
-  async getBatchById(batchId: string, _auth: AuthContext) {
+  async getBatchById(batchId: string, auth: AuthContext) {
     const res = await query('SELECT * FROM payment_batches WHERE id = $1;', [batchId]);
     if (res.rows.length === 0) {
       throw new NotFoundError(`Batch '${batchId}' not found`, 'BATCH_NOT_FOUND');
     }
     const b = res.rows[0];
 
+    // Enforce strict multi-tenant isolation
+    if (auth.role !== UserRole.SUPER_ADMIN && b.organization_id !== auth.organizationId) {
+      throw new ForbiddenError(
+        'Cross-organization batch access is strictly prohibited',
+        'CROSS_ORG_ACCESS_DENIED'
+      );
+    }
+
     const itemsRes = await query(
       `SELECT bi.*, c.full_name as customer_name, c.farmer_code
        FROM payment_batch_items bi
        JOIN customers c ON c.id = bi.customer_id
        WHERE bi.batch_id = $1
-       ORDER BY bi.created_at ASC;`,
+       ORDER BY c.farmer_code ASC, bi.created_at ASC;`,
       [batchId]
     );
 
@@ -482,6 +523,14 @@ export class BatchService {
         settledAt: i.settled_at,
       })),
     };
+  }
+
+  async exportBatch(batchId: string, format: string, auth: AuthContext) {
+    return BankFileService.exportBatch(batchId, format, auth);
+  }
+
+  downloadBatch(token: string) {
+    return BankFileService.getExportByToken(token);
   }
 }
 

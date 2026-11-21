@@ -20,8 +20,11 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_GOOGLE_MAPS_API_KEY': JSON.stringify(
         env.VITE_GOOGLE_MAPS_API_KEY || ''
       ),
+      'import.meta.env.VITE_API_BASE_URL': JSON.stringify(
+        env.VITE_API_BASE_URL || env.VITE_API_URL || (mode === 'production' ? '' : 'http://localhost:4000/api/v1')
+      ),
       'import.meta.env.VITE_API_URL': JSON.stringify(
-        env.VITE_API_URL || 'http://localhost:4000/api/v1'
+        env.VITE_API_BASE_URL || env.VITE_API_URL || (mode === 'production' ? '' : 'http://localhost:4000/api/v1')
       ),
     },
     plugins: [

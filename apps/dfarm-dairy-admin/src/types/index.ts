@@ -466,6 +466,10 @@ export interface StaffMember {
   isActive: boolean
   createdAt: string
   lastActiveAt?: string
+  centerId?: string
+  centerName?: string
+  centerCode?: string
+  counterName?: string
 }
 
 // 16. Audit Log

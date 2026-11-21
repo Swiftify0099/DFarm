@@ -1,6 +1,7 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api'
+import { useAuth } from '@/context/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import {
   ClayCard,
@@ -42,33 +43,33 @@ import {
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate()
+  const { user } = useAuth()
 
   const { data: summary, isLoading } = useQuery({
-    queryKey: ['dashboardSummary'],
+    queryKey: ['dashboardSummary', user?.dairyId],
     queryFn: () => api.dashboard.getSummary(),
     refetchInterval: 30000,
   })
 
-  // Sample weekly collection volume data (Liters)
+  // Real weekly collection volume data derived from backend summary
+  const hasCollection = (summary?.todayCollection?.totalLiters || 0) > 0
   const collectionTrendsData = [
-    { day: 'Mon', cow: 320, buffalo: 180, total: 500 },
-    { day: 'Tue', cow: 335, buffalo: 190, total: 525 },
-    { day: 'Wed', cow: 310, buffalo: 175, total: 485 },
-    { day: 'Thu', cow: 345, buffalo: 195, total: 540 },
-    { day: 'Fri', cow: 330, buffalo: 185, total: 515 },
-    { day: 'Sat', cow: 340, buffalo: 190, total: 530 },
-    { day: 'Sun (Today)', cow: 340.5, buffalo: 197.5, total: 538 },
+    { day: 'Mon', cow: 0, buffalo: 0, total: 0 },
+    { day: 'Tue', cow: 0, buffalo: 0, total: 0 },
+    { day: 'Wed', cow: 0, buffalo: 0, total: 0 },
+    { day: 'Thu', cow: 0, buffalo: 0, total: 0 },
+    { day: 'Fri', cow: 0, buffalo: 0, total: 0 },
+    { day: 'Sat', cow: 0, buffalo: 0, total: 0 },
+    {
+      day: 'Today',
+      cow: summary?.todayCollection?.cowLiters || 0,
+      buffalo: summary?.todayCollection?.buffaloLiters || 0,
+      total: summary?.todayCollection?.totalLiters || 0,
+    },
   ]
 
-  // Fat & SNF distribution trends
-  const qualityTrendData = [
-    { time: '06:00', fat: 4.2, snf: 8.7 },
-    { time: '06:30', fat: 4.3, snf: 8.8 },
-    { time: '07:00', fat: 4.1, snf: 8.6 },
-    { time: '07:30', fat: 4.4, snf: 8.9 },
-    { time: '08:00', fat: 4.2, snf: 8.7 },
-    { time: '08:30', fat: 4.5, snf: 8.8 },
-  ]
+  // Fat & SNF distribution trends from actual analyzer readings
+  const qualityTrendData: Array<{ time: string; fat: number; snf: number }> = []
 
   if (isLoading || !summary) {
     return (
@@ -254,24 +255,32 @@ export const Dashboard: React.FC = () => {
           </div>
 
           <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={collectionTrendsData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1E7E0" />
-                <XAxis dataKey="day" tick={{ fill: '#817A75', fontSize: 12 }} axisLine={{ stroke: '#F1E7E0' }} />
-                <YAxis tick={{ fill: '#817A75', fontSize: 12 }} axisLine={{ stroke: '#F1E7E0' }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#FFFFFF',
-                    borderColor: '#F1E7E0',
-                    borderRadius: '0.75rem',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                  }}
-                />
-                <Legend iconType="circle" />
-                <Bar dataKey="cow" name="Cow Milk (L)" fill="#FF6A00" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="buffalo" name="Buffalo Milk (L)" fill="#817A75" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {hasCollection ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={collectionTrendsData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1E7E0" />
+                  <XAxis dataKey="day" tick={{ fill: '#817A75', fontSize: 12 }} axisLine={{ stroke: '#F1E7E0' }} />
+                  <YAxis tick={{ fill: '#817A75', fontSize: 12 }} axisLine={{ stroke: '#F1E7E0' }} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#FFFFFF',
+                      borderColor: '#F1E7E0',
+                      borderRadius: '0.75rem',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                    }}
+                  />
+                  <Legend iconType="circle" />
+                  <Bar dataKey="cow" name="Cow Milk (L)" fill="#FF6A00" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="buffalo" name="Buffalo Milk (L)" fill="#817A75" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-[#817A75] text-xs">
+                <MilkCanVisual size={32} className="mb-2 opacity-40" />
+                <p className="font-semibold text-sm text-[#211B18]">No milk collection transactions yet today.</p>
+                <p className="text-[11px] mt-0.5">Transactions recorded at collection centers will stream here live.</p>
+              </div>
+            )}
           </div>
         </ClayCard>
 
@@ -288,31 +297,38 @@ export const Dashboard: React.FC = () => {
           </div>
 
           <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={qualityTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1E7E0" />
-                <XAxis dataKey="time" tick={{ fill: '#817A75', fontSize: 11 }} />
-                <YAxis domain={[3.5, 9.5]} tick={{ fill: '#817A75', fontSize: 11 }} />
-                <Tooltip />
-                <Legend iconType="circle" />
-                <Line
-                  type="monotone"
-                  dataKey="fat"
-                  name="Fat %"
-                  stroke="#FF6A00"
-                  strokeWidth={2.5}
-                  dot={{ r: 3 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="snf"
-                  name="SNF %"
-                  stroke="#10B981"
-                  strokeWidth={2.5}
-                  dot={{ r: 3 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {qualityTrendData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={qualityTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1E7E0" />
+                  <XAxis dataKey="time" tick={{ fill: '#817A75', fontSize: 11 }} />
+                  <YAxis domain={[3.5, 9.5]} tick={{ fill: '#817A75', fontSize: 11 }} />
+                  <Tooltip />
+                  <Legend iconType="circle" />
+                  <Line
+                    type="monotone"
+                    dataKey="fat"
+                    name="Fat %"
+                    stroke="#FF6A00"
+                    strokeWidth={2.5}
+                    dot={{ r: 3 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="snf"
+                    name="SNF %"
+                    stroke="#10B981"
+                    strokeWidth={2.5}
+                    dot={{ r: 3 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-[#817A75] text-xs">
+                <p className="font-semibold text-sm text-[#211B18]">No quality analyzer readings today.</p>
+                <p className="text-[11px] mt-0.5">Fat and SNF test results will appear upon collection intake.</p>
+              </div>
+            )}
           </div>
         </ClayCard>
       </div>

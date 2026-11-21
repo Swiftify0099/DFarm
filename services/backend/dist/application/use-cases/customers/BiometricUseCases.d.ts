@@ -6,10 +6,12 @@ export declare class GetFaceTemplatesUseCase {
     }): Promise<{
         templateId: any;
         customerId: any;
+        globalCustomerId: any;
         farmerCode: any;
         fullName: any;
         modelName: any;
         modelVersion: any;
+        modelVersionId: any;
         dimension: any;
         metric: any;
         threshold: number;
@@ -27,14 +29,15 @@ export declare class UpdateCustomerBiometricsUseCase {
     constructor(customerRepo: ICustomerRepository, encryptor: IBiometricEncryptor);
     execute(params: {
         customerId: string;
+        organizationId?: string;
         embedding: number[];
         modelVersion?: string;
     }): Promise<{
         success: boolean;
-        message: string;
+        customerId: string;
         modelVersion: string;
-        dimension: any;
-        keyReference: string;
+        status: string;
+        enrolledAt: string;
     }>;
 }
 //# sourceMappingURL=BiometricUseCases.d.ts.map

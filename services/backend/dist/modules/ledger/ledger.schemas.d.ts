@@ -20,9 +20,9 @@ export declare const CreateAdvanceSchema: z.ZodObject<{
     amount: z.ZodCoercedNumber<unknown>;
     reason: z.ZodString;
     recoveryType: z.ZodDefault<z.ZodEnum<{
+        MANUAL: "MANUAL";
         MONTHLY_BILL_DEDUCTION: "MONTHLY_BILL_DEDUCTION";
         INSTALLMENTS: "INSTALLMENTS";
-        MANUAL: "MANUAL";
     }>>;
     advanceDate: z.ZodOptional<z.ZodString>;
     idempotencyKey: z.ZodOptional<z.ZodString>;
@@ -84,10 +84,10 @@ export declare const LedgerAccountsQuerySchema: z.ZodObject<{
         CLOSED: "CLOSED";
     }>>;
     balanceFilter: z.ZodDefault<z.ZodEnum<{
+        ALL: "ALL";
         PAYABLE: "PAYABLE";
         RECEIVABLE: "RECEIVABLE";
         ZERO: "ZERO";
-        ALL: "ALL";
     }>>;
 }, z.core.$strip>;
 export declare const ReportFilterSchema: z.ZodObject<{

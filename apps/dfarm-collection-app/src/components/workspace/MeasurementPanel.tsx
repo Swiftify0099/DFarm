@@ -5,7 +5,7 @@ import { ReadingCard } from './ReadingCard'
 import { Activity, Scale, Droplet, Sparkles, AlertCircle, RefreshCw } from 'lucide-react'
 
 export const MeasurementPanel: React.FC = () => {
-  const { measurements, updateMeasurements, tareScale } = useHardware()
+  const { measurements, updateMeasurements, tareScale, collectionWorkflowState, activeAttempt } = useHardware()
   const [isManualOverride, setIsManualOverride] = useState(false)
 
   const handleFatChange = (val: number) => {
@@ -37,6 +37,11 @@ export const MeasurementPanel: React.FC = () => {
           <h2 className="text-sm font-bold text-text-primary uppercase tracking-wide">
             Intake Telemetry & Quality Readings
           </h2>
+          {activeAttempt && (
+            <span className="text-[10px] font-mono bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-300">
+              {collectionWorkflowState.replace(/_/g, ' ')}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center space-x-2">

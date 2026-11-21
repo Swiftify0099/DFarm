@@ -1,0 +1,1234 @@
+{
+  "totalScreens": 68,
+  "screens": [
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(auth)\\login.tsx",
+      "component": "LoginScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useRouter",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Smart Dairy Transparency",
+        "पारदर्शक दूध संकलन व थेट बँक जमा",
+        "Customer & Farmer Portal",
+        "Enter Mobile Number",
+        "Mobile Number / मोबाईल नंबर",
+        "🇮🇳",
+        "+91",
+        "Get OTP Verification Code",
+        "Milk Producer Service Terms",
+        "Biometric Data Privacy Policy"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(auth)\\verify-otp.tsx",
+      "component": "VerifyOtpScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useEffect",
+        "useRouter",
+        "useLocalSearchParams",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Security Verification",
+        "ओटीपी पडताळणी",
+        "Step 2 of 2: OTP Security",
+        "Enter 6-Digit Code",
+        "Edit Phone Number / नंबर बदला",
+        "Verify & Continue",
+        "Didn't receive code?",
+        "Resend OTP Now"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(main)\\bills.tsx",
+      "component": "BillsScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useBills"
+      ],
+      "sampleLabels": [
+        "Bills & Statements",
+        "१०-दिवसीय देयक चक्र व बँक जमा",
+        "No Bills Generated",
+        "Total Milk",
+        "Gross Earnings",
+        "Deductions",
+        "Net Direct Bank Payout",
+        "Billing Statement",
+        "Cycle Duration",
+        "Total Milk Supplied",
+        "Gross Milk Value",
+        "Cattle Feed Deductions",
+        "Other Deductions / Advances",
+        "Net Paid to Bank",
+        "Bank Settlement Details:",
+        "Close Statement"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(main)\\collection.tsx",
+      "component": "CollectionHistoryScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useCollection"
+      ],
+      "sampleLabels": [
+        "Milk Collections",
+        "दैनिक सकाळ व संध्याकाळ पाळी संकलन",
+        "No Records Found",
+        "Quantity",
+        "FAT / SNF",
+        "Rate",
+        "Total Amount",
+        "Digital Collection Receipt",
+        "Biometrically Authenticated",
+        "Animal Milk Category",
+        "Collection Shift",
+        "Net Measured Quantity",
+        "Fat Percentage (FAT)",
+        "Solids-Not-Fat (SNF)",
+        "Lactometer Degree",
+        "Official Applied Rate",
+        "Gross Shift Credit",
+        "Certified Collection Officer:"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(main)\\index.tsx",
+      "component": "DashboardScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useRouter",
+        "useCollection",
+        "useLedger",
+        "useProfile"
+      ],
+      "sampleLabels": [
+        "Namaste / नमस्कार,",
+        "Test Face",
+        "Milk Volume",
+        "Today's Value",
+        "FAT / फॅट",
+        "SNF / एस.एन.एफ",
+        "RATE / दर",
+        "No Milk Collection Recorded Today",
+        "Khata Ledger Balance / खाते शिल्लक",
+        "Total Milk Earnings",
+        "Feed Deductions",
+        "Total Volume",
+        "Avg Fat / SNF",
+        "Cow Volume",
+        "Buffalo Volume",
+        "Shift History",
+        "Statements",
+        "Face Sensor"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(main)\\ledger.tsx",
+      "component": "LedgerScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useLedger"
+      ],
+      "sampleLabels": [
+        "Customer Khata",
+        "अधिकृत दुग्ध खाते व ताळेबंद",
+        "Current Account Balance",
+        "Total Milk Credits",
+        "Feed / Deductions",
+        "No Ledger Entries"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(main)\\profile\\diagnostics.tsx",
+      "component": "FaceDiagnosticsScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useRef",
+        "useRouter",
+        "useCameraPermissions"
+      ],
+      "sampleLabels": [
+        "Test My Face",
+        "बायोमेट्रिक सेन्सर व मॉडेल चाचणी",
+        "Diagnostics & Verification Mode",
+        "Camera Permission Required",
+        "Enable Camera",
+        "Diagnostic Telemetry",
+        "Camera Sensor",
+        "YuNet Face Detector",
+        "SFace INT8 Embedder",
+        "Face Detection",
+        "Landmark Alignment",
+        "128-D Vector Integrity"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(main)\\profile\\index.tsx",
+      "component": "ProfileScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useRouter",
+        "useProfile",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Account & Biometrics",
+        "शेतकरी प्रोफाइल व बायोमेट्रिक व्यवस्थापन",
+        "Verified Producer",
+        "Customer ID",
+        "Affiliated Dairy",
+        "Village",
+        "Supply Animals",
+        "Face Biometrics",
+        "Test Face Sensor",
+        "Update Biometrics",
+        "Bank Beneficiary / बँक खाते",
+        "Bank Name",
+        "Account Number",
+        "IFSC Code",
+        "Account Holder",
+        "Application Settings",
+        "Language / भाषा",
+        "English (मराठी)",
+        "Platform Build",
+        "DFarm v1.0.0 (Expo SDK 58)",
+        "Biometric Architecture",
+        "OpenCV YuNet + SFace INT8 (ARM64)",
+        "Secure Logout / लॉगआउट"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(main)\\profile\\update-face.tsx",
+      "component": "UpdateFaceScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useRef",
+        "useRouter",
+        "useCameraPermissions",
+        "useProfile"
+      ],
+      "sampleLabels": [
+        "Update Face Biometrics",
+        "बायोमेट्रिक फोटो अपडेट",
+        "Active Biometric Profile",
+        "Camera Access Required",
+        "Enable Camera",
+        "Biometric Template Updated!",
+        "Return to Profile"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(main)\\_layout.tsx",
+      "component": "MainTabsLayout",
+      "apiCalls": [],
+      "hooks": [],
+      "sampleLabels": []
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(onboarding)\\dairy-discovery.tsx",
+      "component": "DairyDiscoveryScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useEffect",
+        "useRouter",
+        "useLocalSearchParams",
+        "useDairyDiscovery"
+      ],
+      "sampleLabels": [
+        "GPS Location Offline",
+        "Enable GPS",
+        "Select Your Dairy",
+        "No Dairies Found"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(onboarding)\\face-enroll.tsx",
+      "component": "FaceEnrollScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useEffect",
+        "useRef",
+        "useRouter",
+        "useLocalSearchParams",
+        "useCameraPermissions",
+        "useRegistration"
+      ],
+      "sampleLabels": [
+        "Face Biometric Enrollment",
+        "बायोमेट्रिक चेहरा नोंदणी (Step 2 of 2)",
+        "✓ 1. Personal & Animals",
+        "2. Live Face Biometrics",
+        "Camera Access Required",
+        "Grant Camera Access"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(onboarding)\\pending-approval.tsx",
+      "component": "PendingApprovalScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useRouter",
+        "useLocalSearchParams",
+        "useRegistration"
+      ],
+      "sampleLabels": [
+        "Registration Status",
+        "नोंदणी स्थिती व पडताळणी",
+        "Registration Approved",
+        "Account Activated!",
+        "Applicant Name",
+        "Assigned Farmer Code",
+        "Biometric Engine",
+        "YuNet + SFace Active",
+        "Account Status",
+        "Proceed to Dashboard",
+        "Registration Rejected",
+        "Application Review Failed",
+        "Dairy Admin Review Note:",
+        "Edit & Re-submit Registration",
+        "Check Status Again",
+        "Under Dairy Admin Review",
+        "Approval Pending",
+        "Biometric Status",
+        "Enrolled (128-D Vector)",
+        "Application Reference",
+        "Check Approval Status Now"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\(onboarding)\\register.tsx",
+      "component": "RegisterScreen",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useRouter",
+        "useLocalSearchParams"
+      ],
+      "sampleLabels": [
+        "Producer Registration",
+        "नोंदणी: वैयक्तिक व दुग्ध तपशील",
+        "1. Personal & Animals",
+        "2. Live Face Biometrics",
+        "Affiliated Dairy Center",
+        "Change",
+        "Milk Supply Animals / दूध देणारे जनावर",
+        "Next: Live Face Biometric"
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\index.tsx",
+      "component": "Index",
+      "apiCalls": [],
+      "hooks": [
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Connecting to DFarm Network..."
+      ]
+    },
+    {
+      "app": "Customer App",
+      "appSlug": "dfarm-customer-app",
+      "file": "src\\app\\_layout.tsx",
+      "component": "RootLayout",
+      "apiCalls": [],
+      "hooks": [],
+      "sampleLabels": []
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\audit\\AuditLogViewer.tsx",
+      "component": "AuditLogViewer",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\auth\\ActivationPage.tsx",
+      "component": "ActivationPage",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useEffect",
+        "useSearchParams",
+        "useNavigate"
+      ],
+      "sampleLabels": [
+        "Enter 6-Digit Mobile Verification Code"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\auth\\Login.tsx",
+      "component": "Login",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useNavigate",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Registered Mobile Number",
+        "6-Digit OTP Code"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\billing\\BillingManagement.tsx",
+      "component": "BillingManagement",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Generate Fortnightly Settlement Bill",
+        "Select Farmer",
+        "Cycle Start Date",
+        "Cycle End Date",
+        "Billing Cycle Name"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\biometrics\\FaceEnrollmentList.tsx",
+      "component": "FaceEnrollmentList",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Request Customer Re-Enrollment",
+        "Revoke Biometric Template"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\collection\\CollectionSessions.tsx",
+      "component": "CollectionSessions",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Confirm Closing of Collection Session"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\collection\\MilkCollectionRegister.tsx",
+      "component": "MilkCollectionRegister",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Corrected Weight (Liters)",
+        "Mandatory Authorized Reason"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\customers\\CustomerDetail.tsx",
+      "component": "CustomerDetail",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useParams",
+        "useNavigate",
+        "useQuery",
+        "useAuth"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\customers\\CustomerDirectory.tsx",
+      "component": "CustomerDirectory",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useNavigate",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Soft-Delete Customer Record",
+        "Restore Customer Account"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\customers\\PendingApprovals.tsx",
+      "component": "PendingApprovals",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Review Customer Registration Dossier",
+        "Confirm Farmer Registration Approval",
+        "Reject Registration Request"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\dashboard\\Dashboard.tsx",
+      "component": "Dashboard",
+      "apiCalls": [],
+      "hooks": [
+        "useQuery",
+        "useAuth",
+        "useNavigate"
+      ],
+      "sampleLabels": [
+        "Customer Registrations Pending Review",
+        "Today's Milk Collection",
+        "Today's Collection Value",
+        "Accredited to customer ledgers",
+        "Pending Customer Approvals",
+        "Awaiting admin verification",
+        "Active Collection Devices"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\devices\\DeviceManagement.tsx",
+      "component": "DeviceManagement",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\feed\\FeedInventory.tsx",
+      "component": "FeedInventory",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Purchase Reference / Reason",
+        "Record Customer Feed Sale",
+        "Select Farmer",
+        "Select Product",
+        "Quantity",
+        "Payment Mode",
+        "Sale Notes (Optional)"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\ledger\\CustomerLedgerView.tsx",
+      "component": "CustomerLedgerView",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Filter by Farmer Ledger",
+        "Post Authorized Ledger Adjustment",
+        "Select Farmer",
+        "Adjustment Nature",
+        "Amount (₹)",
+        "Description / Particulars",
+        "Mandatory Authorized Reason"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\payments\\PaymentRegister.tsx",
+      "component": "PaymentRegister",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Record Payout / Settlement Receipt",
+        "Select Farmer",
+        "Disbursed Amount (₹)",
+        "Disbursement Mode",
+        "Transaction Reference / Bank UTR",
+        "Notes / Voucher Remark (Optional)"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\profile\\DairyProfile.tsx",
+      "component": "DairyProfilePage",
+      "apiCalls": [],
+      "hooks": [],
+      "sampleLabels": []
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\quality\\QualityAnalytics.tsx",
+      "component": "QualityAnalytics",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\rate-charts\\RateChartManagement.tsx",
+      "component": "RateChartManagement",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Draft New Milk Rate Chart Version",
+        "Chart Title",
+        "Milk Category",
+        "Base Rate (₹/L)",
+        "Min Fat %",
+        "Max Fat %",
+        "Fat Step",
+        "Min SNF %",
+        "Max SNF %",
+        "SNF Step",
+        "Effective Date",
+        "Revision Notes / Rationale",
+        "Activate Rate Chart Version"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\reports\\ReportsHub.tsx",
+      "component": "ReportsHub",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery"
+      ],
+      "sampleLabels": [
+        "Select Official Report",
+        "Reference Date"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\rfid\\RfidManagement.tsx",
+      "component": "RfidManagement",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Assign RFID Smart Card to Farmer",
+        "RFID Card UID / Serial",
+        "Select Farmer",
+        "Mark RFID Card as Lost"
+      ]
+    },
+    {
+      "app": "Dairy Admin",
+      "appSlug": "dfarm-dairy-admin",
+      "file": "src\\pages\\staff\\StaffManagement.tsx",
+      "component": "StaffManagement",
+      "apiCalls": [],
+      "hooks": [
+        "useQuery"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\auth\\Login.tsx",
+      "component": "Login",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useNavigate",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Click to auto-fill OTP"
+      ]
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\collection\\CollectionWorkspace.tsx",
+      "component": "CollectionWorkspace",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useHardware"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\customers\\CustomerDetailModal.tsx",
+      "component": "CustomerDetailModal",
+      "apiCalls": [],
+      "hooks": [
+        "useNavigate",
+        "useHardware"
+      ],
+      "sampleLabels": [
+        "Patron Profile & Biometric Ledger"
+      ]
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\customers\\CustomerLookup.tsx",
+      "component": "CustomerLookup",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useEffect"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\devices\\CameraConfigModal.tsx",
+      "component": "CameraConfigModal",
+      "apiCalls": [],
+      "hooks": [
+        "useState"
+      ],
+      "sampleLabels": [
+        "Camera & Biometric Sensor Calibration"
+      ]
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\devices\\DeviceDiagnostics.tsx",
+      "component": "DeviceDiagnostics",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useHardware"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\devices\\ReconnectWizard.tsx",
+      "component": "ReconnectWizard",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useHardware"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\sessions\\CloseSessionModal.tsx",
+      "component": "CloseSessionModal",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useHardware"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\sessions\\OpenSessionModal.tsx",
+      "component": "OpenSessionModal",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useHardware",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Open New Shift Collection Session"
+      ]
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\sessions\\SessionManagement.tsx",
+      "component": "SessionManagement",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useHardware"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\sessions\\SessionSummaryModal.tsx",
+      "component": "SessionSummaryModal",
+      "apiCalls": [],
+      "hooks": [
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Shift Reconciliation Summary Sheet"
+      ]
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\settings\\SettingsView.tsx",
+      "component": "SettingsView",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Purge Local Datastore"
+      ]
+    },
+    {
+      "app": "Milk Collection App",
+      "appSlug": "dfarm-collection-app",
+      "file": "src\\pages\\sync\\OfflineQueueView.tsx",
+      "component": "OfflineQueueView",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useEffect",
+        "useHardware"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\admins\\AdminListPage.tsx",
+      "component": "AdminListPage",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useNavigate",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\admins\\TransferAdminModal.tsx",
+      "component": "TransferAdminModal",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useAuth",
+        "useMutation",
+        "useQueryClient"
+      ],
+      "sampleLabels": [
+        "New Primary Admin Full Name",
+        "New Admin Mobile Number",
+        "New Admin Email (Optional)",
+        "Operational Justification for Transfer"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\alerts\\AlertsPage.tsx",
+      "component": "AlertsPage",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Resolve Platform Alert",
+        "Mandatory Resolution Notes"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\audit\\AuditLogsPage.tsx",
+      "component": "AuditLogsPage",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery"
+      ],
+      "sampleLabels": [
+        "Inspect Event Payload",
+        "Audit Event Cryptographic Record"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\auth\\ActivationPage.tsx",
+      "component": "ActivationPage",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useEffect",
+        "useSearchParams"
+      ],
+      "sampleLabels": [
+        "Account Activated Successfully"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\auth\\LoginPage.tsx",
+      "component": "LoginPage",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useNavigate",
+        "useLocation",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Provisioned Mobile Number",
+        "6-Digit Verification Code"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\dairies\\CreateDairyModal.tsx",
+      "component": "CreateDairyModal",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useForm",
+        "useAuth",
+        "useMutation",
+        "useQueryClient"
+      ],
+      "sampleLabels": [
+        "Dairy Business Name",
+        "Business Contact Phone",
+        "Primary Admin / Business Email",
+        "Premises / Street Address",
+        "District",
+        "State",
+        "Pincode",
+        "Primary Dairy Admin Full Name",
+        "Primary Admin Mobile Number"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\dairies\\DairyActivationModal.tsx",
+      "component": "DairyActivationModal",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useEffect",
+        "useAuth",
+        "useQueryClient"
+      ],
+      "sampleLabels": [
+        "Open Activation Page"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\dairies\\DairyDetailPage.tsx",
+      "component": "DairyDetailPage",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useParams",
+        "useNavigate",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth",
+        "useEffect"
+      ],
+      "sampleLabels": [
+        "Tenant Operational Timezone",
+        "Default In-App Locale",
+        "Offline Ingestion Grace Period (Hours)"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\dairies\\DairyListPage.tsx",
+      "component": "DairyListPage",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useNavigate",
+        "useQuery"
+      ],
+      "sampleLabels": [
+        "View Details",
+        "Reactivate Tenant",
+        "Suspend Tenant"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\dairies\\DairyLocationPicker.tsx",
+      "component": "DairyLocationPicker",
+      "apiCalls": [],
+      "hooks": [
+        "useEffect",
+        "useRef",
+        "useState",
+        "useCallback"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\dairies\\ReactivateDairyModal.tsx",
+      "component": "ReactivateDairyModal",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useAuth",
+        "useMutation",
+        "useQueryClient"
+      ],
+      "sampleLabels": [
+        "Reactivation Note / Compliance Audit Ref"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\dairies\\SuspendDairyModal.tsx",
+      "component": "SuspendDairyModal",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useAuth",
+        "useMutation",
+        "useQueryClient"
+      ],
+      "sampleLabels": [
+        "Mandatory Reason for Suspension"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\dashboard\\DashboardPage.tsx",
+      "component": "DashboardPage",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useNavigate",
+        "useQuery"
+      ],
+      "sampleLabels": [
+        "Total Registered Dairies",
+        "Onboarding Pipeline",
+        "Connected Hardware",
+        "Analyzers & digital scales across nodes",
+        "Platform Sync Health"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\monitoring\\MonitoringPage.tsx",
+      "component": "MonitoringPage",
+      "apiCalls": [],
+      "hooks": [
+        "useQuery"
+      ],
+      "sampleLabels": []
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\platform-access\\PlatformAccessPage.tsx",
+      "component": "PlatformAccessPage",
+      "apiCalls": [],
+      "hooks": [
+        "useQuery",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "PROVISIONED"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\reports\\ReportsPage.tsx",
+      "component": "ReportsPage",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useQuery",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "Report Category",
+        "Start Date",
+        "End Date"
+      ]
+    },
+    {
+      "app": "Super Admin",
+      "appSlug": "dfarm-super-admin",
+      "file": "src\\features\\support\\SupportAccessPage.tsx",
+      "component": "SupportAccessPage",
+      "apiCalls": [],
+      "hooks": [
+        "useState",
+        "useEffect",
+        "useSearchParams",
+        "useQuery",
+        "useMutation",
+        "useQueryClient",
+        "useAuth"
+      ],
+      "sampleLabels": [
+        "IN PROGRESS",
+        "Target Dairy Tenant",
+        "Support Ticket Reference ID",
+        "Diagnostic Scope",
+        "Authorized Window Duration",
+        "Mandatory Customer Support Justification"
+      ]
+    }
+  ]
+}

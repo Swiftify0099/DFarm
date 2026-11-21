@@ -4,71 +4,50 @@ import {
   CustomerLedgerEntry,
   CustomerKhataSummary,
 } from '../../types/ledger';
+import { normalizeLedgerEntry } from '../../utils/normalizers';
+import { useAuth } from '../auth/useAuth';
 
-export function useLedger() {
+export { normalizeLedgerEntry };
+
+export function useLedger(params?: { page?: number; pageSize?: number }) {
+  const { session } = useAuth();
+  const boundedParams = {
+    page: 1,
+    pageSize: 30,
+    ...params,
+  };
+
   const ledgerEntriesQuery = useQuery({
-    queryKey: ['ledger', 'entries'],
+    queryKey: ['ledger', 'entries', session?.dairyId, session?.customerId, boundedParams],
     queryFn: async (): Promise<CustomerLedgerEntry[]> => {
-      try {
-        const response = await apiClient.get<CustomerLedgerEntry[]>(
-          '/ledger/entries'
-        );
-        return response.data;
-      } catch {
-        return [
-          {
-            id: 'l1-01',
-            transactionDate: '2026-11-15T06:45:00Z',
-            type: 'MILK_CREDIT',
-            description: 'Morning Shift Milk Credit (14.5L Cow)',
-            creditAmount: 558.25,
-            debitAmount: 0,
-            runningBalance: 12480.0,
-            referenceId: 'COL-2026-11-15-M01',
-          },
-          {
-            id: 'l1-02',
-            transactionDate: '2026-11-13T10:30:00Z',
-            type: 'FEED_DEBIT',
-            description: 'Godrej Cattle Feed Mash (1 Bag x 50kg)',
-            creditAmount: 0,
-            debitAmount: 1850.0,
-            runningBalance: 11921.75,
-            referenceId: 'FEED-INV-8891',
-          },
-          {
-            id: 'l1-03',
-            transactionDate: '2026-11-10T14:00:00Z',
-            type: 'BANK_PAYOUT',
-            description: 'Cycle 30 Milk Payment via NEFT (UTR: HDFC890214)',
-            creditAmount: 0,
-            debitAmount: 14200.0,
-            runningBalance: 13771.75,
-            referenceId: 'PAY-NEFT-89021',
-          },
-        ];
-      }
+      const response = await apiClient.get<any>('/ledger/entries', {
+        params: boundedParams,
+      });
+      const list = Array.isArray(response.data)
+        ? response.data
+        : Array.isArray(response.data?.data)
+        ? response.data.data
+        : Array.isArray(response.data?.data?.items)
+        ? response.data.data.items
+        : [];
+      const normalized: CustomerLedgerEntry[] = list.map(normalizeLedgerEntry);
+      return normalized;
     },
     staleTime: 30000,
   });
 
   const khataSummaryQuery = useQuery({
-    queryKey: ['ledger', 'summary'],
+    queryKey: ['ledger', 'summary', session?.dairyId, session?.customerId],
     queryFn: async (): Promise<CustomerKhataSummary> => {
-      try {
-        const response = await apiClient.get<CustomerKhataSummary>(
-          '/ledger/summary'
-        );
-        return response.data;
-      } catch {
-        return {
-          customerId: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
-          currentBalance: 12480.0,
-          totalMilkEarnings: 28530.0,
-          totalDeductions: 16050.0,
-          lastUpdated: '15 Nov 2026, 06:50 AM',
-        };
-      }
+      const response = await apiClient.get<any>('/ledger/summary');
+      const raw = response.data?.data || response.data || {};
+      return {
+        customerId: String(raw.customerId || ''),
+        currentBalance: Number(raw.currentBalance ?? raw.balance ?? 0),
+        totalMilkEarnings: Number(raw.totalMilkEarnings ?? raw.totalEarnings ?? 0),
+        totalDeductions: Number(raw.totalDeductions ?? 0),
+        lastUpdated: String(raw.lastUpdated || new Date().toISOString()),
+      };
     },
     staleTime: 30000,
   });

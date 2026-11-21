@@ -18,6 +18,7 @@ export declare class DoveOtpService implements IOtpService {
     private readonly authorizedAdminPhones;
     registerAuthorizedAdminPhone(phone: string): void;
     unregisterAuthorizedAdminPhone(phone: string): void;
+    resetCooldown(phone: string): void;
     private getStorageKey;
     private getHmacSecret;
     /**
@@ -35,6 +36,8 @@ export declare class DoveOtpService implements IOtpService {
     sendOtp(mobileNumber: string, purpose: 'OPERATOR_LOGIN' | 'CUSTOMER_AUTH' | 'ADMIN_LOGIN', ipAddress?: string): Promise<{
         success: boolean;
         message: string;
+        cooldownSeconds?: number;
+        expiresAt?: string;
         previewOtp?: string;
     }>;
     /**

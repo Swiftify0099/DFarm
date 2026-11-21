@@ -14,6 +14,13 @@ import {
   KeyRound,
   LogOut,
   HelpCircle,
+  MapPin,
+  FileCheck2,
+  Percent,
+  HardDrive,
+  ShieldCheck,
+  Settings,
+  Database,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 
@@ -33,41 +40,61 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const navItems = [
     {
       to: '/',
-      label: 'Platform Overview',
+      label: 'Dashboard',
       icon: <LayoutDashboard className="w-4 h-4" />,
     },
     {
       to: '/dairies',
-      label: 'Dairy Tenants',
+      label: 'Dairy Management',
       icon: <Building2 className="w-4 h-4" />,
       badge: pendingDairiesCount > 0 ? `${pendingDairiesCount} new` : undefined,
       badgeColor: 'bg-amber-100 text-amber-800 border-amber-200',
     },
     {
+      to: '/databases',
+      label: 'Tenant Database Manager',
+      icon: <Database className="w-4 h-4" />,
+    },
+    {
       to: '/admins',
-      label: 'Primary Dairy Admins',
+      label: 'Admin & Operator Management',
       icon: <Users2 className="w-4 h-4" />,
     },
     {
-      to: '/monitoring',
-      label: 'System Health',
-      icon: <Activity className="w-4 h-4" />,
+      to: '/locations',
+      label: 'Dairy Locations & Discovery',
+      icon: <MapPin className="w-4 h-4" />,
     },
     {
-      to: '/alerts',
-      label: 'Platform Alerts',
-      icon: <BellRing className="w-4 h-4" />,
+      to: '/policies/rate',
+      label: 'Global Rate Policies',
+      icon: <FileCheck2 className="w-4 h-4" />,
+    },
+    {
+      to: '/policies/fat-snf',
+      label: 'Global FAT/SNF Policies',
+      icon: <Percent className="w-4 h-4" />,
+    },
+    {
+      to: '/hardware',
+      label: 'Hardware Inventory & Allocation',
+      icon: <HardDrive className="w-4 h-4" />,
+    },
+    {
+      to: '/amc',
+      label: 'AMC & Service Management',
+      icon: <ShieldCheck className="w-4 h-4" />,
+    },
+    {
+      to: '/monitoring',
+      label: 'Platform Monitoring & Alerts',
+      icon: <Activity className="w-4 h-4" />,
       badge: openAlertsCount > 0 ? String(openAlertsCount) : undefined,
       badgeColor: 'bg-rose-100 text-rose-800 border-rose-200',
     },
     {
-      to: '/audit',
-      label: 'Audit Trail',
-      icon: <FileText className="w-4 h-4" />,
-    },
-    {
       to: '/support-access',
-      label: 'Controlled Support',
+      label: 'Support Management',
       icon: <ShieldAlert className="w-4 h-4" />,
     },
     {
@@ -76,9 +103,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: <BarChart3 className="w-4 h-4" />,
     },
     {
-      to: '/platform-access',
-      label: 'Access & Permissions',
-      icon: <KeyRound className="w-4 h-4" />,
+      to: '/audit',
+      label: 'Audit Logs',
+      icon: <FileText className="w-4 h-4" />,
+    },
+    {
+      to: '/settings',
+      label: 'Platform Settings',
+      icon: <Settings className="w-4 h-4" />,
     },
   ]
 

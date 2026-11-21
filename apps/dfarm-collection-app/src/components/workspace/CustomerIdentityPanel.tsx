@@ -1,14 +1,27 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useHardware } from '@/context/HardwareContext'
+import { useAuth } from '@/context/AuthContext'
 import { ClayCard, ClayButton, ClayBadge } from '@/components/ui'
 import { FaceScannerReticle, RfidWaveVisual } from '@/assets/illustrations'
-import { Camera, Radio, Search, CheckCircle, AlertTriangle, RefreshCw, Video, VideoOff } from 'lucide-react'
+import {
+  Camera,
+  Radio,
+  Search,
+  CheckCircle,
+  AlertTriangle,
+  RefreshCw,
+  Video,
+  VideoOff,
+  UserCheck,
+  CornerDownLeft,
+} from 'lucide-react'
 import type { CustomerIdentity } from '@/types'
 import { useCamera } from '@/hooks/useCamera'
-import { getStoredOperatorAuth } from '@/api/client'
+import { getStoredOperatorAuth, customersApi } from '@/api/client'
+import { voiceAnnouncer } from '@/drivers'
 
 interface CustomerIdentityPanelProps {
-  onCustomerSelected: (customer: CustomerIdentity) => void
+  onCustomerSelected: (customer: CustomerIdentity, method?: string) => void
   onOpenManualSearch: () => void
 }
 
@@ -21,15 +34,53 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
     rfidState,
     enrolledTemplates,
     customersMap,
-    simulateFaceDetection,
     resetFaceState,
     simulateRfidScan,
     resetRfidState,
+    updateFaceState,
+    refreshCustomersAndTemplates,
+    isRecognitionLocked,
+    handleFacePresence,
+    startCollectionAttempt,
+    collectionWorkflowState,
+    cancelCollectionAttempt,
   } = useHardware()
 
+  const [searchInput, setSearchInput] = useState('')
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [searchResults, setSearchResults] = useState<CustomerIdentity[]>([])
+  const [isSearching, setIsSearching] = useState(false)
   const [isSimulating, setIsSimulating] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const { dairyId } = getStoredOperatorAuth()
+
+  const { dairyId: authDairyId } = useAuth()
+  const { dairyId: storedDairyId } = getStoredOperatorAuth()
+  const activeDairyId = authDairyId || storedDairyId || '00000000-0000-0000-0000-000000000001'
+
+  // Dynamic refresh of customers & face templates when dairy context is established
+  useEffect(() => {
+    if (activeDairyId) {
+      refreshCustomersAndTemplates(activeDairyId)
+    }
+  }, [activeDairyId, refreshCustomersAndTemplates])
+
+  // FIX: Stable callbacks to prevent useCamera frame-loop restarts on each render.
+  const handleCustomerMatchedCamera = useCallback(
+    (customer: CustomerIdentity) => {
+      const res = startCollectionAttempt(customer, 'FACE_YUNET_SFACE')
+      if (res.success) {
+        onCustomerSelected(customer, 'FACE_RECOGNITION')
+      }
+    },
+    [startCollectionAttempt, onCustomerSelected]
+  )
+
+  const handleFaceStateChange = useCallback(
+    (state: Partial<import('@/types').FaceRecognitionState>) => {
+      updateFaceState(state)
+    },
+    [updateFaceState]
+  )
 
   // Real Hardware Camera Hook
   const {
@@ -43,14 +94,16 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
     latencyMs: cameraLatency,
     startCamera,
     stopCamera,
+    retryCamera,
     resetMatch: resetCameraMatch,
   } = useCamera({
-    activeDairyId: dairyId || '00000000-0000-0000-0000-000000000001',
+    activeDairyId,
     enrolledTemplates,
     customersMap,
-    onCustomerMatched: (customer) => {
-      onCustomerSelected(customer)
-    },
+    onCustomerMatched: handleCustomerMatchedCamera,
+    onFaceStateChange: handleFaceStateChange,
+    isRecognitionLocked,
+    onFacePresence: handleFacePresence,
   })
 
   // Canvas Overlay Rendering for Real-time YuNet Bounding Box & 5-point Landmarks
@@ -100,12 +153,73 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
     }
   }, [isCameraActive, boundingBox, cameraStatus, cameraConfidence, videoRef])
 
-  const handleSimulateFace = async (code?: string) => {
-    setIsSimulating(true)
-    const matched = await simulateFaceDetection(code)
-    setIsSimulating(false)
-    if (matched) {
-      onCustomerSelected(matched)
+  // Direct Farmer Keyboard Lookup (Farmer Code, Mobile Number, or Barcode)
+  const handleFarmerLookup = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    const query = searchInput.trim()
+    if (!query) return
+
+    setIsSearching(true)
+    setSearchError(null)
+    setSearchResults([])
+
+    try {
+      // 1. Direct in-memory map lookup (Instant O(1))
+      const directMatch =
+        customersMap.get(query) ||
+        customersMap.get(query.toUpperCase()) ||
+        customersMap.get(query.toLowerCase())
+
+      if (directMatch) {
+        const res = startCollectionAttempt(directMatch, 'MANUAL_SEARCH')
+        if (res.success) {
+          onCustomerSelected(directMatch, 'DIRECT_CODE_ENTRY')
+          setSearchInput('')
+          setSearchResults([])
+          setSearchError(null)
+        } else {
+          setSearchError(res.error || 'Cannot start collection')
+        }
+        return
+      }
+
+      // 2. Query customer directory with search string
+      const list = await customersApi.list({ search: query, organizationId: activeDairyId || undefined })
+      if (!list || list.length === 0) {
+        setSearchError(`No patron found matching "${query}". Press F2 for directory.`)
+        return
+      }
+
+      if (list.length === 1) {
+        const res = startCollectionAttempt(list[0], 'MANUAL_SEARCH')
+        if (res.success) {
+          onCustomerSelected(list[0], 'DIRECT_CODE_ENTRY')
+          setSearchInput('')
+          setSearchResults([])
+          setSearchError(null)
+        } else {
+          setSearchError(res.error || 'Cannot start collection')
+        }
+      } else {
+        // Multiple matches: show interactive selection pills
+        setSearchResults(list)
+      }
+    } catch (err: any) {
+      setSearchError(err.message || 'Lookup failed. Please verify connection.')
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  const handleSelectSearchResult = (cust: CustomerIdentity) => {
+    const res = startCollectionAttempt(cust, 'MANUAL_SEARCH')
+    if (res.success) {
+      onCustomerSelected(cust, 'MANUAL_SEARCH')
+      setSearchInput('')
+      setSearchResults([])
+      setSearchError(null)
+    } else {
+      setSearchError(res.error || 'Cannot start collection')
     }
   }
 
@@ -114,38 +228,49 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
     const matched = await simulateRfidScan(uid)
     setIsSimulating(false)
     if (matched) {
-      onCustomerSelected(matched)
+      onCustomerSelected(matched, 'RFID_CARD')
     }
   }
 
   const handleResetAll = () => {
+    cancelCollectionAttempt('Manual reset')
     resetCameraMatch()
     resetFaceState()
     resetRfidState()
+    setSearchInput('')
+    setSearchError(null)
+    setSearchResults([])
   }
 
   const activeCustomer = cameraCustomer || faceState.matchedCustomer || rfidState.matchedCustomer
-  const effectiveStatus = isCameraActive ? cameraStatus : faceState.status
+  const effectiveStatus =
+    collectionWorkflowState !== 'IDLE' && collectionWorkflowState !== 'SCANNING'
+      ? collectionWorkflowState
+      : isCameraActive
+      ? cameraStatus
+      : faceState.status
 
   return (
-    <ClayCard className="flex flex-col h-full overflow-hidden p-4">
-      {/* Header with hardware mode tabs */}
-      <div className="flex items-center justify-between pb-3 border-b border-border-subtle">
+    <ClayCard className="flex flex-col h-full overflow-hidden p-3 md:p-4 bg-cream">
+      {/* Header with reticle, title, and Camera Start/Stop Toggle */}
+      <div className="flex items-center justify-between pb-2.5 border-b border-border-subtle">
         <div className="flex items-center space-x-2">
-          <FaceScannerReticle size={24} />
+          <FaceScannerReticle size={22} />
           <div>
-            <h2 className="text-sm font-bold text-text-primary">Biometric & RFID Identification</h2>
-            <p className="text-[11px] text-text-muted">OpenCV YuNet + SFace INT8 ONNX Engine</p>
+            <h2 className="text-sm font-bold text-text-primary leading-tight">
+              Farmer Identification
+            </h2>
+            <p className="text-[10px] text-text-muted">YuNet + SFace INT8 • RFID Wedge • Code Input</p>
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-1.5">
           {/* Camera Start / Stop Toggle */}
           <ClayButton
             variant={isCameraActive ? 'danger' : 'secondary'}
             size="sm"
             onClick={isCameraActive ? stopCamera : startCamera}
-            className="flex items-center space-x-1 text-xs py-1 px-2.5"
+            className="flex items-center space-x-1 text-xs py-1 px-2"
           >
             {isCameraActive ? (
               <>
@@ -177,8 +302,97 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
         </div>
       </div>
 
-      {/* Main Scanner Viewport Area */}
-      <div className="mt-3 relative flex-1 min-h-[240px] bg-stone-900 rounded-2xl overflow-hidden flex flex-col items-center justify-center border-2 border-stone-800 shadow-inner">
+      {/* Prominent Fast Farmer Code / Mobile Input Bar */}
+      <div className="mt-2.5">
+        <form onSubmit={handleFarmerLookup} className="flex items-center gap-1.5">
+          <div className="relative flex-1">
+            <input
+              id="farmer-code-input"
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  handleFarmerLookup()
+                }
+              }}
+              placeholder="Enter Farmer Code (e.g. C-101), Mobile, or RFID & [Enter]..."
+              className="w-full bg-cream-dark border-2 border-border-subtle focus:border-primary-orange rounded-xl px-3 py-2 text-xs font-semibold text-text-primary placeholder:text-text-muted focus:outline-none transition-colors shadow-inner"
+              autoFocus
+            />
+            {searchInput && (
+              <button
+                type="button"
+                onClick={() => setSearchInput('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary text-xs"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <ClayButton
+            type="submit"
+            variant="primary"
+            size="sm"
+            disabled={isSearching || !searchInput.trim()}
+            className="shrink-0 px-3 py-2 text-xs flex items-center space-x-1"
+          >
+            {isSearching ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <CornerDownLeft className="w-3.5 h-3.5" />
+            )}
+            <span>Lookup</span>
+          </ClayButton>
+        </form>
+
+        {/* Inline Search Error Banner */}
+        {searchError && (
+          <div className="mt-1.5 p-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center justify-between">
+            <span className="flex items-center space-x-1">
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0 mr-1" />
+              <span>{searchError}</span>
+            </span>
+            <button
+              onClick={() => setSearchError(null)}
+              className="text-xs text-rose-600 font-bold hover:underline shrink-0 ml-2"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Multiple Matches Resolution List */}
+        {searchResults.length > 0 && (
+          <div className="mt-2 p-2 bg-peach/40 border border-primary-orange/30 rounded-xl space-y-1.5">
+            <p className="text-[11px] font-bold text-text-secondary">
+              Multiple matches found ({searchResults.length}) — click to select:
+            </p>
+            <div className="max-h-28 overflow-y-auto space-y-1">
+              {searchResults.map((cust) => (
+                <div
+                  key={cust.id}
+                  onClick={() => handleSelectSearchResult(cust)}
+                  className="px-2 py-1 bg-cream rounded-lg border border-border-subtle hover:border-primary-orange flex items-center justify-between text-xs cursor-pointer hover:bg-peach/30 transition-colors"
+                >
+                  <span className="font-semibold text-text-primary">
+                    {cust.fullName}{' '}
+                    <span className="text-[11px] font-mono text-primary-orange">
+                      ({cust.customerCode})
+                    </span>
+                  </span>
+                  <span className="text-[10px] text-text-muted">{cust.village}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Main Scanner Viewport Area (Compact 190px height for optimal screen fit) */}
+      <div className="mt-2.5 relative h-[190px] bg-stone-900 rounded-2xl overflow-hidden flex flex-col items-center justify-center border-2 border-stone-800 shadow-inner shrink-0">
         {/* Real Live Camera Video Feed */}
         <video
           ref={videoRef}
@@ -207,7 +421,7 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
               style={{
                 backgroundImage:
                   'linear-gradient(to right, #00E5FF 1px, transparent 1px), linear-gradient(to bottom, #00E5FF 1px, transparent 1px)',
-                backgroundSize: '24px 24px',
+                backgroundSize: '20px 20px',
               }}
             />
           </>
@@ -215,61 +429,53 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
 
         {/* Camera Permission / Error Alert */}
         {cameraError && (
-          <div className="relative z-20 flex flex-col items-center p-4 text-center space-y-2 max-w-sm">
-            <div className="w-12 h-12 rounded-full bg-rose-500/20 border-2 border-rose-400 flex items-center justify-center text-rose-400">
-              <AlertTriangle className="w-6 h-6" />
+          <div className="relative z-20 flex flex-col items-center p-3 text-center space-y-1.5 max-w-sm">
+            <div className="w-10 h-10 rounded-full bg-rose-500/20 border-2 border-rose-400 flex items-center justify-center text-rose-400">
+              <AlertTriangle className="w-5 h-5" />
             </div>
             <p className="text-xs font-bold text-rose-300">Camera Warning</p>
-            <p className="text-[11px] text-stone-300">{cameraError}</p>
-            <ClayButton
-              variant="secondary"
-              size="sm"
-              onClick={startCamera}
-              className="text-xs mt-2"
-            >
+            <p className="text-[11px] text-stone-300 leading-tight">{cameraError}</p>
+            <ClayButton variant="secondary" size="sm" onClick={retryCamera} className="text-xs mt-1">
               Retry Camera
             </ClayButton>
           </div>
         )}
 
         {/* Waiting For Face State */}
-        {!cameraError && (effectiveStatus === 'WAITING_FOR_FACE' || (!isCameraActive && faceState.status === 'WAITING_FOR_FACE')) && (
-          <div className="relative z-10 flex flex-col items-center space-y-3 p-4 text-center">
-            <div className="w-20 h-20 rounded-full border-2 border-dashed border-primary-orange/60 flex items-center justify-center animate-pulse">
-              <Camera className="w-8 h-8 text-primary-orange/80" />
+        {!cameraError &&
+          (effectiveStatus === 'WAITING_FOR_FACE' ||
+            (!isCameraActive && faceState.status === 'WAITING_FOR_FACE')) && (
+            <div className="relative z-10 flex flex-col items-center space-y-2 p-3 text-center">
+              <div className="w-14 h-14 rounded-full border-2 border-dashed border-primary-orange/60 flex items-center justify-center animate-pulse">
+                <Camera className="w-6 h-6 text-primary-orange/80" />
+              </div>
+              <p className="text-xs text-stone-200 font-medium tracking-wide">
+                {isCameraActive ? 'Align face in camera or tap RFID card' : 'Camera ready or tap RFID card'}
+              </p>
+              <span className="text-[10px] text-stone-400 font-mono">
+                YuNet 60fps • SFace INT8 (128-D)
+              </span>
             </div>
-            <p className="text-xs text-stone-200 font-medium tracking-wide">
-              {isCameraActive ? 'Align face in camera frame or tap RFID card' : 'Start camera or tap RFID / test face'}
-            </p>
-            <span className="text-[10px] text-stone-400 font-mono">
-              YuNet 60fps • 5-point facial landmark tracking • SFace INT8 (128-D)
-            </span>
-          </div>
-        )}
+          )}
 
         {/* Matching In Progress State */}
         {(effectiveStatus === 'MATCHING_CUSTOMER' || faceState.status === 'EMBEDDING_GENERATED') && (
-          <div className="relative z-20 flex flex-col items-center space-y-2 bg-stone-900/80 p-3 rounded-xl border border-cyan-500/40">
-            <div className="w-6 h-6 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
-            <p className="text-xs text-cyan-300 font-mono">
-              Generating 128-D SFace Vector & Matching Dairy Scope...
-            </p>
+          <div className="relative z-20 flex flex-col items-center space-y-2 bg-stone-900/80 p-2.5 rounded-xl border border-cyan-500/40">
+            <div className="w-5 h-5 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+            <p className="text-xs text-cyan-300 font-mono">Matching Dairy Biometric Vector...</p>
           </div>
         )}
 
         {/* Customer Matched Result Banner */}
         {effectiveStatus === 'CUSTOMER_MATCHED' && activeCustomer && (
-          <div className="relative z-20 flex flex-col items-center p-3 text-center space-y-2 bg-stone-900/85 rounded-xl border border-emerald-500/50 backdrop-blur-sm max-w-xs shadow-lg">
-            <div className="w-12 h-12 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
-              <CheckCircle className="w-6 h-6" />
+          <div className="relative z-20 flex flex-col items-center p-2.5 text-center space-y-1.5 bg-stone-900/85 rounded-xl border border-emerald-500/50 backdrop-blur-sm max-w-xs shadow-lg">
+            <div className="w-9 h-9 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+              <CheckCircle className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-sm font-bold text-emerald-300">{activeCustomer.fullName}</p>
-              <p className="text-xs text-stone-300 font-mono">
-                Code: {activeCustomer.customerCode} • Confidence: {isCameraActive ? cameraConfidence : faceState.confidenceScore}%
-              </p>
-              <p className="text-[11px] text-stone-400">
-                Dairy: {activeCustomer.dairyId?.substring(0, 8)}... • Milk: {activeCustomer.preferredCategory}
+              <p className="text-xs font-bold text-emerald-300">{activeCustomer.fullName}</p>
+              <p className="text-[11px] text-stone-300 font-mono">
+                Code: {activeCustomer.customerCode} • {isCameraActive ? cameraConfidence : faceState.confidenceScore}% Match
               </p>
             </div>
           </div>
@@ -277,106 +483,75 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
 
         {/* Unknown Person Alert */}
         {effectiveStatus === 'UNKNOWN_PERSON' && (
-          <div className="relative z-20 flex flex-col items-center p-3 text-center space-y-2 bg-stone-900/85 rounded-xl border border-rose-500/50 backdrop-blur-sm max-w-xs shadow-lg">
-            <div className="w-12 h-12 rounded-full bg-rose-500/20 border-2 border-rose-400 flex items-center justify-center text-rose-400">
-              <AlertTriangle className="w-6 h-6" />
+          <div className="relative z-20 flex flex-col items-center p-2.5 text-center space-y-1.5 bg-stone-900/85 rounded-xl border border-rose-500/50 backdrop-blur-sm max-w-xs shadow-lg">
+            <div className="w-9 h-9 rounded-full bg-rose-500/20 border-2 border-rose-400 flex items-center justify-center text-rose-400">
+              <AlertTriangle className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-sm font-bold text-rose-300">Unrecognized Face</p>
-              <p className="text-xs text-stone-300">
-                Face is not registered or approved for this dairy. Use manual lookup or RFID.
-              </p>
+              <p className="text-xs font-bold text-rose-300">Unrecognized Face</p>
+              <p className="text-[10px] text-stone-300">Face not enrolled for this dairy. Use code or RFID.</p>
             </div>
           </div>
         )}
 
         {/* RFID Matched Display */}
         {rfidState.status === 'MATCHED' && rfidState.matchedCustomer && (
-          <div className="relative z-20 flex flex-col items-center p-3 text-center space-y-2 bg-stone-900/85 rounded-xl border border-orange-500/50 backdrop-blur-sm max-w-xs">
-            <div className="w-12 h-12 rounded-full bg-orange-500/20 border-2 border-primary-orange flex items-center justify-center text-primary-orange">
-              <Radio className="w-6 h-6" />
+          <div className="relative z-20 flex flex-col items-center p-2.5 text-center space-y-1.5 bg-stone-900/85 rounded-xl border border-orange-500/50 backdrop-blur-sm max-w-xs">
+            <div className="w-9 h-9 rounded-full bg-orange-500/20 border-2 border-primary-orange flex items-center justify-center text-primary-orange">
+              <Radio className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-sm font-bold text-orange-200">
-                {rfidState.matchedCustomer.fullName}
-              </p>
-              <p className="text-xs text-stone-300 font-mono">
-                RFID Card: {rfidState.cardUid} • Code: {rfidState.matchedCustomer.customerCode}
+              <p className="text-xs font-bold text-orange-200">{rfidState.matchedCustomer.fullName}</p>
+              <p className="text-[10px] text-stone-300 font-mono">
+                Card: {rfidState.cardUid} • Code: {rfidState.matchedCustomer.customerCode}
               </p>
             </div>
           </div>
         )}
 
         {/* Stream latency telemetry pill */}
-        <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/70 text-[10px] text-stone-300 font-mono border border-stone-700 z-20">
-          Status: {isCameraActive ? 'LIVE CAM' : 'STANDBY'} • Latency: {isCameraActive ? cameraLatency : faceState.latencyMs}ms • SFace: INT8 (128-D)
+        <div className="absolute bottom-1.5 left-2 px-2 py-0.5 rounded bg-black/70 text-[10px] text-stone-300 font-mono border border-stone-700 z-20">
+          {isCameraActive ? 'LIVE CAM' : 'STANDBY'} • Latency: {isCameraActive ? cameraLatency : faceState.latencyMs}ms
         </div>
       </div>
 
-      {/* Hardware Simulation & Manual Controls */}
-      <div className="mt-3 space-y-2">
-        <p className="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
-          Identification Controls:
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          <ClayButton
-            variant="secondary"
-            size="sm"
-            onClick={() => handleSimulateFace('C-101')}
-            disabled={isSimulating}
-            className="flex items-center justify-center space-x-1.5"
-          >
-            <Camera className="w-3.5 h-3.5 text-primary-orange" />
-            <span>Scan Face (C-101)</span>
-          </ClayButton>
+      {/* Quick Test Identification Controls */}
+      <div className="mt-2.5 space-y-1.5">
+        <div className="flex items-center justify-between text-[11px] font-bold text-text-secondary uppercase tracking-wider">
+          <span>Quick Identification:</span>
+          {(effectiveStatus !== 'WAITING_FOR_FACE' || rfidState.status !== 'IDLE' || activeCustomer) && (
+            <button
+              onClick={handleResetAll}
+              className="text-text-muted hover:text-text-primary text-[10px] flex items-center"
+            >
+              <RefreshCw className="w-2.5 h-2.5 mr-1" />
+              Reset
+            </button>
+          )}
+        </div>
 
-          <ClayButton
-            variant="secondary"
-            size="sm"
-            onClick={() => handleSimulateFace('C-102')}
-            disabled={isSimulating}
-            className="flex items-center justify-center space-x-1.5"
-          >
-            <Camera className="w-3.5 h-3.5 text-primary-orange" />
-            <span>Scan Face (C-102)</span>
-          </ClayButton>
-
+        <div className="grid grid-cols-2 gap-1.5">
           <ClayButton
             variant="outline"
             size="sm"
             onClick={() => handleSimulateRfid('RFID-94A2B81C')}
             disabled={isSimulating}
-            className="flex items-center justify-center space-x-1.5"
+            className="flex items-center justify-center space-x-1 text-xs py-1"
           >
-            <RfidWaveVisual size={16} />
-            <span>Tap RFID (Patil)</span>
+            <RfidWaveVisual size={14} />
+            <span>RFID (Patil)</span>
           </ClayButton>
 
           <ClayButton
             variant="outline"
             size="sm"
             onClick={onOpenManualSearch}
-            className="flex items-center justify-center space-x-1.5"
+            className="flex items-center justify-center space-x-1 text-xs py-1"
           >
-            <Search className="w-3.5 h-3.5 text-primary-orange" />
-            <span>Manual Search (F2)</span>
+            <Search className="w-3 h-3 text-primary-orange" />
+            <span>Directory (F2)</span>
           </ClayButton>
         </div>
-
-        {/* Reset / Clear Button */}
-        {(effectiveStatus !== 'WAITING_FOR_FACE' || rfidState.status !== 'IDLE' || activeCustomer) && (
-          <div className="pt-1 flex justify-end">
-            <ClayButton
-              variant="ghost"
-              size="sm"
-              onClick={handleResetAll}
-              className="text-text-muted hover:text-text-primary text-xs"
-            >
-              <RefreshCw className="w-3 h-3 mr-1" />
-              Reset Identifier
-            </ClayButton>
-          </div>
-        )}
       </div>
     </ClayCard>
   )

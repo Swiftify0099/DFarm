@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="375" height="812" viewBox="0 0 375 812" fill="none">
+  <!-- Background -->
+  <rect width="375" height="812" fill="#F4F8F3"/>
+  <text x="32" y="38" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#1C2A1E">9:41</text>
+  
+  <!-- Header -->
+  <g transform="translate(24, 60)">
+    <text x="0" y="24" font-family="system-ui, sans-serif" font-size="22" font-weight="700" fill="#1C2A1E">नवीन डेअरी नोंदणी अर्ज</text>
+    <text x="0" y="46" font-family="system-ui, sans-serif" font-size="13" fill="#4D6352">निवडलेली डेअरी: राजारामबापू पाटील दूध संघ</text>
+  </g>
+  
+  <!-- Selected Dairy Locked Banner -->
+  <g transform="translate(24, 120)">
+    <rect width="327" height="60" rx="16" fill="#FFFFFF" stroke="#C8E6C9" filter="drop-shadow(0px 4px 10px rgba(0,0,0,0.04))"/>
+    <text x="16" y="26" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1B5E20">राजारामबापू पाटील दूध संघ (इस्लामपूर)</text>
+    <text x="16" y="46" font-family="system-ui, sans-serif" font-size="11" fill="#829787">मुख्य संकलन केंद्र • कोड: RAJARAM-03</text>
+  </g>
+  
+  <!-- Form Field 1: Name -->
+  <g transform="translate(24, 196)">
+    <text x="4" y="0" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#4D6352">शेतकऱ्याचे संपूर्ण नाव</text>
+    <rect y="10" width="327" height="50" rx="14" fill="#FFFFFF" stroke="#E0E8E1"/>
+    <text x="16" y="41" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#1C2A1E">बाळासाहेब संभाजी पाटील</text>
+  </g>
+  
+  <!-- Form Field 2: Mobile (Pre-filled & Locked) -->
+  <g transform="translate(24, 272)">
+    <text x="4" y="0" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#4D6352">नोंदणीकृत मोबाईल नंबर (लॉक)</text>
+    <rect y="10" width="327" height="50" rx="14" fill="#F4F8F3" stroke="#E0E8E1"/>
+    <text x="16" y="41" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#829787">+91 98765 43210 🔒</text>
+  </g>
+  
+  <!-- Form Field 3: Milk Type Selector -->
+  <g transform="translate(24, 348)">
+    <text x="4" y="0" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#4D6352">दूध पुरवठा प्रकार (Milk Supply Type)</text>
+    <!-- Cow Button -->
+    <rect y="10" width="102" height="42" rx="12" fill="#FFFFFF" stroke="#E0E8E1"/>
+    <text x="51" y="36" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" fill="#4D6352">गाय (Cow)</text>
+    
+    <!-- Buffalo Button (Selected) -->
+    <rect x="112" y="10" width="102" height="42" rx="12" fill="#1B5E20"/>
+    <text x="163" y="36" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="#FFFFFF">म्हैस (Buffalo)</text>
+    
+    <!-- Both Button -->
+    <rect x="224" y="10" width="103" height="42" rx="12" fill="#FFFFFF" stroke="#E0E8E1"/>
+    <text x="275" y="36" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" fill="#4D6352">दोन्ही (Both)</text>
+  </g>
+  
+  <!-- Form Field 4: Face Biometric Capture Card -->
+  <g transform="translate(24, 420)">
+    <rect width="327" height="110" rx="18" fill="#FFFFFF" stroke="#1B5E20" stroke-width="1.5" stroke-dasharray="6 4"/>
+    <circle cx="50" cy="55" r="26" fill="#E8F5E9"/>
+    <text x="50" y="60" text-anchor="middle" font-size="20">📸</text>
+    
+    <text x="90" y="44" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1C2A1E">चेहरा बायोमेट्रिक पडताळणी</text>
+    <text x="90" y="64" font-family="system-ui, sans-serif" font-size="11" fill="#4D6352">कियोस्कवर थेट ओळखीसाठी फोटो आवश्यक</text>
+    <rect x="90" y="74" width="110" height="24" rx="12" fill="#E8F5E9"/>
+    <text x="145" y="90" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#1B5E20">✓ फोटो कॅप्चर पूर्ण</text>
+  </g>
+  
+  <!-- Submit Button -->
+  <g transform="translate(24, 550)">
+    <rect width="327" height="54" rx="16" fill="#1B5E20" filter="drop-shadow(0px 6px 14px rgba(27,94,32,0.3))"/>
+    <text x="163" y="33" text-anchor="middle" font-family="system-ui, sans-serif" font-size="15" font-weight="700" fill="#FFFFFF">नोंदणी अर्ज सादर करा (Submit)</text>
+  </g>
+</svg>

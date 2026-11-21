@@ -59,7 +59,7 @@ export declare class BatchService {
         processedInCall: number;
         items: any[];
     }>;
-    getBatchById(batchId: string, _auth: AuthContext): Promise<{
+    getBatchById(batchId: string, auth: AuthContext): Promise<{
         id: any;
         organizationId: any;
         centerId: any;
@@ -95,6 +95,18 @@ export declare class BatchService {
             settledAt: any;
         }[];
     }>;
+    exportBatch(batchId: string, format: string, auth: AuthContext): Promise<{
+        batchId: string;
+        batchNumber: string;
+        format: string;
+        fileName: string;
+        rowCount: number;
+        totalAmount: number;
+        checksumSha256: string;
+        downloadToken: string;
+        expiresInSeconds: number;
+    }>;
+    downloadBatch(token: string): import("./serializers/IBankFileSerializer.js").SerializedBankFile;
 }
 export declare const batchService: BatchService;
 //# sourceMappingURL=batch.service.d.ts.map

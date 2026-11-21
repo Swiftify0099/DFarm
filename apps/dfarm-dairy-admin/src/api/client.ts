@@ -73,9 +73,9 @@ export const createHeaders = (customHeaders?: HeadersInit): HeadersInit => {
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  // Tenant Isolation: Explicit tenant scoping header
+  // Tenant Isolation: Canonical tenant scoping header
   if (dairyId) {
-    headers['X-Dairy-Tenant-ID'] = dairyId
+    headers['X-Dairy-Id'] = dairyId
   }
 
   if (customHeaders) {
@@ -83,4 +83,57 @@ export const createHeaders = (customHeaders?: HeadersInit): HeadersInit => {
   }
 
   return headers
+}
+
+/**
+ * Resolves the canonical API base URL with safe normalization.
+ * Handles trailing slashes, ensures /api/v1 prefix, and protects against silent localhost fallbacks.
+ */
+export const getApiBaseUrl = (): string => {
+  const envUrl = ((import.meta as any).env?.VITE_API_BASE_URL || '').trim()
+
+  if (envUrl) {
+    const sanitized = envUrl.replace(/\/+$/, '')
+    return sanitized.endsWith('/api/v1') ? sanitized : `${sanitized}/api/v1`
+  }
+
+  // Local development fallback to default port 4000
+  if (import.meta.env.DEV) {
+    return 'http://localhost:4000/api/v1'
+  }
+
+  // In production, warn if VITE_API_BASE_URL was omitted during build
+  if (typeof window !== 'undefined' && import.meta.env.PROD) {
+    console.warn(
+      '[DFarm Dairy Admin] VITE_API_BASE_URL is not configured in production. ' +
+      'API requests will fall back to relative path /api/v1.'
+    )
+  }
+  return '/api/v1'
+}
+
+export const apiRequest = async <T = any>(endpoint: string, options: RequestInit = {}): Promise<T> => {
+  const baseUrl = getApiBaseUrl()
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+  const url = `${baseUrl}${cleanEndpoint}`
+  const headers = createHeaders(options.headers)
+
+  const res = await fetch(url, {
+    ...options,
+    headers,
+  })
+
+  if (!res.ok) {
+    let errMessage = `HTTP ${res.status}: ${res.statusText}`
+    try {
+      const data = await res.json()
+      errMessage = data.error || data.message || errMessage
+    } catch {
+      // json parse failed
+    }
+    throw new ApiError(errMessage, 'API_ERROR', res.status)
+  }
+
+  const data = await res.json()
+  return data
 }

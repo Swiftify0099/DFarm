@@ -4,9 +4,13 @@ import { mockBackend } from '@/services/mockBackend'
 import { storage } from '@/services/storage'
 
 describe('Dairy Admin Two-Factor Activation Flow', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     storage.clear()
     vi.restoreAllMocks()
+    mockBackend.purgeAdminAndRelatedRecords('7755995615')
+    mockBackend.purgeAdminAndRelatedRecords('7507495615')
+    // Stub fetch to prevent test contamination from local background dev server on port 4000
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.reject(new Error('Network offline in unit test')))
   })
 
   it('validates activation token and fallback dairy code successfully', async () => {

@@ -1,13 +1,16 @@
 import { CustomerNotFoundError, DomainValidationError } from '../../../domain/errors/index.js';
-import { db } from '../../../infrastructure/database/PostgresPool.js';
+import { tenantDbManager } from '../../../infrastructure/database/TenantDatabaseManager.js';
 export class GetFaceTemplatesUseCase {
     async execute(params) {
+        const tenantDb = await tenantDbManager.getTenantDb(params.organizationId);
         let sql = `
       SELECT 
         fe.id,
         fe.customer_id,
+        fe.model_version_id,
         c.farmer_code,
         c.full_name,
+        c.global_customer_id,
         encode(fe.embedding_encrypted, 'base64') AS encrypted_data,
         encode(fe.embedding_iv, 'base64') AS iv,
         encode(fe.embedding_auth_tag, 'base64') AS auth_tag,
@@ -22,6 +25,8 @@ export class GetFaceTemplatesUseCase {
       JOIN face_model_versions fmv ON fmv.id = fe.model_version_id
       WHERE fe.status = 'ACTIVE' 
         AND c.is_deleted = FALSE 
+        AND c.status = 'ACTIVE'
+        AND c.registration_status = 'APPROVED'
         AND c.organization_id = $1
     `;
         const queryParams = [params.organizationId];
@@ -29,14 +34,16 @@ export class GetFaceTemplatesUseCase {
             sql += ` AND c.primary_center_id = $2`;
             queryParams.push(params.centerId);
         }
-        const result = await db.query(sql, queryParams);
+        const result = await tenantDb.query(sql, queryParams);
         return result.rows.map((r) => ({
             templateId: r.id,
             customerId: r.customer_id,
+            globalCustomerId: r.global_customer_id,
             farmerCode: r.farmer_code,
             fullName: r.full_name,
             modelName: r.model_name,
             modelVersion: r.model_version,
+            modelVersionId: r.model_version_id,
             dimension: r.embedding_dimension,
             metric: r.similarity_metric,
             threshold: Number(r.recommended_threshold),
@@ -57,29 +64,51 @@ export class UpdateCustomerBiometricsUseCase {
         this.encryptor = encryptor;
     }
     async execute(params) {
-        const customer = await this.customerRepo.findById(params.customerId);
+        const customer = await this.customerRepo.findById(params.customerId, params.organizationId);
         if (!customer) {
             throw new CustomerNotFoundError(params.customerId);
         }
         const modelVersion = params.modelVersion || 'sface_int8_2021dec';
+        const tenantDb = await tenantDbManager.getTenantDb(customer.organizationId);
         // Verify model exists in DB
-        const modelRes = await db.query(`SELECT id, embedding_dimension FROM face_model_versions WHERE model_version = $1 LIMIT 1`, [modelVersion]);
-        if (modelRes.rows.length === 0) {
-            throw new DomainValidationError(`Face model version '${modelVersion}' is not supported.`);
+        const modelRes = await tenantDb.query(`SELECT id, embedding_dimension FROM face_model_versions WHERE model_version = $1 LIMIT 1`, [modelVersion]);
+        let modelId = 'f0000000-0000-0000-0000-000000000001';
+        let expectedDim = 128;
+        if (modelRes.rows.length > 0) {
+            modelId = modelRes.rows[0].id;
+            expectedDim = modelRes.rows[0].embedding_dimension;
         }
-        const expectedDim = modelRes.rows[0].embedding_dimension;
+        else {
+            const anyRes = await tenantDb.query('SELECT id, embedding_dimension FROM face_model_versions LIMIT 1;');
+            if (anyRes.rows.length > 0) {
+                modelId = anyRes.rows[0].id;
+                expectedDim = anyRes.rows[0].embedding_dimension;
+            }
+            else {
+                const insRes = await tenantDb.query(`
+          INSERT INTO face_model_versions (
+            model_name, model_version, embedding_dimension, similarity_metric,
+            recommended_threshold, is_active
+          ) VALUES (
+            'OpenCV-SFace-INT8', $1, 128, 'COSINE', 0.363, TRUE
+          ) RETURNING id, embedding_dimension;
+        `, [modelVersion]);
+                modelId = insRes.rows[0].id;
+                expectedDim = insRes.rows[0].embedding_dimension;
+            }
+        }
         if (params.embedding.length !== expectedDim) {
             throw new DomainValidationError(`Biometric vector dimension mismatch: expected ${expectedDim} for ${modelVersion}, received ${params.embedding.length}`);
         }
-        // Encrypt with AES-256-GCM + AAD
-        const encrypted = this.encryptor.encrypt128DimEmbedding(params.embedding, params.customerId, modelRes.rows[0].id);
-        await this.customerRepo.updateFaceEnrollment(params.customerId, modelVersion, JSON.stringify(encrypted));
+        // Encrypt with AES-256-GCM + AAD (always bind to canonical customer.id)
+        const encrypted = this.encryptor.encrypt128DimEmbedding(params.embedding, customer.id, modelId);
+        await this.customerRepo.updateFaceEnrollment(customer.id, modelVersion, JSON.stringify(encrypted), customer.organizationId);
         return {
             success: true,
-            message: 'Face biometric template enrolled and encrypted successfully.',
+            customerId: customer.id,
             modelVersion,
-            dimension: expectedDim,
-            keyReference: encrypted.keyReference,
+            status: 'ENROLLED',
+            enrolledAt: new Date().toISOString(),
         };
     }
 }

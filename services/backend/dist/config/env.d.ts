@@ -24,6 +24,17 @@ declare const envSchema: z.ZodObject<{
     RATE_LIMIT_WINDOW_MS: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     RATE_LIMIT_MAX_REQUESTS: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
     DATABASE_URL: z.ZodDefault<z.ZodString>;
+    CENTRAL_DATABASE_URL: z.ZodOptional<z.ZodString>;
+    DATABASE_PROVISIONER_URL: z.ZodOptional<z.ZodString>;
+    TENANT_DB_ENCRYPTION_KEY: z.ZodDefault<z.ZodString>;
+    TENANT_POOL_MAX: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+    TENANT_POOL_IDLE_TIMEOUT_MS: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+    TENANT_POOL_CONNECTION_TIMEOUT_MS: z.ZodDefault<z.ZodCoercedNumber<unknown>>;
+    DATABASE_TLS_MODE: z.ZodDefault<z.ZodEnum<{
+        disable: "disable";
+        require: "require";
+        prefer: "prefer";
+    }>>;
     JWT_SECRET: z.ZodDefault<z.ZodString>;
     WHATSAPP_ENABLED: z.ZodDefault<z.ZodCoercedBoolean<unknown>>;
     WHATSAPP_API_URL: z.ZodDefault<z.ZodString>;

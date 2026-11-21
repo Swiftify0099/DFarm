@@ -59,7 +59,7 @@ export const Login: React.FC = () => {
             DFarm Collection Kiosk
           </h1>
           <p className="text-xs text-text-muted">
-            Gokul Dairy Farmers Cooperative • Terminal DF-KIOSK-001
+            Authorized Dairy Collection Kiosk • Real-Time Milk Intake Terminal
           </p>
         </div>
 
@@ -199,7 +199,7 @@ export const Login: React.FC = () => {
         {/* Security badge footer */}
         <div className="flex items-center justify-center space-x-2 text-xs text-text-muted">
           <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          <span>Tenant Isolated: Gokul Dairy (dairy-ten-9801)</span>
+          <span>Tenant Isolated Dairy Operator Terminal</span>
         </div>
       </div>
     </div>

@@ -210,5 +210,38 @@ export class PaymentController {
       next(err);
     }
   }
+
+  public static async exportBatch(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      if (!req.auth) throw new UnauthorizedError();
+      const { batchId } = req.params as { batchId: string };
+      const format = (req.query['format'] as string) || 'NEFT_STANDARD';
+      const result = await batchService.exportBatch(batchId, format, req.auth);
+      return ApiResponse.success(res, result, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async downloadBatch(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const token = (req.query['token'] as string) || '';
+      if (!token) {
+        res.status(400).json({ success: false, error: 'Download token is required' });
+        return;
+      }
+      const file = batchService.downloadBatch(token);
+
+      res.setHeader('Content-Type', file.mimeType);
+      res.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('X-Checksum-SHA256', file.checksumSha256);
+      res.status(200).send(file.content);
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 

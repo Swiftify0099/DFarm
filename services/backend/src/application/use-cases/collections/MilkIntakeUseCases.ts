@@ -14,11 +14,13 @@ import {
   SessionClosedError,
 } from '../../../domain/errors/index.js';
 import { FatPercentage, SnfPercentage, MilkWeight } from '../../../domain/value-objects/index.js';
+import { financialPolicyResolutionService } from '../../../domain/services/FinancialPolicyResolutionService.js';
 
 export interface ProcessMilkIntakeDTO {
   sessionId?: string;
   sessionCode?: string;
   customerId: string;
+  organizationId?: string;
   milkCategory: MilkCategory;
   weightLiters: number;
   fatPercentage: number;
@@ -68,20 +70,28 @@ export class ProcessMilkIntakeUseCase {
     new SnfPercentage(dto.snfPercentage, dto.milkCategory);
 
     // 3. Verify Customer & Permissions
-    const customer = await this.customerRepo.findById(dto.customerId);
+    const customer = await this.customerRepo.findById(dto.customerId, dto.organizationId);
     if (!customer) {
       throw new CustomerNotFoundError(dto.customerId);
     }
     customer.validateCanDeliver(dto.milkCategory);
 
     // 4. Verify Active Session
-    let session = dto.sessionCode
-      ? await this.sessionRepo.findByCode(dto.sessionCode)
+    const orgId = dto.organizationId || customer.organizationId;
+    let session = dto.sessionId
+      ? await this.sessionRepo.findById(dto.sessionId, orgId)
       : null;
 
-    if (!session && dto.sessionId) {
-      // Find active session for customer's center
-      session = await this.sessionRepo.findActiveSession(customer.centerId, dto.deviceId || 'KIOSK_MAIN');
+    if (!session && dto.sessionCode) {
+      session = await this.sessionRepo.findByCode(dto.sessionCode, orgId);
+    }
+
+    // If the referenced session is closed or missing, check if an active OPEN session exists for this center/device
+    if ((!session || !session.isOpen) && (dto.sessionId || customer.centerId)) {
+      const activeOpen = await this.sessionRepo.findActiveSession(customer.centerId, dto.deviceId || 'KIOSK_MAIN', orgId);
+      if (activeOpen && activeOpen.isOpen) {
+        session = activeOpen;
+      }
     }
 
     if (!session || !session.isOpen) {
@@ -96,9 +106,16 @@ export class ProcessMilkIntakeUseCase {
       session.businessDate
     );
 
-    const calculation = rateChart.calculateRate(dto.fatPercentage, dto.snfPercentage);
+    const calculation = await financialPolicyResolutionService.calculateAuthoritativePrice({
+      rateChart,
+      milkCategory: dto.milkCategory,
+      weightLiters: dto.weightLiters,
+      fatPercentage: dto.fatPercentage,
+      snfPercentage: dto.snfPercentage,
+      businessDate: session.businessDate,
+    });
     const appliedRate = calculation.ratePerLiter;
-    const totalAmount = calculation.totalForVolume(dto.weightLiters);
+    const totalAmount = calculation.totalAmount;
 
     // 6. Instantiate MilkCollectionTransaction Entity
     const transactionId = crypto.randomUUID();
@@ -145,7 +162,7 @@ export class ProcessMilkIntakeUseCase {
     await this.sessionRepo.save(session);
 
     // 9. Post Double-Entry Ledger Credit
-    let ledger = await this.ledgerRepo.findByCustomer(customer.id);
+    let ledger = await this.ledgerRepo.findByCustomer(customer.id, customer.organizationId);
     if (!ledger) {
       throw new DomainValidationError(`Customer financial ledger could not be initialized.`);
     }
@@ -169,8 +186,8 @@ export class ProcessMilkIntakeUseCase {
 export class GetCustomerCollectionHistoryUseCase {
   constructor(private readonly transactionRepo: ICollectionTransactionRepository) {}
 
-  public async execute(customerId: string, limit = 50, offset = 0) {
-    const records = await this.transactionRepo.listByCustomer(customerId, limit, offset);
+  public async execute(customerId: string, limit = 50, offset = 0, organizationId?: string) {
+    const records = await this.transactionRepo.listByCustomer(customerId, limit, offset, organizationId);
     return records.map((r) => r.toJSON());
   }
 }
@@ -178,8 +195,8 @@ export class GetCustomerCollectionHistoryUseCase {
 export class GetMonthlyMilkSummaryUseCase {
   constructor(private readonly transactionRepo: ICollectionTransactionRepository) {}
 
-  public async execute(customerId: string, monthYear?: string) {
+  public async execute(customerId: string, monthYear?: string, organizationId?: string) {
     const my = monthYear || new Date().toISOString().substring(0, 7); // YYYY-MM
-    return this.transactionRepo.getMonthlySummary(customerId, my);
+    return this.transactionRepo.getMonthlySummary(customerId, my, organizationId);
   }
 }

@@ -51,18 +51,18 @@ export const SettingsView: React.FC = () => {
             <div className="flex justify-between py-1 border-b border-border-subtle/50">
               <span className="text-text-muted">Registered Dairy:</span>
               <span className="font-bold text-text-primary">
-                {operator?.dairyName || 'Gokul Dairy Farmers Cooperative'}
+                {operator?.dairyName || 'Authorized Dairy Cooperative'}
               </span>
             </div>
             <div className="flex justify-between py-1 border-b border-border-subtle/50">
               <span className="text-text-muted">Dairy Code:</span>
               <span className="font-mono font-bold text-primary-orange">
-                {operator?.dairyCode || 'DF-GOKUL-01'}
+                {operator?.dairyCode || 'DAIRY'}
               </span>
             </div>
             <div className="flex justify-between py-1 border-b border-border-subtle/50">
               <span className="text-text-muted">Tenant UUID:</span>
-              <span className="font-mono text-text-muted">{operator?.dairyId || 'dairy-ten-9801'}</span>
+              <span className="font-mono text-text-muted">{operator?.dairyId || 'Unassigned'}</span>
             </div>
             <div className="flex justify-between py-1 border-b border-border-subtle/50">
               <span className="text-text-muted">Terminal Identifier:</span>

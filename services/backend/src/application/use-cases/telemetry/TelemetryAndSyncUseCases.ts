@@ -74,15 +74,22 @@ export class ProcessOfflineSyncBatchUseCase {
       idempotencyKey?: string;
     }>;
   }) {
-    const results: Array<{ clientIntakeUuid: string; success: boolean; error?: string; transactionId?: string }> = [];
+    const results: Array<{
+      clientIntakeUuid: string;
+      success: boolean;
+      error?: string;
+      transactionId?: string;
+      receiptNumber?: string;
+      isIdempotentReplay?: boolean;
+    }> = [];
 
     for (const item of batch.transactions) {
       try {
         const dto: ProcessMilkIntakeDTO = {
           sessionCode: item.sessionCode,
           customerId: item.customerId,
-          milkCategory: item.milkCategory,
-          weightLiters: item.weightLiters,
+          milkCategory: (item as any).milkCategory || (item as any).milkType || 'COW',
+          weightLiters: (item as any).weightLiters ?? (item as any).quantityLiters ?? 0,
           fatPercentage: item.fatPercentage,
           snfPercentage: item.snfPercentage,
           clrDensity: item.clrDensity,
@@ -98,12 +105,15 @@ export class ProcessOfflineSyncBatchUseCase {
           clientIntakeUuid: item.clientIntakeUuid,
           success: true,
           transactionId: res.transaction.id,
+          receiptNumber: res.receiptNumber,
+          isIdempotentReplay: Boolean(res.isIdempotentReplay),
         });
       } catch (err: any) {
         results.push({
           clientIntakeUuid: item.clientIntakeUuid,
           success: false,
           error: err.message || 'Intake sync failed',
+          isIdempotentReplay: false,
         });
       }
     }
@@ -115,6 +125,10 @@ export class ProcessOfflineSyncBatchUseCase {
       syncedCount,
       failedCount,
       totalCount: batch.transactions.length,
+      total: batch.transactions.length,
+      succeeded: syncedCount,
+      failed: failedCount,
+      items: results,
       details: results,
     };
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MockCollectionBackend, CURRENT_DAIRY_ID } from '../api/mock-backend'
+import { MockCollectionBackend, CURRENT_DAIRY_ID } from './mocks/mock-backend'
 
 describe('Operator Authentication & Tenant Isolation', () => {
   it('dispatches valid 6-digit OTP to assigned operator mobile number', async () => {

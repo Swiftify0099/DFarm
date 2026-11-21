@@ -1,0 +1,46 @@
+{
+  "testRunTimestamp": "2026-11-20T01:18:12.000Z",
+  "totalTenantsTested": 3,
+  "clusterStatus": "HEALTHY",
+  "results": [
+    {
+      "dairyId": "a0000000-0000-0000-0000-000000000001",
+      "dairyCode": "GOKUL_KOLHAPUR",
+      "databaseName": "dfarm_tenant_gokul_kolhapur_a00000000000",
+      "pingLatencyMs": 5,
+      "connectionHealth": "HEALTHY",
+      "schemaCompliance": "COMPLIANT",
+      "missingRequiredTables": [],
+      "totalTables": 27,
+      "viewsCount": 0,
+      "provisioningState": "READY",
+      "overallVerdict": "PASS"
+    },
+    {
+      "dairyId": "b0000000-0000-0000-0000-000000000002",
+      "dairyCode": "WARANA_DAIRY",
+      "databaseName": "dfarm_tenant_warana_dairy_b00000000000",
+      "pingLatencyMs": 6,
+      "connectionHealth": "HEALTHY",
+      "schemaCompliance": "COMPLIANT",
+      "missingRequiredTables": [],
+      "totalTables": 27,
+      "viewsCount": 0,
+      "provisioningState": "READY",
+      "overallVerdict": "PASS"
+    },
+    {
+      "dairyId": "d0000000-0000-0000-0000-000000000001",
+      "dairyCode": "BARAMATI_COOP",
+      "databaseName": "dfarm_tenant_baramati_coop_d00000000000",
+      "pingLatencyMs": 4,
+      "connectionHealth": "HEALTHY",
+      "schemaCompliance": "COMPLIANT",
+      "missingRequiredTables": [],
+      "totalTables": 27,
+      "viewsCount": 0,
+      "provisioningState": "READY",
+      "overallVerdict": "PASS"
+    }
+  ]
+}

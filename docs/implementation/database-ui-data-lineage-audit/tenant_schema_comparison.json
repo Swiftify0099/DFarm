@@ -1,0 +1,681 @@
+{
+  "templateDatabase": "dfarm_tenant_archetype",
+  "totalTenantsExpected": 2,
+  "sampleTenants": [
+    {
+      "dairyId": "00000000-0000-0000-0000-000000000101",
+      "dairyCode": "SANGAMNER",
+      "databaseName": "dfarm_tenant_sangamner_000000000000",
+      "expectedTablesCount": 93,
+      "actualTablesCount": "NOT VERIFIED (Cluster Offline)",
+      "schemaVersion": "v1.0.0",
+      "missingMigrations": [],
+      "driftDetected": false,
+      "status": "NOT VERIFIED (ECONNREFUSED)"
+    },
+    {
+      "dairyId": "00000000-0000-0000-0000-000000000102",
+      "dairyCode": "BARAMATI",
+      "databaseName": "dfarm_tenant_baramati_000000000000",
+      "expectedTablesCount": 93,
+      "actualTablesCount": "NOT VERIFIED (Cluster Offline)",
+      "schemaVersion": "v1.0.0",
+      "missingMigrations": [],
+      "driftDetected": false,
+      "status": "NOT VERIFIED (ECONNREFUSED)"
+    }
+  ],
+  "operationalTablesAudit": [
+    {
+      "tableName": "organizations",
+      "firstDefinedIn": "002_organizations_and_centers.sql",
+      "columnsCount": 9,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "dairy_centers",
+      "firstDefinedIn": "002_organizations_and_centers.sql",
+      "columnsCount": 17,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "center_settings",
+      "firstDefinedIn": "002_organizations_and_centers.sql",
+      "columnsCount": 21,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "collection_shifts",
+      "firstDefinedIn": "002_organizations_and_centers.sql",
+      "columnsCount": 8,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "users",
+      "firstDefinedIn": "003_user_identity_foundation.sql",
+      "columnsCount": 15,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "user_center_assignments",
+      "firstDefinedIn": "003_user_identity_foundation.sql",
+      "columnsCount": 5,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customers",
+      "firstDefinedIn": "004_customer_identity.sql",
+      "columnsCount": 20,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_milk_categories",
+      "firstDefinedIn": "004_customer_identity.sql",
+      "columnsCount": 6,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_addresses",
+      "firstDefinedIn": "004_customer_identity.sql",
+      "columnsCount": 10,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_registration_records",
+      "firstDefinedIn": "004_customer_identity.sql",
+      "columnsCount": 7,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_status_history",
+      "firstDefinedIn": "004_customer_identity.sql",
+      "columnsCount": 7,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_consent_records",
+      "firstDefinedIn": "004_customer_identity.sql",
+      "columnsCount": 10,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "face_model_versions",
+      "firstDefinedIn": "005_face_and_rfid.sql",
+      "columnsCount": 9,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "face_enrollments",
+      "firstDefinedIn": "005_face_and_rfid.sql",
+      "columnsCount": 16,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "biometric_retention_records",
+      "firstDefinedIn": "005_face_and_rfid.sql",
+      "columnsCount": 7,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "rfid_cards",
+      "firstDefinedIn": "005_face_and_rfid.sql",
+      "columnsCount": 7,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "rfid_card_assignments",
+      "firstDefinedIn": "005_face_and_rfid.sql",
+      "columnsCount": 10,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "identification_audit_logs",
+      "firstDefinedIn": "006_customer_identification_audit.sql",
+      "columnsCount": 14,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "supervisor_verification_records",
+      "firstDefinedIn": "006_customer_identification_audit.sql",
+      "columnsCount": 9,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "rate_charts",
+      "firstDefinedIn": "007_rate_management.sql",
+      "columnsCount": 8,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "rate_chart_versions",
+      "firstDefinedIn": "007_rate_management.sql",
+      "columnsCount": 14,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "rate_chart_cells",
+      "firstDefinedIn": "007_rate_management.sql",
+      "columnsCount": 5,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "rate_applicability_rules",
+      "firstDefinedIn": "007_rate_management.sql",
+      "columnsCount": 5,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "collection_sessions",
+      "firstDefinedIn": "008_collection_sessions_and_transactions.sql",
+      "columnsCount": 15,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "collection_quality_readings",
+      "firstDefinedIn": "008_collection_sessions_and_transactions.sql",
+      "columnsCount": 8,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "collection_weight_readings",
+      "firstDefinedIn": "008_collection_sessions_and_transactions.sql",
+      "columnsCount": 9,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "milk_collections",
+      "firstDefinedIn": "008_collection_sessions_and_transactions.sql",
+      "columnsCount": 20,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "collection_receipts",
+      "firstDefinedIn": "008_collection_sessions_and_transactions.sql",
+      "columnsCount": 6,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "collection_adjustments",
+      "firstDefinedIn": "008_collection_sessions_and_transactions.sql",
+      "columnsCount": 14,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "collection_reversals",
+      "firstDefinedIn": "008_collection_sessions_and_transactions.sql",
+      "columnsCount": 6,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_ledger_accounts",
+      "firstDefinedIn": "009_customer_ledger.sql",
+      "columnsCount": 8,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "ledger_transactions",
+      "firstDefinedIn": "009_customer_ledger.sql",
+      "columnsCount": 14,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "ledger_entries",
+      "firstDefinedIn": "009_customer_ledger.sql",
+      "columnsCount": 6,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_advances",
+      "firstDefinedIn": "009_customer_ledger.sql",
+      "columnsCount": 19,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_deductions",
+      "firstDefinedIn": "009_customer_ledger.sql",
+      "columnsCount": 13,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_adjustments",
+      "firstDefinedIn": "009_customer_ledger.sql",
+      "columnsCount": 13,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "devices",
+      "firstDefinedIn": "010_devices_sync_and_audit.sql",
+      "columnsCount": 11,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "device_sync_state",
+      "firstDefinedIn": "010_devices_sync_and_audit.sql",
+      "columnsCount": 8,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "sync_events",
+      "firstDefinedIn": "010_devices_sync_and_audit.sql",
+      "columnsCount": 9,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "sync_tombstones",
+      "firstDefinedIn": "010_devices_sync_and_audit.sql",
+      "columnsCount": 8,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "sync_conflict_records",
+      "firstDefinedIn": "010_devices_sync_and_audit.sql",
+      "columnsCount": 10,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "audit_logs",
+      "firstDefinedIn": "010_devices_sync_and_audit.sql",
+      "columnsCount": 12,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "approval_records",
+      "firstDefinedIn": "010_devices_sync_and_audit.sql",
+      "columnsCount": 9,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "face_re_enrollment_jobs",
+      "firstDefinedIn": "013_face_model_version_metadata.sql",
+      "columnsCount": 9,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "feed_categories",
+      "firstDefinedIn": "014_feed_inventory_procurement_and_sales.sql",
+      "columnsCount": 8,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "feed_products",
+      "firstDefinedIn": "014_feed_inventory_procurement_and_sales.sql",
+      "columnsCount": 18,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "feed_suppliers",
+      "firstDefinedIn": "014_feed_inventory_procurement_and_sales.sql",
+      "columnsCount": 14,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "center_product_inventory",
+      "firstDefinedIn": "014_feed_inventory_procurement_and_sales.sql",
+      "columnsCount": 9,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "feed_purchases",
+      "firstDefinedIn": "014_feed_inventory_procurement_and_sales.sql",
+      "columnsCount": 18,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "feed_purchase_items",
+      "firstDefinedIn": "014_feed_inventory_procurement_and_sales.sql",
+      "columnsCount": 12,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "stock_movements",
+      "firstDefinedIn": "014_feed_inventory_procurement_and_sales.sql",
+      "columnsCount": 19,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "feed_sales",
+      "firstDefinedIn": "014_feed_inventory_procurement_and_sales.sql",
+      "columnsCount": 21,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "feed_sale_items",
+      "firstDefinedIn": "014_feed_inventory_procurement_and_sales.sql",
+      "columnsCount": 11,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "feed_returns",
+      "firstDefinedIn": "014_feed_inventory_procurement_and_sales.sql",
+      "columnsCount": 19,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "inventory_transfers",
+      "firstDefinedIn": "014_feed_inventory_procurement_and_sales.sql",
+      "columnsCount": 16,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "inventory_adjustments",
+      "firstDefinedIn": "014_feed_inventory_procurement_and_sales.sql",
+      "columnsCount": 12,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "employees",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 33,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "employee_center_assignments",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 5,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "employee_shifts",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 11,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "employee_attendance",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 21,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "employee_attendance_audits",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 9,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "employee_leaves",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 14,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "employee_salary_structures",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 21,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "employee_advances",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 16,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "payroll_runs",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 24,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "employee_payslips",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 28,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "employee_advance_repayments",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 8,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "employee_salary_payments",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 17,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "payroll_audit_logs",
+      "firstDefinedIn": "016_employee_management_attendance_and_payroll.sql",
+      "columnsCount": 10,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "system_configurations",
+      "firstDefinedIn": "018_milk_rate_management_system.sql",
+      "columnsCount": 10,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "billing_periods",
+      "firstDefinedIn": "020_automated_monthly_billing_and_settlements.sql",
+      "columnsCount": 20,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "monthly_bills",
+      "firstDefinedIn": "020_automated_monthly_billing_and_settlements.sql",
+      "columnsCount": 39,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "monthly_bill_items",
+      "firstDefinedIn": "020_automated_monthly_billing_and_settlements.sql",
+      "columnsCount": 16,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "monthly_bill_adjustments",
+      "firstDefinedIn": "020_automated_monthly_billing_and_settlements.sql",
+      "columnsCount": 7,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "bill_finalization_records",
+      "firstDefinedIn": "020_automated_monthly_billing_and_settlements.sql",
+      "columnsCount": 12,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_payments",
+      "firstDefinedIn": "020_automated_monthly_billing_and_settlements.sql",
+      "columnsCount": 13,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "billing_scheduler_execution_logs",
+      "firstDefinedIn": "020_automated_monthly_billing_and_settlements.sql",
+      "columnsCount": 9,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_payouts",
+      "firstDefinedIn": "021_customer_payouts_batches_and_reconciliation.sql",
+      "columnsCount": 28,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_receipts",
+      "firstDefinedIn": "021_customer_payouts_batches_and_reconciliation.sql",
+      "columnsCount": 22,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "payment_batches",
+      "firstDefinedIn": "021_customer_payouts_batches_and_reconciliation.sql",
+      "columnsCount": 28,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "payment_batch_items",
+      "firstDefinedIn": "021_customer_payouts_batches_and_reconciliation.sql",
+      "columnsCount": 15,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "payment_reconciliation_records",
+      "firstDefinedIn": "021_customer_payouts_batches_and_reconciliation.sql",
+      "columnsCount": 21,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "payment_adjustments",
+      "firstDefinedIn": "021_customer_payouts_batches_and_reconciliation.sql",
+      "columnsCount": 12,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "payment_approvals",
+      "firstDefinedIn": "021_customer_payouts_batches_and_reconciliation.sql",
+      "columnsCount": 9,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_notifications",
+      "firstDefinedIn": "022_customer_notifications.sql",
+      "columnsCount": 12,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "notification_templates",
+      "firstDefinedIn": "023_notification_engine_push_and_whatsapp_automation.sql",
+      "columnsCount": 13,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "notification_records",
+      "firstDefinedIn": "023_notification_engine_push_and_whatsapp_automation.sql",
+      "columnsCount": 23,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "notification_delivery_logs",
+      "firstDefinedIn": "023_notification_engine_push_and_whatsapp_automation.sql",
+      "columnsCount": 11,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "whatsapp_customer_mappings",
+      "firstDefinedIn": "023_notification_engine_push_and_whatsapp_automation.sql",
+      "columnsCount": 13,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "whatsapp_messages",
+      "firstDefinedIn": "023_notification_engine_push_and_whatsapp_automation.sql",
+      "columnsCount": 18,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "customer_device_tokens",
+      "firstDefinedIn": "023_notification_engine_push_and_whatsapp_automation.sql",
+      "columnsCount": 11,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "provider_event_records",
+      "firstDefinedIn": "023_notification_engine_push_and_whatsapp_automation.sql",
+      "columnsCount": 8,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    },
+    {
+      "tableName": "kiosk_shift_sessions",
+      "firstDefinedIn": "027_kiosk_shift_sessions_and_sface128_seed.sql",
+      "columnsCount": 24,
+      "isOperational": true,
+      "dataOwnership": "Tenant Dairy"
+    }
+  ]
+}

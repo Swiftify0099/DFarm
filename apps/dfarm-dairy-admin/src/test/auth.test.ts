@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { MockDairyBackend, CURRENT_DAIRY_ID } from '@/api/mock-server'
+import { MockDairyBackend, CURRENT_DAIRY_ID } from './mocks/mock-server'
 
 describe('Dairy Admin Mobile OTP Authentication State Machine', () => {
   const validMobile = '9876543210'

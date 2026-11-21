@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import type { CustomerIdentity } from '@/types'
 import { customersApi } from '@/api/client'
-import { MockCollectionBackend } from '@/api/mock-backend'
 import { ClayModal, ClayInput, ClayButton, ClayBadge } from '@/components/ui'
 import { Search, UserCheck, MapPin, Phone } from 'lucide-react'
 
@@ -29,16 +28,10 @@ export const CustomerLookupModal: React.FC<CustomerLookupModalProps> = ({
   const loadCustomers = async (search?: string) => {
     setIsLoading(true)
     try {
-      let data: CustomerIdentity[] = []
-      try {
-        data = await customersApi.list(search ? { search } : undefined)
-      } catch {
-        data = []
-      }
-      if (!data || data.length === 0) {
-        data = await MockCollectionBackend.getCustomers(search)
-      }
-      setCustomers(data)
+      const data = await customersApi.list(search ? { search } : undefined)
+      setCustomers(data || [])
+    } catch {
+      setCustomers([])
     } finally {
       setIsLoading(false)
     }

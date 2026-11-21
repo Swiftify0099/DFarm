@@ -19,7 +19,10 @@ import {
   ClayInput,
   ClayBadge,
   ClayHeader,
+  AnimalSelector,
+  AnimalType,
 } from '../../design-system';
+import { DairyCenterIcon } from '../../assets/vectors/LocationAssets';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -30,14 +33,22 @@ export default function RegisterScreen() {
     mobileNumber?: string;
   }>();
 
-  const dairyId = params.dairyId || '9a6d80a1-4e78-4ef6-bb4d-6e8284534e10';
-  const dairyName = params.dairyName || 'Shree Krishna Sahakari Dudh Sanstha';
+  const dairyId = params.dairyId || '';
+  const dairyName = params.dairyName || 'DFarm Cooperative Society';
   const mobileNumber = params.mobileNumber || '';
 
   const [fullName, setFullName] = useState('');
   const [village, setVillage] = useState(params.village || '');
-  const [milkType, setMilkType] = useState<'COW' | 'BUFFALO' | 'BOTH'>('COW');
+  const [milkType, setMilkType] = useState<AnimalType>('COW');
   const [consentChecked, setConsentChecked] = useState(false);
+
+  // Bank Beneficiary details for direct payout settlement
+  const [accountHolderName, setAccountHolderName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [confirmAccountNumber, setConfirmAccountNumber] = useState('');
+  const [ifscCode, setIfscCode] = useState('');
+  const [bankName, setBankName] = useState('');
+
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
   const validate = (): boolean => {
@@ -46,26 +57,52 @@ export default function RegisterScreen() {
       newErrors.fullName = 'Full name must be at least 3 characters';
     }
     if (village.trim().length < 2) {
-      newErrors.village = 'Please enter your village name';
+      newErrors.village = 'Please enter your village or gram panchayat name';
     }
     if (!consentChecked) {
-      newErrors.consent = 'Biometric consent is mandatory to proceed';
+      newErrors.consent = 'Biometric consent is mandatory to proceed with contactless collection';
     }
+
+    // Bank account validation
+    const cleanAccount = accountNumber.trim();
+    const cleanConfirm = confirmAccountNumber.trim();
+    const cleanIfsc = ifscCode.trim().toUpperCase();
+
+    if (!cleanAccount || cleanAccount.length < 9 || cleanAccount.length > 18) {
+      newErrors.accountNumber = 'Bank account number must be between 9 and 18 digits';
+    } else if (cleanAccount !== cleanConfirm) {
+      newErrors.confirmAccountNumber = 'Account numbers do not match';
+    }
+
+    const ifscRegex = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+    if (!cleanIfsc || !ifscRegex.test(cleanIfsc)) {
+      newErrors.ifscCode = 'Valid 11-character IFSC code is required (e.g. SBIN0001234)';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleNext = () => {
     if (!validate()) return;
+    const cleanAccount = accountNumber.trim();
+    const cleanConfirm = confirmAccountNumber.trim();
+    const cleanIfsc = ifscCode.trim().toUpperCase();
+
     router.push({
       pathname: '/(onboarding)/face-enroll',
       params: {
         dairyId,
         dairyName,
-        fullName,
-        village,
+        fullName: fullName.trim(),
+        village: village.trim(),
         milkSupplyType: milkType,
         mobileNumber,
+        bankName: bankName.trim() || 'Cooperative Bank',
+        accountNumber: cleanAccount,
+        confirmAccountNumber: cleanConfirm,
+        ifscCode: cleanIfsc,
+        accountHolderName: accountHolderName.trim() || fullName.trim(),
       },
     });
   };
@@ -74,9 +111,20 @@ export default function RegisterScreen() {
     <SafeAreaView style={styles.container}>
       <ClayHeader
         title="Producer Registration"
-        subtitle="Step 1 of 2: Personal & Dairy Details"
+        subtitle="नोंदणी: वैयक्तिक व दुग्ध तपशील"
         onBack={() => router.back()}
       />
+
+      {/* Step Progress Tracker */}
+      <View style={styles.progressContainer}>
+        <View style={styles.stepTrack}>
+          <View style={styles.stepActiveBar} />
+        </View>
+        <View style={styles.stepLabelsRow}>
+          <Text style={styles.stepActiveLabel}>1. Personal & Animals</Text>
+          <Text style={styles.stepInactiveLabel}>2. Live Face Biometrics</Text>
+        </View>
+      </View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -88,21 +136,32 @@ export default function RegisterScreen() {
           keyboardDismissMode="none"
           showsVerticalScrollIndicator={false}
         >
-          {/* Selected Dairy Affiliation Card */}
+          {/* Selected Dairy Affiliation Certificate */}
           <ClayCard variant="highlight" style={styles.dairyAffiliationCard}>
             <View style={styles.dairyHeaderRow}>
-              <ClayBadge label="Selected Dairy" variant="orange" />
-              <Pressable onPress={() => router.back()}>
+              <View style={styles.dairyBadgeWrapper}>
+                <DairyCenterIcon size={28} />
+                <ClayBadge label="Affiliated Dairy Center" variant="orange" />
+              </View>
+              <Pressable
+                onPress={() => router.back()}
+                style={({ pressed }) => pressed && styles.pressed}
+              >
                 <Text style={styles.changeDairyText}>Change</Text>
               </Pressable>
             </View>
             <Text style={styles.affiliatedDairyName}>{dairyName}</Text>
+            {params.village && (
+              <Text style={styles.affiliatedVillage}>
+                📍 Center Location: {params.village}
+              </Text>
+            )}
           </ClayCard>
 
           {/* Registration Details Form Card */}
           <ClayCard variant="raised" style={styles.formCard}>
             <ClayInput
-              label="Full Name (as per Bank / Aadhaar)"
+              label="Full Name (as per Bank / Aadhaar) / पूर्ण नाव"
               placeholder="e.g. Vitthal Dnyandeo Patil"
               value={fullName}
               onChangeText={(text) => {
@@ -115,7 +174,7 @@ export default function RegisterScreen() {
             />
 
             <ClayInput
-              label="Village / Gram Panchayat"
+              label="Village / Gram Panchayat / गाव किंवा ग्रामपंचायत"
               placeholder="e.g. Manchar"
               value={village}
               onChangeText={(text) => {
@@ -127,46 +186,92 @@ export default function RegisterScreen() {
               error={errors.village}
             />
 
-            {/* Milk Supply Category Toggle */}
+            {/* Milk Supply Animals Segmented Selector */}
             <View style={styles.fieldSection}>
-              <Text style={styles.fieldLabel}>Milk Supply Animals</Text>
-              <View style={styles.animalTypeRow}>
-                {(['COW', 'BUFFALO', 'BOTH'] as const).map((type) => {
-                  const isSelected = milkType === type;
-                  return (
-                    <Pressable
-                      key={type}
-                      onPress={() => setMilkType(type)}
-                      style={[
-                        styles.animalPill,
-                        isSelected && styles.animalPillActive,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.animalPillText,
-                          isSelected && styles.animalPillTextActive,
-                        ]}
-                      >
-                        {type === 'COW'
-                          ? '🐄 Cow'
-                          : type === 'BUFFALO'
-                          ? '🐃 Buffalo'
-                          : '🐄+🐃 Both'}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+              <Text style={styles.fieldLabel}>Milk Supply Animals / दूध देणारे जनावर</Text>
+              <AnimalSelector value={milkType} onChange={setMilkType} />
+            </View>
+
+            {/* Bank Beneficiary Details Section */}
+            <View style={styles.bankHeaderRow}>
+              <Text style={styles.sectionHeaderTitle}>Bank Settlement Details / बँक तपशील</Text>
+              <ClayBadge label="For Direct Payouts" variant="success" />
+            </View>
+
+            <ClayInput
+              label="Account Holder Name / खातेदाराचे नाव"
+              placeholder="As per bank passbook"
+              value={accountHolderName}
+              onChangeText={(val) => {
+                setAccountHolderName(val);
+                if (errors.accountHolderName) setErrors((prev) => ({ ...prev, accountHolderName: '' }));
+              }}
+              error={errors.accountHolderName}
+            />
+
+            <ClayInput
+              label="Bank Account Number / बँक खाते क्रमांक"
+              placeholder="e.g. 10293847561"
+              value={accountNumber}
+              keyboardType="number-pad"
+              secureTextEntry
+              onChangeText={(val) => {
+                setAccountNumber(val.replace(/[^0-9]/g, ''));
+                if (errors.accountNumber) setErrors((prev) => ({ ...prev, accountNumber: '' }));
+              }}
+              error={errors.accountNumber}
+            />
+
+            <ClayInput
+              label="Confirm Account Number / खाते क्रमांक पुन्हा टाका"
+              placeholder="Re-enter bank account number"
+              value={confirmAccountNumber}
+              keyboardType="number-pad"
+              onChangeText={(val) => {
+                setConfirmAccountNumber(val.replace(/[^0-9]/g, ''));
+                if (errors.confirmAccountNumber) setErrors((prev) => ({ ...prev, confirmAccountNumber: '' }));
+              }}
+              error={errors.confirmAccountNumber}
+            />
+
+            <View style={styles.twoColumnRow}>
+              <View style={styles.columnHalf}>
+                <ClayInput
+                  label="IFSC Code / आय.एफ.एस.सी."
+                  placeholder="e.g. SBIN0001234"
+                  value={ifscCode}
+                  autoCapitalize="characters"
+                  maxLength={11}
+                  onChangeText={(val) => {
+                    setIfscCode(val.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+                    if (errors.ifscCode) setErrors((prev) => ({ ...prev, ifscCode: '' }));
+                  }}
+                  error={errors.ifscCode}
+                />
+              </View>
+              <View style={styles.columnHalf}>
+                <ClayInput
+                  label="Bank Name / बँकेचे नाव"
+                  placeholder="e.g. SBI"
+                  value={bankName}
+                  onChangeText={setBankName}
+                />
               </View>
             </View>
 
             {/* Biometric Consent Box */}
             <Pressable
-              onPress={() => setConsentChecked(!consentChecked)}
-              style={[
+              onPress={() => {
+                setConsentChecked(!consentChecked);
+                if (errors.consent) {
+                  setErrors((prev) => ({ ...prev, consent: '' }));
+                }
+              }}
+              style={({ pressed }) => [
                 styles.consentCard,
                 consentChecked && styles.consentCardActive,
                 !!errors.consent && styles.consentCardError,
+                pressed && styles.pressed,
               ]}
             >
               <View
@@ -177,19 +282,25 @@ export default function RegisterScreen() {
               >
                 {consentChecked && <Text style={styles.checkmark}>✓</Text>}
               </View>
-              <Text style={styles.consentText}>
-                I provide explicit consent to DFarm to enroll and store my
-                facial biometric vector for contactless milk collection
-                identity verification.
-              </Text>
+              <View style={styles.consentTextCol}>
+                <Text style={styles.consentTitle}>
+                  Biometric Data Privacy Consent / बायोमेट्रिक संमती
+                </Text>
+                <Text style={styles.consentText}>
+                  I grant explicit consent to DFarm and my affiliated dairy society to enroll and
+                  store my facial biometric vector using OpenCV YuNet + SFace INT8 for contactless milk
+                  pour authentication and automatic ledger crediting.
+                </Text>
+              </View>
             </Pressable>
             {errors.consent && (
-              <Text style={styles.consentErrorText}>{errors.consent}</Text>
+              <Text style={styles.consentErrorText}>⚠️ {errors.consent}</Text>
             )}
 
             <ClayButton
               title="Next: Live Face Biometric"
               onPress={handleNext}
+              variant="primary"
               style={styles.nextBtn}
             />
           </ClayCard>
@@ -207,18 +318,55 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  progressContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  stepTrack: {
+    height: 4,
+    backgroundColor: DFARM_COLORS.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginBottom: 6,
+  },
+  stepActiveBar: {
+    width: '50%',
+    height: '100%',
+    backgroundColor: DFARM_COLORS.primaryOrange,
+  },
+  stepLabelsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  stepActiveLabel: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryOrange,
+  },
+  stepInactiveLabel: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    color: DFARM_COLORS.secondaryText,
+  },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 14,
+    paddingBottom: 28,
   },
   dairyAffiliationCard: {
     marginBottom: 16,
+    padding: 16,
   },
   dairyHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 8,
+  },
+  dairyBadgeWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   changeDairyText: {
     ...DFARM_TYPOGRAPHY.bodySm,
@@ -229,6 +377,11 @@ const styles = StyleSheet.create({
   affiliatedDairyName: {
     ...DFARM_TYPOGRAPHY.h3,
     color: DFARM_COLORS.primaryText,
+  },
+  affiliatedVillage: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    color: DFARM_COLORS.secondaryText,
+    marginTop: 2,
   },
   formCard: {
     paddingVertical: 20,
@@ -241,34 +394,7 @@ const styles = StyleSheet.create({
     ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '600',
     color: DFARM_COLORS.primaryText,
-    marginBottom: 8,
-  },
-  animalTypeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  animalPill: {
-    flex: 1,
-    paddingVertical: 10,
-    marginHorizontal: 3,
-    borderRadius: DFARM_RADIUS.md,
-    backgroundColor: DFARM_COLORS.surfaceInset,
-    borderWidth: 1.5,
-    borderColor: DFARM_COLORS.border,
-    alignItems: 'center',
-  },
-  animalPillActive: {
-    backgroundColor: '#FFFFFF',
-    borderColor: DFARM_COLORS.primaryOrange,
-  },
-  animalPillText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: DFARM_COLORS.secondaryText,
-  },
-  animalPillTextActive: {
-    color: DFARM_COLORS.primaryOrange,
-    fontWeight: '700',
+    marginBottom: 6,
   },
   consentCard: {
     flexDirection: 'row',
@@ -277,9 +403,10 @@ const styles = StyleSheet.create({
     borderRadius: DFARM_RADIUS.md,
     borderWidth: 1.5,
     borderColor: DFARM_COLORS.border,
-    padding: 12,
+    padding: 14,
+    marginTop: 8,
     marginBottom: 6,
-    marginTop: 4,
+    gap: 12,
   },
   consentCardActive: {
     borderColor: DFARM_COLORS.primaryOrange,
@@ -287,6 +414,7 @@ const styles = StyleSheet.create({
   },
   consentCardError: {
     borderColor: DFARM_COLORS.error,
+    backgroundColor: '#FFF8F8',
   },
   checkbox: {
     width: 22,
@@ -297,32 +425,61 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
     marginTop: 2,
   },
   checkboxActive: {
-    backgroundColor: DFARM_COLORS.primaryOrange,
     borderColor: DFARM_COLORS.primaryOrange,
+    backgroundColor: DFARM_COLORS.primaryOrange,
   },
   checkmark: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '800',
+  },
+  consentTextCol: {
+    flex: 1,
+  },
+  consentTitle: {
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryText,
+    marginBottom: 4,
   },
   consentText: {
     ...DFARM_TYPOGRAPHY.bodySm,
-    color: DFARM_COLORS.primaryText,
-    flex: 1,
+    color: DFARM_COLORS.secondaryText,
     lineHeight: 18,
   },
   consentErrorText: {
-    fontSize: 12,
+    ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.error,
+    fontWeight: '500',
     marginBottom: 12,
     marginLeft: 4,
-    fontWeight: '600',
   },
   nextBtn: {
-    marginTop: 14,
+    marginTop: 16,
+  },
+  pressed: {
+    opacity: 0.85,
+  },
+  bankHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  sectionHeaderTitle: {
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryText,
+  },
+  twoColumnRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  columnHalf: {
+    flex: 1,
   },
 });

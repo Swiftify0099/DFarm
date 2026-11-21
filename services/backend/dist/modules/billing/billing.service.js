@@ -209,21 +209,14 @@ export class BillingService {
            AND c.is_deleted = FALSE
            AND (
              c.status = 'ACTIVE'
-             OR EXISTS (
-               SELECT 1 FROM milk_collections mc 
-               WHERE mc.customer_id = c.id 
-                 AND mc.business_date >= $2::date 
-                 AND mc.business_date <= $3::date
+             OR c.id IN (
+               SELECT mc.customer_id FROM milk_collections mc 
+               WHERE mc.business_date >= $2 
+                 AND mc.business_date <= $3
              )
-             OR EXISTS (
-               SELECT 1 FROM ledger_transactions lt
-               WHERE lt.customer_id = c.id
-                 AND lt.created_at >= $2::date
-                 AND lt.created_at < ($3::date + INTERVAL '1 day')
-             )
-             OR EXISTS (
-               SELECT 1 FROM customer_ledger_accounts cla
-               WHERE cla.customer_id = c.id AND cla.current_balance <> 0.00
+             OR c.id IN (
+               SELECT cla.customer_id FROM customer_ledger_accounts cla
+               WHERE cla.current_balance <> 0.00
              )
            )
          ORDER BY c.farmer_code ASC;`, [period.center_id, period.start_date, period.end_date]);

@@ -1,4 +1,6 @@
 import { db } from '../../../infrastructure/database/PostgresPool.js';
+import { logger } from '../../../shared/logger/index.js';
+import { tenantDbManager } from '../../../infrastructure/database/TenantDatabaseManager.js';
 
 export interface NearbyDairyResult {
   id: string;
@@ -25,6 +27,10 @@ export interface NearbyDairyResult {
   distanceLabel: string | null;
   isActive: boolean;
   discoveryStatus: string;
+  provisioningStatus?: string;
+  isRegistrationEligible?: boolean;
+  registrationBlockReason?: string;
+  isOperational?: boolean;
 }
 
 export interface NearbyDairiesOutput {
@@ -33,9 +39,9 @@ export interface NearbyDairiesOutput {
   totalFound: number;
 }
 
-// Default search radius: 5 km (5000 meters) for precise GPS discovery
-// Extended to 150 km when no GPS coordinates supplied (search mode)
-const DEFAULT_RADIUS_KM = 5;
+// Default search radius: 50 km (covers typical district & neighboring talukas)
+// Extended to 150 km when no GPS coordinates supplied (regional directory mode)
+const DEFAULT_RADIUS_KM = 50;
 const EXTENDED_RADIUS_KM = 150;
 
 export class GetNearbyDairiesUseCase {
@@ -87,22 +93,52 @@ export class GetNearbyDairiesUseCase {
               -- Haversine great-circle distance in km
               (
                 6371.0 * acos(
-                  LEAST(1.0, GREATEST(-1.0,
-                    cos(radians($1::double precision))
-                    * cos(radians(o.latitude::double precision))
-                    * cos(radians(o.longitude::double precision) - radians($2::double precision))
-                    + sin(radians($1::double precision))
-                    * sin(radians(o.latitude::double precision))
-                  ))
+                  CASE 
+                    WHEN (
+                      cos(radians($1::double precision))
+                      * cos(radians(o.latitude::double precision))
+                      * cos(radians(o.longitude::double precision) - radians($2::double precision))
+                      + sin(radians($1::double precision))
+                      * sin(radians(o.latitude::double precision))
+                    ) > 1.0 THEN 1.0
+                    WHEN (
+                      cos(radians($1::double precision))
+                      * cos(radians(o.latitude::double precision))
+                      * cos(radians(o.longitude::double precision) - radians($2::double precision))
+                      + sin(radians($1::double precision))
+                      * sin(radians(o.latitude::double precision))
+                    ) < -1.0 THEN -1.0
+                    ELSE (
+                      cos(radians($1::double precision))
+                      * cos(radians(o.latitude::double precision))
+                      * cos(radians(o.longitude::double precision) - radians($2::double precision))
+                      + sin(radians($1::double precision))
+                      * sin(radians(o.latitude::double precision))
+                    )
+                  END
                 )
               ) AS distance_km
             FROM organizations o
-            LEFT JOIN users u
-              ON u.organization_id = o.id
-             AND (u.user_role = 'DAIRY_ADMIN' OR u.role IN ('DAIRY_ADMIN', 'SUPER_ADMIN'))
-            LEFT JOIN dairy_centers dc
-              ON dc.organization_id = o.id
-             AND dc.status = 'ACTIVE'
+            LEFT JOIN (
+              SELECT DISTINCT ON (organization_id)
+                organization_id,
+                full_name,
+                mobile_number,
+                phone_number
+              FROM users
+              WHERE (user_role = 'DAIRY_ADMIN' OR role IN ('DAIRY_ADMIN', 'SUPER_ADMIN'))
+              ORDER BY organization_id, created_at DESC
+            ) u ON u.organization_id = o.id
+            LEFT JOIN (
+              SELECT DISTINCT ON (organization_id)
+                organization_id,
+                id,
+                code,
+                name
+              FROM dairy_centers
+              WHERE status = 'ACTIVE'
+              ORDER BY organization_id, created_at ASC
+            ) dc ON dc.organization_id = o.id
             WHERE
               o.latitude  IS NOT NULL
               AND o.longitude IS NOT NULL
@@ -153,12 +189,26 @@ export class GetNearbyDairiesUseCase {
             dc.name AS center_name,
             NULL::double precision AS distance_km
           FROM organizations o
-          LEFT JOIN users u
-            ON u.organization_id = o.id
-           AND u.user_role = 'DAIRY_ADMIN'
-          LEFT JOIN dairy_centers dc
-            ON dc.organization_id = o.id
-           AND dc.status = 'ACTIVE'
+          LEFT JOIN (
+            SELECT DISTINCT ON (organization_id)
+              organization_id,
+              full_name,
+              mobile_number,
+              phone_number
+            FROM users
+            WHERE (user_role = 'DAIRY_ADMIN' OR role IN ('DAIRY_ADMIN', 'SUPER_ADMIN'))
+            ORDER BY organization_id, created_at DESC
+          ) u ON u.organization_id = o.id
+          LEFT JOIN (
+            SELECT DISTINCT ON (organization_id)
+              organization_id,
+              id,
+              code,
+              name
+            FROM dairy_centers
+            WHERE status = 'ACTIVE'
+            ORDER BY organization_id, created_at ASC
+          ) dc ON dc.organization_id = o.id
           WHERE
             UPPER(o.status) NOT IN ('SUSPENDED', 'DELETED', 'DISABLED')
             AND (
@@ -173,7 +223,102 @@ export class GetNearbyDairiesUseCase {
         params = [searchQuery || null];
       }
 
-      const result = await db.query(sql, params);
+      let result = await db.query(sql, params);
+
+      // Progressive expansion: if zero dairies found within initial proximity radius,
+      // fallback to returning nearest registered active dairies sorted nearest-first
+      if (hasCoords && result.rows.length === 0) {
+        const fallbackSql = `
+          WITH haversine AS (
+            SELECT
+              o.id,
+              o.code,
+              o.name,
+              o.status,
+              o.latitude,
+              o.longitude,
+              o.formatted_address,
+              o.village_locality,
+              o.city,
+              o.district,
+              o.state,
+              o.business_phone,
+              u.full_name AS admin_name,
+              COALESCE(u.mobile_number, u.phone_number) AS admin_mobile,
+              dc.id   AS center_id,
+              dc.code AS center_code,
+              dc.name AS center_name,
+              (
+                6371.0 * acos(
+                  CASE 
+                    WHEN (
+                      cos(radians($1::double precision))
+                      * cos(radians(o.latitude::double precision))
+                      * cos(radians(o.longitude::double precision) - radians($2::double precision))
+                      + sin(radians($1::double precision))
+                      * sin(radians(o.latitude::double precision))
+                    ) > 1.0 THEN 1.0
+                    WHEN (
+                      cos(radians($1::double precision))
+                      * cos(radians(o.latitude::double precision))
+                      * cos(radians(o.longitude::double precision) - radians($2::double precision))
+                      + sin(radians($1::double precision))
+                      * sin(radians(o.latitude::double precision))
+                    ) < -1.0 THEN -1.0
+                    ELSE (
+                      cos(radians($1::double precision))
+                      * cos(radians(o.latitude::double precision))
+                      * cos(radians(o.longitude::double precision) - radians($2::double precision))
+                      + sin(radians($1::double precision))
+                      * sin(radians(o.latitude::double precision))
+                    )
+                  END
+                )
+              ) AS distance_km
+            FROM organizations o
+            LEFT JOIN (
+              SELECT DISTINCT ON (organization_id)
+                organization_id,
+                full_name,
+                mobile_number,
+                phone_number
+              FROM users
+              WHERE (user_role = 'DAIRY_ADMIN' OR role IN ('DAIRY_ADMIN', 'SUPER_ADMIN'))
+              ORDER BY organization_id, created_at DESC
+            ) u ON u.organization_id = o.id
+            LEFT JOIN (
+              SELECT DISTINCT ON (organization_id)
+                organization_id,
+                id,
+                code,
+                name
+              FROM dairy_centers
+              WHERE status = 'ACTIVE'
+              ORDER BY organization_id, created_at ASC
+            ) dc ON dc.organization_id = o.id
+            WHERE
+              o.latitude IS NOT NULL
+              AND o.longitude IS NOT NULL
+              AND o.latitude <> 0
+              AND o.longitude <> 0
+              AND o.latitude BETWEEN -90 AND 90
+              AND o.longitude BETWEEN -180 AND 180
+              AND UPPER(o.status) NOT IN ('SUSPENDED', 'DELETED', 'DISABLED')
+              AND (
+                $3::text IS NULL OR $3 = ''
+                OR LOWER(o.name)             LIKE LOWER('%' || $3 || '%')
+                OR LOWER(COALESCE(o.village_locality, '')) LIKE LOWER('%' || $3 || '%')
+                OR LOWER(COALESCE(o.district, ''))         LIKE LOWER('%' || $3 || '%')
+                OR LOWER(COALESCE(o.code, ''))             LIKE LOWER('%' || $3 || '%')
+              )
+          )
+          SELECT *
+          FROM haversine
+          ORDER BY distance_km ASC
+          LIMIT 20;
+        `;
+        result = await db.query(fallbackSql, [lat, lng, searchQuery || null]);
+      }
 
       return result.rows.map((row: any) => {
         const distKm = row.distance_km !== null && row.distance_km !== undefined
@@ -189,9 +334,15 @@ export class GetNearbyDairiesUseCase {
         }
 
         const status = (row.status || '').toUpperCase();
-        // Dairies are discoverable if NOT suspended, deleted, or disabled
-        // Both ACTIVE and onboarding-phase dairies are shown unless explicitly suspended
         const isActive = !['SUSPENDED', 'DELETED', 'DISABLED'].includes(status);
+        const tenantMapping = tenantDbManager.getTenantMapping(row.id);
+        const provisioningStatus = tenantMapping?.provisioningStatus || (isActive ? 'ACTIVE' : 'PENDING');
+        const isRegistrationEligible = isActive && (provisioningStatus === 'ACTIVE' || (provisioningStatus as string) === 'READY');
+        const registrationBlockReason = !isRegistrationEligible
+          ? (provisioningStatus === 'FAILED'
+              ? 'Dairy database setup failed. Please contact dairy support.'
+              : 'Dairy database is currently initializing. Not ready for new registrations.')
+          : undefined;
 
         return {
           id: row.id,
@@ -218,9 +369,14 @@ export class GetNearbyDairiesUseCase {
           distanceLabel,
           isActive,
           discoveryStatus: status,
+          provisioningStatus,
+          isRegistrationEligible,
+          registrationBlockReason,
+          isOperational: isRegistrationEligible,
         };
       });
     } catch (err: any) {
+      logger.error({ error: err.message, stack: err.stack }, 'GetNearbyDairiesUseCase DB query error; falling back to in-memory');
       // If DB is unavailable, return empty array — the route will merge in-memory dairies
       return [];
     }

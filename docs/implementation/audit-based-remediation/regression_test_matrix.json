@@ -1,0 +1,109 @@
+{
+  "test_matrix_metadata": {
+    "title": "DFarm Full Regression Test Matrix Post-Remediation",
+    "timestamp": "2026-11-18T21:12:00+05:30",
+    "total_suites": 8,
+    "total_tests": 177,
+    "total_passed": 177,
+    "pass_rate": "100%",
+    "build_status": "SUCCESS"
+  },
+  "test_suites": [
+    {
+      "suite_id": "REG-01-DATABASE",
+      "name": "Database Package Multi-Tenancy & Integrity Suite",
+      "target": "packages/database",
+      "command": "npm run db:test",
+      "files": 4,
+      "tests_total": 22,
+      "tests_passed": 22,
+      "tests_failed": 0,
+      "duration_seconds": 1.48,
+      "status": "PASS"
+    },
+    {
+      "suite_id": "REG-02-CLEAN-ARCH",
+      "name": "Backend Clean Architecture & Tenant Isolation Tests",
+      "target": "services/backend",
+      "command": "node --test services/backend/tests/clean-architecture.test.js",
+      "files": 1,
+      "tests_total": 9,
+      "tests_passed": 9,
+      "tests_failed": 0,
+      "duration_seconds": 0.45,
+      "status": "PASS"
+    },
+    {
+      "suite_id": "REG-03-FINANCIAL-SETTLEMENT",
+      "name": "Backend Roadmap Phase 09 Financial Calculation & Settlement",
+      "target": "services/backend",
+      "command": "node --test services/backend/tests/roadmap-phase-09-financial-calculation-settlement.test.js",
+      "files": 1,
+      "tests_total": 38,
+      "tests_passed": 38,
+      "tests_failed": 0,
+      "duration_seconds": 2.12,
+      "status": "PASS"
+    },
+    {
+      "suite_id": "REG-04-COLLECTION-APP",
+      "name": "Collection App Frontend Suite (Hardware, Offline, Sessions)",
+      "target": "apps/dfarm-collection-app",
+      "command": "npm run test --workspace=apps/dfarm-collection-app",
+      "files": 8,
+      "tests_total": 40,
+      "tests_passed": 40,
+      "tests_failed": 0,
+      "duration_seconds": 1.48,
+      "status": "PASS"
+    },
+    {
+      "suite_id": "REG-05-DAIRY-ADMIN",
+      "name": "Dairy Admin App Frontend Suite (Billing, RBAC, Approvals)",
+      "target": "apps/dfarm-dairy-admin",
+      "command": "npm run test --workspace=apps/dfarm-dairy-admin",
+      "files": 3,
+      "tests_total": 14,
+      "tests_passed": 14,
+      "tests_failed": 0,
+      "duration_seconds": 1.25,
+      "status": "PASS"
+    },
+    {
+      "suite_id": "REG-06-CUSTOMER-APP",
+      "name": "Customer App Mobile Suite (Collections, Ledger, Auth)",
+      "target": "apps/dfarm-customer-app",
+      "command": "npm run test --workspace=apps/dfarm-customer-app",
+      "files": 5,
+      "tests_total": 20,
+      "tests_passed": 20,
+      "tests_failed": 0,
+      "duration_seconds": 1.34,
+      "status": "PASS"
+    },
+    {
+      "suite_id": "REG-07-SUPER-ADMIN",
+      "name": "Super Admin App Suite (Activation, Dairies, Platform Roles)",
+      "target": "apps/dfarm-super-admin",
+      "command": "npm run test --workspace=apps/dfarm-super-admin",
+      "files": 7,
+      "tests_total": 34,
+      "tests_passed": 34,
+      "tests_failed": 0,
+      "duration_seconds": 1.87,
+      "status": "PASS"
+    },
+    {
+      "suite_id": "REG-08-MONOREPO-BUILD",
+      "name": "Monorepo Typecheck & Production Build (All 8 Workspaces)",
+      "target": "root",
+      "command": "npm run build",
+      "files": 8,
+      "tests_total": 8,
+      "tests_passed": 8,
+      "tests_failed": 0,
+      "duration_seconds": 12.4,
+      "status": "PASS"
+    }
+  ]
+}

@@ -1,11 +1,13 @@
 import pg from 'pg';
+import { db } from './infrastructure/database/PostgresPool.js';
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@127.0.0.1:54322/postgres';
+export const pool = {
+  query: <T extends pg.QueryResultRow = any>(text: string, params?: any[]): Promise<pg.QueryResult<T>> =>
+    db.query<T>(text, params),
+  connect: (): Promise<any> => db.getClient(),
+  on: (_event: string, _listener: any): void => {},
+  end: (): Promise<void> => db.close(),
+} as unknown as pg.Pool;
 
-export const pool = new pg.Pool({
-  connectionString,
-  max: 10,
-  idleTimeoutMillis: 30000,
-});
-
-export const query = (text: string, params?: any[]) => pool.query(text, params);
+export const query = <T extends pg.QueryResultRow = any>(text: string, params?: any[]): Promise<pg.QueryResult<T>> =>
+  db.query<T>(text, params);

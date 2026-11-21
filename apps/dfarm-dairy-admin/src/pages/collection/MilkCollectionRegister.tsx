@@ -36,7 +36,7 @@ export const MilkCollectionRegister: React.FC = () => {
   const [notice, setNotice] = useState<{ type: 'success' | 'danger'; message: string } | null>(null)
 
   const { data: transactions = [], isLoading } = useQuery({
-    queryKey: ['collectionTransactions'],
+    queryKey: ['collectionTransactions', user?.dairyId],
     queryFn: () => api.collections.getTransactions(),
   })
 
@@ -45,9 +45,9 @@ export const MilkCollectionRegister: React.FC = () => {
     mutationFn: ({ txnId, newWeight, reason }: { txnId: string; newWeight: number; reason: string }) =>
       api.collections.adjustTransaction(txnId, newWeight, reason, user?.fullName || 'Dairy Admin'),
     onSuccess: (updatedTxn) => {
-      queryClient.invalidateQueries({ queryKey: ['collectionTransactions'] })
-      queryClient.invalidateQueries({ queryKey: ['customerLedger'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] })
+      queryClient.invalidateQueries({ queryKey: ['collectionTransactions', user?.dairyId] })
+      queryClient.invalidateQueries({ queryKey: ['customerLedger', user?.dairyId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary', user?.dairyId] })
       setShowAdjustModal(false)
       setShowDetailModal(false)
       setNewWeightInput('')

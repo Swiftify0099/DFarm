@@ -1,0 +1,40 @@
+{
+  "permissionMatrix": [
+    {
+      "category": "CATEGORY_A_OPERATIONAL",
+      "superAdminInsert": "ALLOWED_WITH_AUDIT",
+      "superAdminUpdate": "ALLOWED_WITH_AUDIT",
+      "superAdminDelete": "SOFT_DELETE_WITH_AUDIT",
+      "dairyAdminAccess": "DOMAIN_MANAGED",
+      "farmerAppAccess": "READ_ONLY",
+      "auditAction": "CONTROLLED_RECORD_INSERT/UPDATE/DELETE"
+    },
+    {
+      "category": "CATEGORY_B_LIFECYCLE",
+      "superAdminInsert": "ALLOWED_WITH_AUDIT",
+      "superAdminUpdate": "LIFECYCLE_ACTION_PREFERRED",
+      "superAdminDelete": "SOFT_DELETE_ONLY",
+      "dairyAdminAccess": "DOMAIN_WORKFLOW",
+      "farmerAppAccess": "SELF_PROFILE_READ",
+      "auditAction": "CONTROLLED_RECORD_INSERT/UPDATE/DELETE"
+    },
+    {
+      "category": "CATEGORY_C_FINANCIAL",
+      "superAdminInsert": "PROHIBITED (Must use billing/reversal engine)",
+      "superAdminUpdate": "PROHIBITED (Double-entry immutability enforced)",
+      "superAdminDelete": "PROHIBITED (Ledger history permanently preserved)",
+      "dairyAdminAccess": "READ_ONLY / MAKER_CHECKER",
+      "farmerAppAccess": "STATEMENT_READ_ONLY",
+      "auditAction": "REJECTION_LOGGED_ON_ATTEMPT"
+    },
+    {
+      "category": "CATEGORY_D_SECURITY",
+      "superAdminInsert": "PROHIBITED (Requires enrollment workflow)",
+      "superAdminUpdate": "PROHIBITED (Re-enrollment required)",
+      "superAdminDelete": "PROHIBITED",
+      "dairyAdminAccess": "NO_RAW_ACCESS",
+      "farmerAppAccess": "NO_RAW_ACCESS",
+      "auditAction": "REDACTED_IN_FLIGHT"
+    }
+  ]
+}

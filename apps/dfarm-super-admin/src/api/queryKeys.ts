@@ -34,4 +34,26 @@ export const queryKeys = {
   reports: {
     generated: (filter: Record<string, unknown>) => ['reports', 'generated', filter] as const,
   },
+  policies: {
+    rateAll: ['policies', 'rate'] as const,
+    fatSnfAll: ['policies', 'fatSnf'] as const,
+  },
+  hardware: {
+    all: ['hardware'] as const,
+    list: (filters?: Record<string, unknown>) => ['hardware', 'list', filters] as const,
+  },
+  amc: {
+    plans: ['amc', 'plans'] as const,
+    subscriptions: (dairyId?: string) => ['amc', 'subscriptions', dairyId] as const,
+  },
+  settings: {
+    platform: ['settings', 'platform'] as const,
+  },
+  tenantDatabase: {
+    overview: (dairyId: string) => ['tenantDatabase', 'overview', dairyId] as const,
+    tables: (dairyId: string) => ['tenantDatabase', 'tables', dairyId] as const,
+    schema: (dairyId: string, tableName: string) => ['tenantDatabase', 'schema', dairyId, tableName] as const,
+    records: (dairyId: string, tableName: string, params?: Record<string, unknown>) => ['tenantDatabase', 'records', dairyId, tableName, params] as const,
+    migrations: (dairyId: string) => ['tenantDatabase', 'migrations', dairyId] as const,
+  },
 }

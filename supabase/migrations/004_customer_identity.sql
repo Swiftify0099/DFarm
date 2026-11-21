@@ -28,9 +28,11 @@ CREATE TABLE IF NOT EXISTS customers (
     CONSTRAINT uq_customer_code_per_center UNIQUE (primary_center_id, farmer_code),
     CONSTRAINT chk_customer_status CHECK (status IN (
         'DRAFT', 'PENDING_FACE_ENROLLMENT', 'PENDING_RFID_ASSIGNMENT',
-        'PENDING_SYNC', 'ACTIVE', 'SUSPENDED', 'SOFT_DELETED'
+        'PENDING_SYNC', 'ACTIVE', 'SUSPENDED', 'SOFT_DELETED', 'INACTIVE'
     )),
-    CONSTRAINT chk_customer_registration_status CHECK (registration_status IN ('IN_PROGRESS', 'COMPLETED', 'REJECTED'))
+    CONSTRAINT chk_customer_registration_status CHECK (registration_status IN (
+        'IN_PROGRESS', 'COMPLETED', 'REJECTED', 'PENDING_APPROVAL', 'APPROVED', 'UNREGISTERED'
+    ))
 );
 
 CREATE TRIGGER set_customers_updated_at

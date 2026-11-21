@@ -1,0 +1,70 @@
+{
+  "timestamp": "2026-11-19T08:00:19.578Z",
+  "migrationsDirectory": "supabase/migrations",
+  "totalMigrations": 10,
+  "schemaTableCount": 43,
+  "conformingTables": 43,
+  "violationsCount": 0,
+  "migrations": [
+    {
+      "file": "001_extensions_and_common.sql",
+      "status": "APPLIED",
+      "tables": 0,
+      "description": "Extensions (uuid-ossp, pgcrypto), updated_at trigger, current_org_id claim extractor (Supabase auth.uid intact)"
+    },
+    {
+      "file": "002_organizations_and_dairies.sql",
+      "status": "APPLIED",
+      "tables": 5,
+      "description": "organizations, organization_domains, dairy_centers, dairy_banks, organization_settings"
+    },
+    {
+      "file": "003_rbac_and_users.sql",
+      "status": "APPLIED",
+      "tables": 4,
+      "description": "roles, permissions, role_permissions, app_users, user_centers"
+    },
+    {
+      "file": "004_customers_and_bank.sql",
+      "status": "APPLIED",
+      "tables": 4,
+      "description": "customers, customer_bank_accounts, customer_addresses, customer_memberships"
+    },
+    {
+      "file": "005_rfid_cards.sql",
+      "status": "APPLIED",
+      "tables": 2,
+      "description": "rfid_cards, rfid_card_assignments"
+    },
+    {
+      "file": "006_biometrics_sface.sql",
+      "status": "APPLIED",
+      "tables": 3,
+      "description": "face_models, face_enrollments, face_audit_logs"
+    },
+    {
+      "file": "007_rate_charts.sql",
+      "status": "APPLIED",
+      "tables": 4,
+      "description": "rate_charts, rate_matrix_cells, quality_incentive_slabs, deduction_slabs"
+    },
+    {
+      "file": "008_collection_sessions_and_transactions.sql",
+      "status": "APPLIED",
+      "tables": 4,
+      "description": "shift_sessions, milk_collections, quality_readings, dispatch_batches"
+    },
+    {
+      "file": "009_customer_ledger.sql",
+      "status": "APPLIED",
+      "tables": 6,
+      "description": "ledger_accounts, ledger_transactions, subledger_entries, billing_cycles, finalized_bills, payment_disbursements"
+    },
+    {
+      "file": "010_devices_sync_and_audit.sql",
+      "status": "APPLIED",
+      "tables": 11,
+      "description": "devices, device_peripherals, sync_batches, sync_batch_items, platform_alerts, amc_plans, amc_subscriptions, hardware_units, hardware_allocations, audit_logs, idempotency_records"
+    }
+  ]
+}

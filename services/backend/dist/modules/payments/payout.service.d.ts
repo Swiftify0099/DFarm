@@ -16,6 +16,8 @@ export declare class PayoutService {
     createPayout(params: CreatePayoutParams, auth: AuthContext): Promise<any>;
     approvePayout(payoutId: string, auth: AuthContext, comments?: string | null): Promise<any>;
     submitPayout(payoutId: string, auth: AuthContext, paymentReference?: string | null): Promise<any>;
+    private executeSettlePayoutFallback;
+    private executeFailPayoutFallback;
     confirmPayout(payoutId: string, auth: AuthContext, paymentReference: string, settledAt?: string, _notes?: string | null): Promise<any>;
     failPayout(payoutId: string, auth: AuthContext, failureReason: string): Promise<any>;
     reversePayout(payoutId: string, auth: AuthContext, reason: string, idempotencyKey: string): Promise<any>;
@@ -60,6 +62,7 @@ export declare class PayoutService {
     getCustomerPaymentSummary(customerId: string, auth: AuthContext): Promise<{
         customerId: string;
         currentBalance: number;
+        currentPayableBalance: number;
         eligiblePayableAmount: number;
         outstandingCustomerReceivable: number;
         currency: any;

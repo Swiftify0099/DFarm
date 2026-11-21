@@ -1,9 +1,9 @@
-import pg from 'pg';
-const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:postgres@127.0.0.1:54322/postgres';
-export const pool = new pg.Pool({
-    connectionString,
-    max: 10,
-    idleTimeoutMillis: 30000,
-});
-export const query = (text, params) => pool.query(text, params);
+import { db } from './infrastructure/database/PostgresPool.js';
+export const pool = {
+    query: (text, params) => db.query(text, params),
+    connect: () => db.getClient(),
+    on: (_event, _listener) => { },
+    end: () => db.close(),
+};
+export const query = (text, params) => db.query(text, params);
 //# sourceMappingURL=db.js.map

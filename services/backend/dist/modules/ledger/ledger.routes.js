@@ -16,6 +16,12 @@ ledgerRouter.get('/reports/advances', requireRole([UserRole.SUPER_ADMIN, UserRol
 ledgerRouter.get('/reports/register', requireRole([UserRole.SUPER_ADMIN, UserRole.DAIRY_OWNER, UserRole.CENTER_MANAGER, UserRole.ACCOUNTANT]), validateRequest({ query: ReportFilterSchema }), LedgerController.getTransactionRegisterReport);
 // Account List
 ledgerRouter.get('/accounts', requireRole([UserRole.SUPER_ADMIN, UserRole.DAIRY_OWNER, UserRole.CENTER_MANAGER, UserRole.ACCOUNTANT, UserRole.SUPERVISOR]), validateRequest({ query: LedgerAccountsQuerySchema }), LedgerController.getAccounts);
+// Account Summary by Customer ID (alias)
+ledgerRouter.get('/accounts/:customerId', requireCustomerOwnership(req => req.params['customerId']), LedgerController.getSummary);
+// Farmer Self Passbook Entries Stream
+ledgerRouter.get('/entries', LedgerController.getFarmerPassbookEntries);
+// Farmer Self Summary
+ledgerRouter.get('/summary', LedgerController.getMySummary);
 // Account Reconciliation
 ledgerRouter.post('/reconcile', requireRole([UserRole.SUPER_ADMIN, UserRole.DAIRY_OWNER, UserRole.CENTER_MANAGER, UserRole.ACCOUNTANT, UserRole.SUPERVISOR]), validateRequest({ body: ReconcileQuerySchema }), LedgerController.reconcile);
 // Advance Approvals, Rejections & Recoveries

@@ -1,0 +1,73 @@
+{
+  "classificationPolicy": "DFARM-DATA-CLASSIFICATION-v2.0",
+  "categories": {
+    "CATEGORY_A_OPERATIONAL": {
+      "name": "Standard Operational Master Data",
+      "description": "Configurable operational tables allowing controlled Super Admin CRUD with audit logging",
+      "accessMode": "CONTROLLED_CRUD",
+      "tables": [
+        "organizations",
+        "dairy_centers",
+        "rate_charts",
+        "rate_chart_slabs",
+        "feed_products",
+        "feed_inventory",
+        "feed_categories",
+        "notification_templates",
+        "tenant_metadata",
+        "device_sync_queues"
+      ]
+    },
+    "CATEGORY_B_LIFECYCLE": {
+      "name": "Business Lifecycle Managed Entities",
+      "description": "Entities transitioning through domain state machine workflows (Approval, KYC, Shift Concluded)",
+      "accessMode": "LIFECYCLE_ACTION_ONLY",
+      "tables": [
+        "users",
+        "customers",
+        "farmer_profiles",
+        "rfid_cards",
+        "rfid_assignments",
+        "kiosk_shift_sessions",
+        "milk_collections",
+        "collection_transactions",
+        "devices"
+      ]
+    },
+    "CATEGORY_C_FINANCIAL": {
+      "name": "Immutable Financial Ledger & Statements",
+      "description": "Double-entry accounting records, finalized billing cycles, and bank reconciliation. Direct UPDATE and DELETE strictly prohibited.",
+      "accessMode": "IMMUTABLE_FINANCIAL",
+      "tables": [
+        "customer_ledger_accounts",
+        "customer_subledger",
+        "customer_ledger_entries",
+        "ledger_transactions",
+        "journal_entries",
+        "billing_periods",
+        "billing_cycles",
+        "monthly_bills",
+        "farmer_bills",
+        "milk_bills",
+        "customer_payouts",
+        "payout_batches",
+        "payout_transactions",
+        "bank_reconciliation_records",
+        "feed_sales"
+      ]
+    },
+    "CATEGORY_D_SECURITY": {
+      "name": "Sensitive Security & Biometric Templates",
+      "description": "Face embeddings, minutiae templates, password hashes, and bank credentials. In-flight redaction enforced.",
+      "accessMode": "SECURITY_PROTECTED",
+      "tables": [
+        "face_biometric_templates",
+        "face_model_versions",
+        "face_enrollments",
+        "auth_tokens",
+        "otp_challenges",
+        "customer_bank_beneficiaries"
+      ]
+    }
+  }
+}

@@ -37,7 +37,17 @@ export class MilkCollectionTransaction {
         return this.props.idempotencyKey;
     }
     toJSON() {
-        return { ...this.props };
+        return {
+            ...this.props,
+            quantityLiters: this.props.weightLiters,
+            ratePerLiter: this.props.appliedRatePerLiter,
+            animalType: this.props.milkCategory,
+            receiptNumber: this.props.transactionCode,
+            collectionDate: this.props.date,
+            collectionTime: this.props.timestamp?.includes('T')
+                ? (this.props.timestamp.split('T')[1] || '').substring(0, 5)
+                : (this.props.timestamp || ''),
+        };
     }
 }
 //# sourceMappingURL=MilkCollectionTransaction.js.map

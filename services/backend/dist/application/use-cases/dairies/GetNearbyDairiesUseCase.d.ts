@@ -23,6 +23,10 @@ export interface NearbyDairyResult {
     distanceLabel: string | null;
     isActive: boolean;
     discoveryStatus: string;
+    provisioningStatus?: string;
+    isRegistrationEligible?: boolean;
+    registrationBlockReason?: string;
+    isOperational?: boolean;
 }
 export interface NearbyDairiesOutput {
     items: NearbyDairyResult[];

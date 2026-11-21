@@ -5,9 +5,19 @@ import { logger } from './shared/logger/index.js';
 let server = null;
 export function startServer() {
     server = http.createServer(app);
-    server.listen(config.PORT, () => {
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            logger.fatal({ port: config.PORT }, `Port ${config.PORT} is already in use by another process. Please free port ${config.PORT} or configure a different PORT.`);
+        }
+        else {
+            logger.fatal({ err }, 'Server error encountered during startup');
+        }
+        process.exit(1);
+    });
+    server.listen(config.PORT, '0.0.0.0', () => {
         logger.info({
             port: config.PORT,
+            host: '0.0.0.0',
             env: config.NODE_ENV,
             apiBase: config.API_BASE_URL,
         }, 'DFarm Smart Dairy Backend Server started successfully');

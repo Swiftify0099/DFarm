@@ -36,6 +36,10 @@ export class CustomerLedgerAccount {
     return this.props.customerId;
   }
 
+  public get organizationId(): string {
+    return this.props.organizationId;
+  }
+
   public get currentBalance(): number {
     return this.props.currentBalance;
   }

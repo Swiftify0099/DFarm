@@ -1,7 +1,14 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { View, Text, StyleSheet } from 'react-native';
-import { DFARM_COLORS, DFARM_RADIUS, DFARM_SHADOWS } from '../../design-system/theme';
+import { View, StyleSheet, Platform } from 'react-native';
+import { DFARM_COLORS, DFARM_RADIUS, DFARM_SHADOWS, DFARM_TYPOGRAPHY } from '../../design-system/theme';
+import {
+  NavHomeIcon,
+  NavMilkIcon,
+  NavKhataIcon,
+  NavBillsIcon,
+  NavProfileIcon,
+} from '../../assets/vectors/NavAssets';
 
 export default function MainTabsLayout() {
   return (
@@ -19,25 +26,31 @@ export default function MainTabsLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon icon="🏠" label="Home" color={color ? String(color) : '#817A75'} focused={focused} />
+            <TabIconSlot focused={focused}>
+              <NavHomeIcon size={22} color={color ? String(color) : DFARM_COLORS.secondaryText} />
+            </TabIconSlot>
           ),
         }}
       />
       <Tabs.Screen
         name="collection"
         options={{
-          title: 'Collection',
+          title: 'Milk',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon icon="🥛" label="Milk" color={color ? String(color) : '#817A75'} focused={focused} />
+            <TabIconSlot focused={focused}>
+              <NavMilkIcon size={22} color={color ? String(color) : DFARM_COLORS.secondaryText} />
+            </TabIconSlot>
           ),
         }}
       />
       <Tabs.Screen
         name="ledger"
         options={{
-          title: 'Ledger',
+          title: 'Khata',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon icon="📖" label="Khata" color={color ? String(color) : '#817A75'} focused={focused} />
+            <TabIconSlot focused={focused}>
+              <NavKhataIcon size={22} color={color ? String(color) : DFARM_COLORS.secondaryText} />
+            </TabIconSlot>
           ),
         }}
       />
@@ -46,48 +59,37 @@ export default function MainTabsLayout() {
         options={{
           title: 'Bills',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon icon="🧾" label="Bills" color={color ? String(color) : '#817A75'} focused={focused} />
+            <TabIconSlot focused={focused}>
+              <NavBillsIcon size={22} color={color ? String(color) : DFARM_COLORS.secondaryText} />
+            </TabIconSlot>
           ),
         }}
       />
       <Tabs.Screen
-        name="profile/index"
+        name="profile"
         options={{
           title: 'Profile',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon icon="👤" label="Profile" color={color ? String(color) : '#817A75'} focused={focused} />
+            <TabIconSlot focused={focused}>
+              <NavProfileIcon size={22} color={color ? String(color) : DFARM_COLORS.secondaryText} />
+            </TabIconSlot>
           ),
-        }}
-      />
-      {/* Hidden sub-routes inside profile stack */}
-      <Tabs.Screen
-        name="profile/diagnostics"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="profile/update-face"
-        options={{
-          href: null,
         }}
       />
     </Tabs>
   );
 }
 
-function TabIcon({
-  icon,
+function TabIconSlot({
+  children,
   focused,
 }: {
-  icon: string;
-  label: string;
-  color: string;
+  children: React.ReactNode;
   focused: boolean;
 }) {
   return (
     <View style={[styles.iconWrapper, focused && styles.iconWrapperFocused]}>
-      <Text style={styles.iconEmoji}>{icon}</Text>
+      {children}
     </View>
   );
 }
@@ -95,34 +97,27 @@ function TabIcon({
 const styles = StyleSheet.create({
   tabBar: {
     backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
+    borderTopWidth: 1.5,
     borderTopColor: DFARM_COLORS.border,
-    height: 64,
-    paddingBottom: 8,
+    height: Platform.OS === 'ios' ? 84 : 68,
     paddingTop: 8,
-    borderTopLeftRadius: DFARM_RADIUS.lg,
-    borderTopRightRadius: DFARM_RADIUS.lg,
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 10,
     ...DFARM_SHADOWS.clayTabBar,
   },
   tabLabel: {
+    ...DFARM_TYPOGRAPHY.bodySm,
     fontSize: 11,
     fontWeight: '700',
+    marginTop: 2,
   },
   iconWrapper: {
+    width: 40,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    width: 32,
-    height: 32,
     borderRadius: DFARM_RADIUS.pill,
   },
   iconWrapperFocused: {
     backgroundColor: DFARM_COLORS.peach,
-  },
-  iconEmoji: {
-    fontSize: 16,
   },
 });

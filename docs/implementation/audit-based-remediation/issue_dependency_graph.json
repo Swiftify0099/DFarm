@@ -1,0 +1,124 @@
+{
+  "graph_metadata": {
+    "title": "DFarm Master Issue Dependency and Remediation Flow Graph",
+    "version": "1.0.0",
+    "timestamp": "2026-11-18T21:12:00+05:30",
+    "total_nodes": 10,
+    "directed_edges": 12
+  },
+  "nodes": [
+    {
+      "id": "DFARM-AUDIT-001",
+      "layer": "DATABASE_INFRASTRUCTURE",
+      "name": "Untracked Migrations in Manifest",
+      "phase": "PRE_REQUISITE_INFRASTRUCTURE",
+      "status": "RESOLVED",
+      "blocks": ["DFARM-AUDIT-009"]
+    },
+    {
+      "id": "DFARM-AUDIT-002",
+      "layer": "DATABASE_MIGRATION",
+      "name": "Quarantine Hardcoded Maintenance SQL",
+      "phase": "DATABASE_CLEANUP",
+      "status": "RESOLVED",
+      "blocks": []
+    },
+    {
+      "id": "DFARM-AUDIT-003",
+      "layer": "FRONTEND_TESTING",
+      "name": "Super Admin Test Double Network Leaks",
+      "phase": "TEST_ISOLATION",
+      "status": "RESOLVED",
+      "blocks": []
+    },
+    {
+      "id": "DFARM-AUDIT-004",
+      "layer": "AI_BIOMETRIC_SERVICE",
+      "name": "Biometric Face Distance Threshold",
+      "phase": "CALIBRATION_PENDING",
+      "status": "PENDING_FIELD_CALIBRATION_DATASET",
+      "blocks": []
+    },
+    {
+      "id": "DFARM-AUDIT-005",
+      "layer": "COLLECTION_APP_CONTEXT",
+      "name": "Hardware Measurement Default State",
+      "phase": "FRONTEND_INTEGRITY",
+      "status": "RESOLVED",
+      "blocks": []
+    },
+    {
+      "id": "DFARM-AUDIT-006",
+      "layer": "BACKEND_ROUTING",
+      "name": "Duplicate Route Mounting & Missing Customer Ledger Route",
+      "phase": "API_CONSOLIDATION",
+      "status": "RESOLVED",
+      "blocks": ["DFARM-AUDIT-008"]
+    },
+    {
+      "id": "DFARM-AUDIT-007",
+      "layer": "FRONTEND_NETWORKING",
+      "name": "Triplicate Redundant Tenant Headers",
+      "phase": "PROTOCOL_STANDARDIZATION",
+      "status": "RESOLVED",
+      "blocks": []
+    },
+    {
+      "id": "DFARM-AUDIT-008",
+      "layer": "MOBILE_QUERY_HOOKS",
+      "name": "Unbounded Mobile Data Fetching",
+      "phase": "CLIENT_PERFORMANCE",
+      "status": "RESOLVED",
+      "blocks": []
+    },
+    {
+      "id": "DFARM-AUDIT-009",
+      "layer": "TENANT_LEDGER_WORKFLOW",
+      "name": "Offline Closed-Session Ledger Posting vs Billing Quarantine",
+      "phase": "FINANCIAL_INTEGRITY",
+      "status": "RESOLVED",
+      "blocks": []
+    },
+    {
+      "id": "DFARM-AUDIT-010",
+      "layer": "FRONTEND_ARCHITECTURE",
+      "name": "Frontend Mock Servers in Production Tree",
+      "phase": "CODEBASE_PURITY",
+      "status": "RESOLVED",
+      "blocks": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "DFARM-AUDIT-001",
+      "target": "DFARM-AUDIT-009",
+      "type": "SCHEMA_PREREQUISITE",
+      "description": "Migration 034 status hardening requires MigrationRunner and MIGRATION_MANIFEST tracking to apply to tenant databases"
+    },
+    {
+      "source": "DFARM-AUDIT-006",
+      "target": "DFARM-AUDIT-008",
+      "type": "API_CONTRACT_DEPENDENCY",
+      "description": "Customer app paginated query hooks consume the consolidated ledger routes and pagination parameters"
+    },
+    {
+      "source": "DFARM-AUDIT-007",
+      "target": "DFARM-AUDIT-006",
+      "type": "GATEWAY_ROUTING_DEPENDENCY",
+      "description": "Standardized X-Dairy-Id header routes requests through Backend TenantDatabaseManager to target tenant database"
+    },
+    {
+      "source": "DFARM-AUDIT-010",
+      "target": "DFARM-AUDIT-003",
+      "type": "TEST_ARCHITECTURE_CLEANUP",
+      "description": "Relocation of mock-backend and mock-server into test/mocks enables clean unit test mocking"
+    }
+  ],
+  "execution_sequence": [
+    "STAGE_1_DATABASE_INFRASTRUCTURE: DFARM-AUDIT-001, DFARM-AUDIT-002",
+    "STAGE_2_BACKEND_ROUTING_AND_MIGRATIONS: DFARM-AUDIT-006, DFARM-AUDIT-009",
+    "STAGE_3_CLIENT_NETWORKING_AND_PERFORMANCE: DFARM-AUDIT-007, DFARM-AUDIT-008",
+    "STAGE_4_HARDWARE_AND_BIOMETRICS: DFARM-AUDIT-005, DFARM-AUDIT-004",
+    "STAGE_5_FRONTEND_TEST_ISOLATION_AND_CODE_PURITY: DFARM-AUDIT-010, DFARM-AUDIT-003"
+  ]
+}

@@ -278,10 +278,16 @@ export async function authenticateDevice(req: Request, _res: Response, next: Nex
       throw new UnauthorizedError('Device identification required via Bearer token, X-Device-Token, or X-Device-ID header', 'UNAUTHORIZED_DEVICE');
     }
 
-    const devRes = await pool.query(
-      'SELECT id, organization_id, center_id, device_identifier, status, max_offline_hours, last_seen_at FROM devices WHERE id = $1;',
-      [deviceId]
-    );
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deviceId);
+    const devRes = isUuid
+      ? await pool.query(
+          'SELECT id, organization_id, center_id, device_identifier, status, max_offline_hours, last_seen_at FROM devices WHERE id = $1;',
+          [deviceId]
+        )
+      : await pool.query(
+          'SELECT id, organization_id, center_id, device_identifier, status, max_offline_hours, last_seen_at FROM devices WHERE device_identifier = $1;',
+          [deviceId]
+        );
 
     if (devRes.rows.length === 0) {
       throw new UnauthorizedError(`Device ${deviceId} is not registered`, 'DEVICE_NOT_FOUND');

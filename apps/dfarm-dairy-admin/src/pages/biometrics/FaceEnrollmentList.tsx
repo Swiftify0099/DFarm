@@ -28,7 +28,7 @@ export const FaceEnrollmentList: React.FC = () => {
   const [notice, setNotice] = useState<{ type: 'success' | 'danger'; message: string } | null>(null)
 
   const { data: records = [], isLoading } = useQuery({
-    queryKey: ['faceEnrollments'],
+    queryKey: ['faceEnrollments', user?.dairyId],
     queryFn: () => api.faceEnrollment.getAll(),
   })
 
@@ -37,8 +37,8 @@ export const FaceEnrollmentList: React.FC = () => {
     mutationFn: ({ recordId, note }: { recordId: string; note: string }) =>
       api.faceEnrollment.requestReEnrollment(recordId, note, user?.fullName || 'Dairy Admin'),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['faceEnrollments'] })
-      queryClient.invalidateQueries({ queryKey: ['customers'] })
+      queryClient.invalidateQueries({ queryKey: ['faceEnrollments', user?.dairyId] })
+      queryClient.invalidateQueries({ queryKey: ['customers', user?.dairyId] })
       setShowReEnrollModal(false)
       setNotice({ type: 'success', message: 'Re-enrollment notification dispatched to farmer mobile app.' })
     },
@@ -52,8 +52,8 @@ export const FaceEnrollmentList: React.FC = () => {
     mutationFn: ({ recordId, reason }: { recordId: string; reason: string }) =>
       api.faceEnrollment.revoke(recordId, reason, user?.fullName || 'Dairy Admin'),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['faceEnrollments'] })
-      queryClient.invalidateQueries({ queryKey: ['customers'] })
+      queryClient.invalidateQueries({ queryKey: ['faceEnrollments', user?.dairyId] })
+      queryClient.invalidateQueries({ queryKey: ['customers', user?.dairyId] })
       setShowRevokeModal(false)
       setNotice({ type: 'success', message: 'Face biometric template revoked and purged from collection kiosks.' })
     },

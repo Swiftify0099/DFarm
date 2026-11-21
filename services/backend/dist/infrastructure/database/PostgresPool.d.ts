@@ -6,8 +6,24 @@ export declare class PostgresDatabase {
     private isPostgresConnected;
     private constructor();
     static getInstance(): PostgresDatabase;
-    private getOrCreateMemDb;
+    private withTimeout;
+    checkConnection(): Promise<boolean>;
+    getHealth(): {
+        status: 'CONNECTED' | 'DISCONNECTED';
+        databaseMode: 'PHYSICAL_POSTGRES' | 'TEST_ISOLATED_MEM_DB';
+        poolSize: number;
+        idleCount: number;
+        waitingCount: number;
+    };
+    private isTestEnvironment;
+    /**
+     * Explicit In-Memory Test Double: Allowed in unit tests and development fallback
+     * when physical PostgreSQL cluster is unreachable.
+     * STRICTLY prohibited in production server runtime.
+     */
+    private getOrCreateTestMemDb;
     query<T extends pg.QueryResultRow = any>(text: string, params?: any[]): Promise<pg.QueryResult<T>>;
+    getClient(): Promise<any>;
     withTransaction<T>(callback: (client: pg.PoolClient) => Promise<T>): Promise<T>;
     close(): Promise<void>;
 }

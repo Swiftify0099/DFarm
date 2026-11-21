@@ -14,6 +14,7 @@ export interface CustomerProps {
     village?: string;
     rfidCardUid?: string | null;
     faceTemplateEnrolled?: boolean;
+    globalCustomerId?: string;
     balanceDue?: number;
     lastDelivery?: {
         date: string;
@@ -26,6 +27,8 @@ export interface CustomerProps {
         ifscCode?: string;
         accountHolderName?: string;
     };
+    isDeleted?: boolean;
+    deletionReason?: string;
     rejectionReason?: string;
     createdAt?: string;
     updatedAt?: string;
@@ -45,7 +48,10 @@ export declare class Customer {
     get village(): string | undefined;
     get rfidCardUid(): string | null | undefined;
     get isBiometricEnrolled(): boolean;
+    get globalCustomerId(): string | undefined;
+    setGlobalCustomerId(id: string): void;
     get balanceDue(): number;
+    get isDeleted(): boolean;
     get lastDelivery(): {
         date: string;
         shift: "MORNING" | "EVENING";
@@ -63,8 +69,18 @@ export declare class Customer {
     get rejectionReason(): string | undefined;
     approveRegistration(assignedCode?: string): void;
     rejectRegistration(reason: string): void;
+    suspend(reason?: string): void;
+    reactivate(): void;
+    updateProfile(updates: {
+        fullName?: string;
+        village?: string;
+        permittedCategories?: MilkCategory[];
+        mobileNumber?: string;
+    }): void;
     toJSON(): {
         customerCode: string;
+        isSoftDeleted: boolean;
+        faceEnrollmentStatus: string;
         id: string;
         organizationId: string;
         centerId: string;
@@ -77,6 +93,7 @@ export declare class Customer {
         village?: string;
         rfidCardUid?: string | null;
         faceTemplateEnrolled?: boolean;
+        globalCustomerId?: string;
         balanceDue?: number;
         lastDelivery?: {
             date: string;
@@ -89,6 +106,8 @@ export declare class Customer {
             ifscCode?: string;
             accountHolderName?: string;
         };
+        isDeleted?: boolean;
+        deletionReason?: string;
         rejectionReason?: string;
         createdAt?: string;
         updatedAt?: string;

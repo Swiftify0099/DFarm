@@ -4,108 +4,67 @@ import {
   MilkCollectionRecord,
   MonthlyMilkSummary,
 } from '../../types/collection';
+import { normalizeMilkCollectionRecord } from '../../utils/normalizers';
+import { useAuth } from '../auth/useAuth';
+
+export { normalizeMilkCollectionRecord };
 
 export function useCollection(filters?: {
   startDate?: string;
   endDate?: string;
   animalType?: 'ALL' | 'COW' | 'BUFFALO';
+  page?: number;
+  pageSize?: number;
 }) {
-  const collectionListQuery = useQuery({
-    queryKey: ['collection', 'list', filters],
-    queryFn: async (): Promise<MilkCollectionRecord[]> => {
-      try {
-        const response = await apiClient.get<MilkCollectionRecord[]>(
-          '/collection/history',
-          { params: filters }
-        );
-        return response.data;
-      } catch {
-        // Structured authentic default records for verification
-        const defaultRecords: MilkCollectionRecord[] = [
-          {
-            id: '1c01e92a-7140-4bc2-8a90-34901f440a01',
-            receiptNumber: 'COL-2026-11-15-M01',
-            shift: 'MORNING',
-            collectionDate: '2026-11-15',
-            collectionTime: '06:45',
-            animalType: 'COW',
-            quantityLiters: 14.5,
-            fatPercentage: 4.2,
-            snfPercentage: 8.6,
-            lactometerReading: 28.5,
-            ratePerLiter: 38.5,
-            totalAmount: 558.25,
-            operatorName: 'Sanjay Shinde',
-            operatorId: 'OP-401',
-            verifiedBiometrically: true,
-          },
-          {
-            id: '2d02f83b-8251-4cd3-9b01-45012f551b02',
-            receiptNumber: 'COL-2026-11-14-E02',
-            shift: 'EVENING',
-            collectionDate: '2026-11-14',
-            collectionTime: '18:15',
-            animalType: 'BUFFALO',
-            quantityLiters: 11.2,
-            fatPercentage: 6.8,
-            snfPercentage: 9.1,
-            lactometerReading: 30.0,
-            ratePerLiter: 58.0,
-            totalAmount: 649.6,
-            operatorName: 'Sanjay Shinde',
-            operatorId: 'OP-401',
-            verifiedBiometrically: true,
-          },
-          {
-            id: '3e03a94c-9362-4de4-ac12-56123f662c03',
-            receiptNumber: 'COL-2026-11-14-M01',
-            shift: 'MORNING',
-            collectionDate: '2026-11-14',
-            collectionTime: '06:30',
-            animalType: 'COW',
-            quantityLiters: 15.0,
-            fatPercentage: 4.1,
-            snfPercentage: 8.5,
-            lactometerReading: 28.0,
-            ratePerLiter: 37.8,
-            totalAmount: 567.0,
-            operatorName: 'Ramesh Kale',
-            operatorId: 'OP-402',
-            verifiedBiometrically: true,
-          },
-        ];
+  const { session } = useAuth();
+  const boundedFilters = {
+    page: 1,
+    pageSize: 30,
+    ...filters,
+  };
 
-        return defaultRecords.filter((rec) => {
-          if (filters?.animalType && filters.animalType !== 'ALL') {
-            return rec.animalType === filters.animalType;
-          }
-          return true;
-        });
+  const collectionListQuery = useQuery({
+    queryKey: ['collection', 'list', session?.dairyId, session?.customerId, boundedFilters],
+    queryFn: async (): Promise<MilkCollectionRecord[]> => {
+      const response = await apiClient.get<any>(
+        '/collection/history',
+        { params: boundedFilters }
+      );
+      const list = Array.isArray(response.data)
+        ? response.data
+        : Array.isArray(response.data?.data)
+        ? response.data.data
+        : Array.isArray(response.data?.data?.items)
+        ? response.data.data.items
+        : [];
+      const normalized: MilkCollectionRecord[] = list.map(normalizeMilkCollectionRecord);
+      if (boundedFilters.animalType && boundedFilters.animalType !== 'ALL') {
+        return normalized.filter((item: MilkCollectionRecord) => item.animalType === boundedFilters.animalType);
       }
+      return normalized;
     },
     staleTime: 30000,
   });
 
   const monthlySummaryQuery = useQuery({
-    queryKey: ['collection', 'monthly-summary'],
+    queryKey: ['collection', 'monthly-summary', session?.dairyId, session?.customerId],
     queryFn: async (): Promise<MonthlyMilkSummary> => {
-      try {
-        const response = await apiClient.get<MonthlyMilkSummary>(
-          '/collection/summary/monthly'
-        );
-        return response.data;
-      } catch {
-        return {
-          monthYear: 'November 2026',
-          totalLiters: 382.4,
-          cowLiters: 242.0,
-          buffaloLiters: 140.4,
-          avgFat: 4.85,
-          avgSnf: 8.78,
-          totalAmount: 18240.5,
-          transactionCount: 28,
-        };
-      }
+      const response = await apiClient.get<any>(
+        '/collection/summary/monthly'
+      );
+      const raw = response.data?.data || response.data || {};
+      return {
+        monthYear: String(
+          raw.monthYear || new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' })
+        ),
+        totalLiters: Number(raw.totalLiters ?? 0),
+        cowLiters: Number(raw.cowLiters ?? 0),
+        buffaloLiters: Number(raw.buffaloLiters ?? 0),
+        avgFat: Number(raw.avgFat ?? 0),
+        avgSnf: Number(raw.avgSnf ?? 0),
+        totalAmount: Number(raw.totalAmount ?? 0),
+        transactionCount: Number(raw.transactionCount ?? 0),
+      };
     },
     staleTime: 60000,
   });

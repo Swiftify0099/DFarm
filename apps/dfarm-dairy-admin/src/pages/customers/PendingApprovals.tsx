@@ -28,7 +28,7 @@ export const PendingApprovals: React.FC = () => {
   const [alertNotice, setAlertNotice] = useState<{ type: 'success' | 'danger'; message: string } | null>(null)
 
   const { data: requests = [], isLoading } = useQuery({
-    queryKey: ['pendingRegistrations'],
+    queryKey: ['pendingRegistrations', user?.dairyId],
     queryFn: () => api.customers.getPending(),
   })
 
@@ -38,9 +38,9 @@ export const PendingApprovals: React.FC = () => {
   const approveMutation = useMutation({
     mutationFn: (requestId: string) => api.customers.approve(requestId, user?.fullName || 'Dairy Admin'),
     onSuccess: (newCust) => {
-      queryClient.invalidateQueries({ queryKey: ['pendingRegistrations'] })
-      queryClient.invalidateQueries({ queryKey: ['customers'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] })
+      queryClient.invalidateQueries({ queryKey: ['pendingRegistrations', user?.dairyId] })
+      queryClient.invalidateQueries({ queryKey: ['customers', user?.dairyId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary', user?.dairyId] })
       setShowApproveConfirm(false)
       setShowDetailModal(false)
       setAlertNotice({
@@ -61,8 +61,8 @@ export const PendingApprovals: React.FC = () => {
     mutationFn: ({ requestId, reason }: { requestId: string; reason: string }) =>
       api.customers.reject(requestId, reason, user?.fullName || 'Dairy Admin'),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['pendingRegistrations'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] })
+      queryClient.invalidateQueries({ queryKey: ['pendingRegistrations', user?.dairyId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary', user?.dairyId] })
       setShowRejectConfirm(false)
       setShowDetailModal(false)
       setAlertNotice({

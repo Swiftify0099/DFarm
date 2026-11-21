@@ -61,6 +61,9 @@ export interface DairyTenant {
   code: string // e.g. DF-BLR-0042
   name: string
   status: DairyStatus
+  databaseName?: string
+  provisioningStatus?: string
+  provisioningError?: string
   primaryAdminId: string
   primaryAdminName: string
   primaryAdminMobile: string

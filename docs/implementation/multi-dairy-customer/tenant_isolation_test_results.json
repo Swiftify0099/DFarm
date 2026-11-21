@@ -1,0 +1,52 @@
+{
+  "auditDate": "2026-11-19T00:14:00+05:30",
+  "auditResult": "STRICT_PHYSICAL_ISOLATION_CONFIRMED",
+  "tenantsTested": [
+    {
+      "dairyId": "00000000-0000-0000-0000-000000000010",
+      "dairyCode": "WARNA-01",
+      "dairyName": "Warna Sahakari Dudh Utpadak Sanstha",
+      "status": "APPROVED",
+      "farmerCode": "C-WARNA-101"
+    },
+    {
+      "dairyId": "00000000-0000-0000-0000-000000000020",
+      "dairyCode": "KRISHNA-02",
+      "dairyName": "Krishna Valley Cooperative Dairy",
+      "status": "REJECTED",
+      "farmerCode": null
+    }
+  ],
+  "isolationChecks": [
+    {
+      "test": "Cross-Dairy Profile Query",
+      "description": "Ensure Dairy A token cannot read Dairy B customer record",
+      "passed": true,
+      "details": "GET /api/v1/customers/me returns Dairy A UUID and Warna organizationId"
+    },
+    {
+      "test": "Cross-Dairy Milk Collections Query",
+      "description": "Ensure Dairy A token cannot query milk collections of Dairy B",
+      "passed": true,
+      "details": "GET /api/v1/collections/history routed strictly to Warna tenant pool"
+    },
+    {
+      "test": "Cross-Dairy Ledger Summary Query",
+      "description": "Ensure Dairy A token cannot view ledger balance of Dairy B",
+      "passed": true,
+      "details": "GET /api/v1/ledger/summary queries Warna double-entry ledger exclusively"
+    },
+    {
+      "test": "Cross-Dairy Monthly Bills Query",
+      "description": "Ensure Dairy A token cannot view billing records of Dairy B",
+      "passed": true,
+      "details": "GET /api/v1/bills returns only Warna monthly bill items"
+    },
+    {
+      "test": "Unauthorized Dairy Switch Prevention",
+      "description": "Attempt switching session to REJECTED Dairy B",
+      "passed": true,
+      "details": "POST /api/v1/customers/switch-dairy returned 400 Bad Request with message 'Only approved memberships can be selected'"
+    }
+  ]
+}

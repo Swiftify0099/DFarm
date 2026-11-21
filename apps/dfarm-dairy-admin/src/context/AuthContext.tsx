@@ -26,6 +26,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const storedUser = api.auth.getCurrentUser()
     if (storedUser) {
       setUser(storedUser)
+      // Background verification with backend to ensure tenant binding and session are fresh
+      api.auth.getMe().then((liveUser) => {
+        if (liveUser) {
+          setUser(liveUser)
+        }
+      }).catch(() => {
+        // Ignored, fallback to stored session or prompt re-login on 401
+      })
     }
     setIsLoading(false)
   }, [])
@@ -47,7 +55,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const hasPermission = (permission: Permission): boolean => {
     if (!user) return false
-    if (user.role === 'PRIMARY_DAIRY_ADMIN') return true
+    if (user.role === 'PRIMARY_DAIRY_ADMIN' || (user.role as any) === 'SUPER_ADMIN') return true
+    if (user.permissions?.includes('ALL' as any)) return true
     return user.permissions.includes(permission)
   }
 

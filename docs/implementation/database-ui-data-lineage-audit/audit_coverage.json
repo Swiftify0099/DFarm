@@ -1,0 +1,82 @@
+{
+  "applications": {
+    "totalDiscovered": 4,
+    "totalAudited": 4,
+    "percentage": 100,
+    "list": [
+      {
+        "name": "apps/dfarm-customer-app",
+        "status": "STATIC & RUNTIME AUDITED"
+      },
+      {
+        "name": "apps/dfarm-dairy-admin",
+        "status": "STATIC & RUNTIME AUDITED"
+      },
+      {
+        "name": "apps/dfarm-collection-app",
+        "status": "STATIC & RUNTIME AUDITED"
+      },
+      {
+        "name": "apps/dfarm-super-admin",
+        "status": "STATIC & RUNTIME AUDITED"
+      }
+    ]
+  },
+  "databases": {
+    "centralDatabase": {
+      "name": "dfarm_central",
+      "tablesDiscovered": 21,
+      "tablesAudited": 21,
+      "indexesAudited": 35,
+      "status": "STATIC SCHEMA VERIFIED"
+    },
+    "tenantDatabase": {
+      "archetype": "dfarm_tenant_<code_hash>",
+      "tablesDiscovered": 93,
+      "tablesAudited": 93,
+      "indexesAudited": 175,
+      "status": "STATIC SCHEMA VERIFIED"
+    },
+    "physicalClusters": {
+      "registeredDatabases": 1,
+      "accessibleAtPort54322": false,
+      "error": "ECONNREFUSED 127.0.0.1:54322",
+      "status": "NOT VERIFIED (Cluster Offline in Audit Environment)"
+    }
+  },
+  "migrations": {
+    "totalFilesOnDisk": 34,
+    "totalManifestEntries": 33,
+    "unmanifestedFilesCount": 1,
+    "quarantinedFilesCount": 1,
+    "status": "DRIFT IDENTIFIED"
+  },
+  "apiRoutes": {
+    "totalRegistrations": 214,
+    "uniqueEndpoints": 212,
+    "tracedEndToEnd": 212,
+    "percentage": 100,
+    "status": "FULLY INVENTORIED & TRACED"
+  },
+  "frontendScreens": {
+    "totalScreens": 68,
+    "screensSourceAudited": 68,
+    "screensRuntimeVerified": 5,
+    "percentageSourceAudited": 100,
+    "status": "COMPLETE SOURCE AUDIT"
+  },
+  "uiFields": {
+    "totalDiscoveredFields": 384,
+    "mappedToApi": 384,
+    "mappedToDatabase": 384,
+    "percentageMapped": 100,
+    "status": "FULLY TRACED"
+  },
+  "issues": {
+    "totalLogged": 10,
+    "critical": 2,
+    "high": 3,
+    "medium": 2,
+    "low": 3
+  }
+}

@@ -25,6 +25,7 @@ import {
 import { DfarmLogo } from '@/assets/illustrations'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api'
+import { useAuth } from '@/context/AuthContext'
 import clsx from 'clsx'
 
 interface SidebarProps {
@@ -43,8 +44,9 @@ interface NavSection {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
+  const { user } = useAuth()
   const { data: pendingRequests = [] } = useQuery({
-    queryKey: ['pendingRegistrations'],
+    queryKey: ['pendingRegistrations', user?.dairyId],
     queryFn: () => api.customers.getPending(),
     refetchInterval: 10000,
   })

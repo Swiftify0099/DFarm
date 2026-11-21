@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api'
+import { useAuth } from '@/context/AuthContext'
 import {
   ClayCard,
   ClayButton,
@@ -41,6 +42,7 @@ import type {
 export const CustomerDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [activeTab, setActiveTab] = useState('profile')
 
   const { data: customer, isLoading } = useQuery({
@@ -199,7 +201,9 @@ export const CustomerDetail: React.FC = () => {
               </div>
               <div className="flex justify-between py-1 border-b border-[#F1E7E0]/60">
                 <span className="text-[#817A75]">Dairy Association:</span>
-                <span className="font-bold text-[#211B18]">Gokul Dairy Cooperative (DF-GOKUL-01)</span>
+                <span className="font-bold text-[#211B18]">
+                  {user?.dairyName ? `${user.dairyName} (${user.dairyCode || 'DAIRY'})` : 'Authorized Dairy'}
+                </span>
               </div>
               <div className="flex justify-between py-1">
                 <span className="text-[#817A75]">Audit Actions Recorded:</span>

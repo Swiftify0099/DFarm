@@ -140,6 +140,7 @@ export const RecentIntakeTable: React.FC<RecentIntakeTableProps> = ({ refreshTri
         keyExtractor={(item) => item.id}
         isLoading={isLoading}
         emptyMessage="No milk intakes recorded in this active shift session yet."
+        className="max-h-52 overflow-y-auto"
       />
     </ClayCard>
   )

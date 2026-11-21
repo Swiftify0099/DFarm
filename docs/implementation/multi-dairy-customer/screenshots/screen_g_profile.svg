@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="375" height="812" viewBox="0 0 375 812" fill="none">
+  <!-- Background -->
+  <rect width="375" height="812" fill="#F4F8F3"/>
+  <text x="32" y="38" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#1C2A1E">9:41</text>
+  
+  <!-- Header -->
+  <g transform="translate(24, 60)">
+    <text x="0" y="24" font-family="system-ui, sans-serif" font-size="22" font-weight="700" fill="#1C2A1E">माझे प्रोफाईल (Profile)</text>
+  </g>
+  
+  <!-- Farmer Profile Card -->
+  <g transform="translate(24, 106)">
+    <rect width="327" height="96" rx="20" fill="#FFFFFF" filter="drop-shadow(0px 6px 14px rgba(0,0,0,0.05))"/>
+    <circle cx="48" cy="48" r="28" fill="#E8F5E9"/>
+    <text x="48" y="55" text-anchor="middle" font-family="system-ui, sans-serif" font-size="20" font-weight="700" fill="#1B5E20">बा</text>
+    
+    <text x="90" y="40" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="#1C2A1E">बाळासाहेब पाटील</text>
+    <text x="90" y="58" font-family="system-ui, sans-serif" font-size="13" fill="#4D6352">+91 98765 43210</text>
+    <text x="90" y="74" font-family="system-ui, sans-serif" font-size="11" fill="#829787">गाव: वारणानगर • केवायसी: पूर्ण</text>
+  </g>
+  
+  <!-- Section Title -->
+  <g transform="translate(24, 226)">
+    <text x="0" y="16" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="#1C2A1E">माझी सर्व डेअरी खाती (Dairy Memberships)</text>
+  </g>
+  
+  <!-- Multi-Dairy Membership Card 1 -->
+  <g transform="translate(24, 254)">
+    <rect width="327" height="86" rx="18" fill="#FFFFFF" stroke="#C8E6C9" stroke-width="1.5" filter="drop-shadow(0px 4px 10px rgba(0,0,0,0.03))"/>
+    <rect x="225" y="12" width="88" height="20" rx="10" fill="#E8F5E9"/>
+    <text x="269" y="26" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" font-weight="700" fill="#1B5E20">सध्या सक्रिय</text>
+    
+    <text x="16" y="30" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1C2A1E">वारणा सहकारी दूध संस्था</text>
+    <text x="16" y="48" font-family="system-ui, sans-serif" font-size="12" fill="#4D6352">शेतकरी कोड: <tspan font-weight="700" fill="#1B5E20">C-W101</tspan> • मुख्य संकलन केंद्र</text>
+    <text x="16" y="66" font-family="system-ui, sans-serif" font-size="11" fill="#829787">वारणानगर, ता. पन्हाळा, कोल्हापूर</text>
+  </g>
+  
+  <!-- Multi-Dairy Membership Card 2 -->
+  <g transform="translate(24, 350)">
+    <rect width="327" height="86" rx="18" fill="#FFFFFF" stroke="#E0E8E1" filter="drop-shadow(0px 4px 10px rgba(0,0,0,0.03))"/>
+    <!-- Switch Action -->
+    <g transform="translate(235, 26)">
+      <rect width="78" height="30" rx="15" fill="#1B5E20"/>
+      <text x="39" y="19" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" font-weight="700" fill="#FFFFFF">स्विच करा</text>
+    </g>
+    
+    <text x="16" y="30" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1C2A1E">कृष्णा व्हॅली दूध संघ</text>
+    <text x="16" y="48" font-family="system-ui, sans-serif" font-size="12" fill="#4D6352">शेतकरी कोड: <tspan font-weight="700" fill="#1B5E20">C-K204</tspan> • उत्तर केंद्र</text>
+    <text x="16" y="66" font-family="system-ui, sans-serif" font-size="11" fill="#829787">सांगली ग्रामीण, जि. सांगली</text>
+  </g>
+  
+  <!-- Multi-Dairy Membership Card 3 -->
+  <g transform="translate(24, 446)">
+    <rect width="327" height="74" rx="18" fill="#FFFFFF" stroke="#FFE082" opacity="0.9"/>
+    <rect x="215" y="12" width="98" height="20" rx="10" fill="#FFF8E1"/>
+    <text x="264" y="26" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" font-weight="700" fill="#D48B14">मंजुरी प्रलंबित</text>
+    
+    <text x="16" y="30" font-family="system-ui, sans-serif" font-size="14" font-weight="700" fill="#1C2A1E">गोकुळ सहकारी संघ</text>
+    <text x="16" y="50" font-family="system-ui, sans-serif" font-size="12" fill="#829787">अर्ज प्रक्रिया सुरू आहे</text>
+  </g>
+  
+  <!-- Discover & Add Another Dairy Action -->
+  <g transform="translate(24, 536)">
+    <rect width="327" height="48" rx="14" fill="#E8F5E9" stroke="#C8E6C9"/>
+    <text x="163" y="29" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="#1B5E20">➕ दुसऱ्या डेअरीसाठी अर्ज करा / शोधा</text>
+  </g>
+</svg>

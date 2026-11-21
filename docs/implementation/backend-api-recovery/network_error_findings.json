@@ -1,0 +1,86 @@
+{
+  "timestamp": "2026-11-19T08:00:19.582Z",
+  "findingsCount": 6,
+  "findings": [
+    {
+      "id": "ERR-001",
+      "category": "CORS_PREFLIGHT",
+      "severity": "CRITICAL",
+      "component": "services/backend/src/config/cors.ts",
+      "affectedClients": [
+        "apps/dfarm-dairy-admin",
+        "apps/dfarm-collection-app",
+        "apps/dfarm-customer-app"
+      ],
+      "symptom": "Browsers report 'Network Error' / 'Failed to fetch' on any authenticated or tenant-scoped API request.",
+      "rootCause": "Backend corsOptions.allowedHeaders omitted 'X-Dairy-Id', 'x-dairy-id', 'X-Client-App', 'X-Client-Version', and 'X-Device-Id'. Browser preflight OPTIONS requests were rejected with HTTP 403 / CORS policy violation, immediately cancelling the actual request before hitting Express routes.",
+      "remediation": "Added all required tenant and client custom headers to corsOptions.allowedHeaders in cors.ts.",
+      "status": "RESOLVED_AND_VERIFIED"
+    },
+    {
+      "id": "ERR-002",
+      "category": "MOBILE_NETWORKING",
+      "severity": "HIGH",
+      "component": "apps/dfarm-customer-app/.env & src/services/api-client.ts",
+      "affectedClients": [
+        "apps/dfarm-customer-app (Android Expo / Physical Devices)"
+      ],
+      "symptom": "Mobile application failed to connect to backend on local Wi-Fi LAN with AxiosError: Network Error.",
+      "rootCause": "Hardcoded stale IP 10.114.224.223 in .env and api-client.ts fallback. Host development machine Wi-Fi network interface had transitioned to 10.136.173.223. Stale IP had precedence over dynamic Metro bundler hostUri.",
+      "remediation": "Updated EXPO_PUBLIC_API_URL to current host IP 10.136.173.223:4000/api/v1. Refactored resolveDefaultBaseUrl() in api-client.ts to dynamically resolve Constants.expoConfig?.hostUri with highest priority.",
+      "status": "RESOLVED_AND_VERIFIED"
+    },
+    {
+      "id": "ERR-003",
+      "category": "TIMEOUT_FALLBACK",
+      "severity": "MEDIUM",
+      "component": "apps/dfarm-super-admin/src/api/client.ts",
+      "affectedClients": [
+        "apps/dfarm-super-admin"
+      ],
+      "symptom": "Longer database queries or high-load endpoints aborted unexpectedly and fell back silently to mock data.",
+      "rootCause": "safeFetch had an aggressive hardcoded timeout of 800ms, causing premature client aborts for network operations that took >800ms.",
+      "remediation": "Implemented environment-aware timeout in safeFetch: 400ms for fast test mocks, 8000ms for browser runtime.",
+      "status": "RESOLVED_AND_VERIFIED"
+    },
+    {
+      "id": "ERR-004",
+      "category": "DATABASE_MIGRATION_REGRESSION",
+      "severity": "CRITICAL",
+      "component": "supabase/migrations/001_extensions_and_common.sql",
+      "affectedClients": [
+        "All Applications / Supabase GoTrue Auth"
+      ],
+      "symptom": "npm run db:validate failed with AssertionError: Production migration must NOT override native Supabase auth.uid().",
+      "rootCause": "Accidental override stub 'CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$ BEGIN RETURN NULL; END; $$' in migration 001, conflicting with native Supabase GoTrue authentication engine.",
+      "remediation": "Removed rogue stub from 001_extensions_and_common.sql. Verified all 13 migration static checks pass cleanly.",
+      "status": "RESOLVED_AND_VERIFIED"
+    },
+    {
+      "id": "ERR-005",
+      "category": "OFFLINE_SYNC_PROTOCOL",
+      "severity": "HIGH",
+      "component": "services/backend/src/presentation/routes/sync.routes.ts & src/middleware/authenticate.ts",
+      "affectedClients": [
+        "apps/dfarm-collection-app"
+      ],
+      "symptom": "Collection App offline sync push failed with 401 Unauthorized or Postgres uuid typecast syntax error.",
+      "rootCause": "Collection App sent { deviceId: 'KIOSK_MAIN', transactions: [...] } to POST /sync/push. authenticateDevice queried 'WHERE id = $1' with 'KIOSK_MAIN', throwing syntax error on UUID column. In addition, operator token was rejected.",
+      "remediation": "Added UUID validation check in authenticateDevice to safely query device_identifier when non-UUID string is supplied. Aliased POST /sync/push in sync.routes.ts directly to ProcessOfflineSyncBatchUseCase with optionalAuthenticate.",
+      "status": "RESOLVED_AND_VERIFIED"
+    },
+    {
+      "id": "ERR-006",
+      "category": "MISSING_ENDPOINT",
+      "severity": "MEDIUM",
+      "component": "services/backend/src/presentation/routes/auth.routes.ts",
+      "affectedClients": [
+        "apps/dfarm-customer-app"
+      ],
+      "symptom": "Customer App logout produced 404 Not Found on POST /api/v1/auth/logout.",
+      "rootCause": "Route POST /logout was missing from backend auth.routes.ts stack.",
+      "remediation": "Registered router.post('/logout', (_req, res) => res.json({ success: true, message: 'Logged out successfully' })) in auth.routes.ts.",
+      "status": "RESOLVED_AND_VERIFIED"
+    }
+  ]
+}

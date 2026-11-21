@@ -1,0 +1,53 @@
+{
+  "matrixTitle": "Customer Registration & Onboarding Test Matrix",
+  "testCases": [
+    {
+      "id": "REG-TC-01",
+      "name": "Mobile OTP Dispatch & Verification",
+      "expectedStatus": 200,
+      "payloadValid": true,
+      "result": "PASS",
+      "notes": "Creates global_customer_identities in dfarm_central"
+    },
+    {
+      "id": "REG-TC-02",
+      "name": "Customer Registration with Bank Details & Biometric",
+      "expectedStatus": 201,
+      "payloadValid": true,
+      "result": "PASS",
+      "notes": "Successfully persists customer in physical tenant DB with faceEnrollmentStatus='ENROLLED'"
+    },
+    {
+      "id": "REG-TC-03",
+      "name": "Invalid IFSC Code Rejection",
+      "expectedStatus": 400,
+      "payloadValid": false,
+      "result": "PASS",
+      "notes": "Rejected by Zod regex validation"
+    },
+    {
+      "id": "REG-TC-04",
+      "name": "Mismatched Account Number Confirmation",
+      "expectedStatus": 400,
+      "payloadValid": false,
+      "result": "PASS",
+      "notes": "Caught in client-side ClayInput validation before transmission"
+    },
+    {
+      "id": "REG-TC-05",
+      "name": "Dairy Admin Pending Approvals Query",
+      "expectedStatus": 200,
+      "payloadValid": true,
+      "result": "PASS",
+      "notes": "Returns newly registered farmer in PENDING_APPROVAL status with masked bank details"
+    },
+    {
+      "id": "REG-TC-06",
+      "name": "Dairy Admin Customer Approval",
+      "expectedStatus": 200,
+      "payloadValid": true,
+      "result": "PASS",
+      "notes": "Transitions customer to APPROVED, assigns farmerCode, initializes ledger account"
+    }
+  ]
+}

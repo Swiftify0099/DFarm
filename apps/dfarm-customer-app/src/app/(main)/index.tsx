@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -11,15 +11,25 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   DFARM_COLORS,
   DFARM_TYPOGRAPHY,
+  DFARM_RADIUS,
   ClayCard,
   ClayBadge,
 } from '../../design-system';
+import { useAuth } from '../../features/auth/useAuth';
 import { useCollection } from '../../features/collection/useCollection';
 import { useLedger } from '../../features/ledger/useLedger';
 import { useProfile } from '../../features/profile/useProfile';
+import { ShiftSunIcon, ShiftMoonIcon, NavBillsIcon, NavMilkIcon } from '../../assets/vectors/NavAssets';
+import { DairyCenterIcon } from '../../assets/vectors/LocationAssets';
+import { CowIcon } from '../../assets/vectors/CowIcon';
+import { BuffaloIcon } from '../../assets/vectors/BuffaloIcon';
+import { BiometricSuccessBadge } from '../../assets/vectors/BiometricAssets';
+import { DairySwitchModal } from '../../components/DairySwitchModal';
 
 export default function DashboardScreen() {
   const router = useRouter();
+  const { session } = useAuth();
+  const [switchModalVisible, setSwitchModalVisible] = useState(false);
   const { collections, monthlySummary } = useCollection();
   const { summary: khata } = useLedger();
   const { profile } = useProfile();
@@ -28,21 +38,30 @@ export default function DashboardScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Top App Bar */}
+      {/* Top App Bar with Farmer Greeting & Biometric Badge */}
       <View style={styles.topBar}>
         <View style={styles.userColumn}>
-          <Text style={styles.greetingText}>Namaste,</Text>
+          <Text style={styles.greetingText}>Namaste / नमस्कार,</Text>
           <Text style={styles.userName} numberOfLines={1}>
-            {profile?.fullName || 'Vitthal Dnyandeo Patil'}
+            {profile?.fullName || 'DFarm Producer'}
           </Text>
-          <Text style={styles.dairyTag} numberOfLines={1}>
-            🏛️ {profile?.dairyName || 'Shree Krishna Sahakari Dudh Sanstha'}
-          </Text>
+          <Pressable
+            onPress={() => setSwitchModalVisible(true)}
+            style={({ pressed }) => [styles.dairyTagRow, pressed && styles.pressed]}
+          >
+            <DairyCenterIcon size={16} />
+            <Text style={styles.dairyTag} numberOfLines={1}>
+              {profile?.dairyName || session?.dairyName || 'DFarm Cooperative Society'}
+            </Text>
+            <View style={styles.switchPill}>
+              <Text style={styles.switchPillText}>बदला ▾</Text>
+            </View>
+          </Pressable>
         </View>
 
         <Pressable
           onPress={() => router.push('/(main)/profile/diagnostics')}
-          style={styles.diagBadgeBtn}
+          style={({ pressed }) => [styles.diagBadgeBtn, pressed && styles.pressed]}
         >
           <ClayBadge label="Test Face" variant="orange" />
         </Pressable>
@@ -52,27 +71,70 @@ export default function DashboardScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* Biometric Enrollment Action Banner (When Approved but not yet enrolled) */}
+        {profile && !profile?.biometricStatus?.isEnrolled && (
+          <ClayCard variant="highlight" style={styles.enrollmentBanner}>
+            <View style={styles.enrollmentBannerHeader}>
+              <View style={styles.enrollmentBannerIconBox}>
+                <Text style={styles.enrollmentBannerEmoji}>📸</Text>
+              </View>
+              <View style={styles.enrollmentBannerTextBox}>
+                <Text style={styles.enrollmentBannerTitle}>
+                  Face Biometrics Not Enrolled / चेहरा नोंदणी अपूर्ण
+                </Text>
+                <Text style={styles.enrollmentBannerSubtitle}>
+                  Please enroll your face (5 quality-checked samples) to enable seamless, instant
+                  milk collection recognition at the center.
+                </Text>
+              </View>
+            </View>
+            <Pressable
+              onPress={() => router.push('/(main)/profile/update-face')}
+              style={({ pressed }) => [styles.enrollmentActionBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.enrollmentActionBtnText}>
+                Enroll Face Biometrics Now (५ नमुने) →
+              </Text>
+            </Pressable>
+          </ClayCard>
+        )}
+
         {/* Today's Milk Collection Card (Hero Clay Surface) */}
         <ClayCard variant="highlight" style={styles.heroCard}>
           <View style={styles.heroHeader}>
             <View style={styles.shiftPill}>
+              {todayRecord?.shift === 'EVENING' ? (
+                <ShiftMoonIcon size={16} />
+              ) : (
+                <ShiftSunIcon size={16} />
+              )}
               <Text style={styles.shiftPillText}>
-                {todayRecord ? `☀️ ${todayRecord.shift} SHIFT` : '☀️ TODAY SHIFT'}
+                {todayRecord ? `${todayRecord.shift} SHIFT` : 'TODAY SHIFT'}
               </Text>
             </View>
-            <ClayBadge
-              label={todayRecord?.animalType || 'COW MILK'}
-              variant={todayRecord?.animalType === 'BUFFALO' ? 'buffalo' : 'cow'}
-            />
+
+            {todayRecord && (
+              <ClayBadge
+                label={todayRecord.animalType || (todayRecord as any).milkCategory || 'COW'}
+                variant={(todayRecord.animalType || (todayRecord as any).milkCategory) === 'BUFFALO' ? 'buffalo' : 'cow'}
+                icon={
+                  (todayRecord.animalType || (todayRecord as any).milkCategory) === 'BUFFALO' ? (
+                    <BuffaloIcon size={14} />
+                  ) : (
+                    <CowIcon size={14} />
+                  )
+                }
+              />
+            )}
           </View>
 
           {todayRecord ? (
             <>
               <View style={styles.metricRow}>
                 <View style={styles.metricItem}>
-                  <Text style={styles.metricLabel}>Quantity</Text>
+                  <Text style={styles.metricLabel}>Milk Volume</Text>
                   <Text style={styles.metricValueLarge}>
-                    {todayRecord.quantityLiters.toFixed(1)}
+                    {((todayRecord.quantityLiters ?? (todayRecord as any).weightLiters ?? 0)).toFixed(1)}
                     <Text style={styles.unitText}> L</Text>
                   </Text>
                 </View>
@@ -82,7 +144,7 @@ export default function DashboardScreen() {
                 <View style={styles.metricItem}>
                   <Text style={styles.metricLabel}>Today's Value</Text>
                   <Text style={styles.metricValueLarge}>
-                    ₹{todayRecord.totalAmount.toFixed(2)}
+                    ₹{((todayRecord.totalAmount ?? 0)).toFixed(2)}
                   </Text>
                 </View>
               </View>
@@ -90,52 +152,78 @@ export default function DashboardScreen() {
               {/* Quality Indicators: FAT & SNF */}
               <View style={styles.qualityContainer}>
                 <View style={styles.qualityPill}>
-                  <Text style={styles.qualityLabel}>FAT</Text>
-                  <Text style={styles.qualityValue}>{todayRecord.fatPercentage}%</Text>
+                  <Text style={styles.qualityLabel}>FAT / फॅट</Text>
+                  <Text style={styles.qualityValue}>
+                    {((todayRecord.fatPercentage ?? (todayRecord as any).fat ?? 0)).toFixed(1)}%
+                  </Text>
                 </View>
                 <View style={styles.qualityPill}>
-                  <Text style={styles.qualityLabel}>SNF</Text>
-                  <Text style={styles.qualityValue}>{todayRecord.snfPercentage}%</Text>
+                  <Text style={styles.qualityLabel}>SNF / एस.एन.एफ</Text>
+                  <Text style={styles.qualityValue}>
+                    {((todayRecord.snfPercentage ?? (todayRecord as any).snf ?? 0)).toFixed(1)}%
+                  </Text>
                 </View>
                 <View style={styles.qualityPill}>
-                  <Text style={styles.qualityLabel}>RATE</Text>
-                  <Text style={styles.qualityValue}>₹{todayRecord.ratePerLiter}/L</Text>
+                  <Text style={styles.qualityLabel}>RATE / दर</Text>
+                  <Text style={styles.qualityValue}>
+                    ₹{((todayRecord.ratePerLiter ?? (todayRecord as any).appliedRatePerLiter ?? 0)).toFixed(2)}/L
+                  </Text>
                 </View>
               </View>
             </>
           ) : (
             <View style={styles.emptyToday}>
+              <Text style={styles.emptyTodayTitle}>No Milk Collection Recorded Today</Text>
               <Text style={styles.emptyTodayText}>
-                Morning collection starts at 06:00 AM
+                Deliver your milk to your local collection center. Your shift pour and quality
+                metrics will reflect here automatically.
               </Text>
             </View>
           )}
         </ClayCard>
 
         {/* Khata / Financial Summary Card */}
-        <Pressable onPress={() => router.push('/(main)/ledger')}>
+        <Pressable
+          onPress={() => router.push('/(main)/ledger')}
+          style={({ pressed }) => pressed && styles.pressed}
+        >
           <ClayCard variant="raised" style={styles.khataCard}>
             <View style={styles.cardHeaderRow}>
-              <Text style={styles.cardSectionTitle}>Khata Ledger Balance</Text>
-              <ClayBadge label="Payable to You" variant="success" />
+              <Text style={styles.cardSectionTitle}>Khata Ledger Balance / खाते शिल्लक</Text>
+              <ClayBadge
+                label={(khata?.currentBalance ?? 0) >= 0 ? 'Payable to You' : 'Due to Dairy'}
+                variant={(khata?.currentBalance ?? 0) >= 0 ? 'success' : 'error'}
+              />
             </View>
 
             <Text style={styles.balanceAmount}>
-              ₹{khata?.currentBalance.toLocaleString('en-IN') || '12,480.00'}
+              ₹
+              {(khata?.currentBalance ?? 0).toLocaleString('en-IN', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
             </Text>
 
             <View style={styles.khataStatsRow}>
-              <View>
+              <View style={styles.khataStatCol}>
                 <Text style={styles.khataSubLabel}>Total Milk Earnings</Text>
-                <Text style={styles.khataSubValue}>
-                  ₹{khata?.totalMilkEarnings.toLocaleString('en-IN') || '28,530.00'}
+                <Text style={styles.khataSubValueCredit}>
+                  +₹
+                  {(khata?.totalMilkEarnings ?? 0).toLocaleString('en-IN', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </Text>
               </View>
               <View style={styles.metricDivider} />
-              <View>
+              <View style={styles.khataStatCol}>
                 <Text style={styles.khataSubLabel}>Feed Deductions</Text>
-                <Text style={styles.khataSubValue}>
-                  ₹{khata?.totalDeductions.toLocaleString('en-IN') || '16,050.00'}
+                <Text style={styles.khataSubValueDebit}>
+                  -₹
+                  {(khata?.totalDeductions ?? 0).toLocaleString('en-IN', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </Text>
               </View>
             </View>
@@ -146,36 +234,40 @@ export default function DashboardScreen() {
         <ClayCard variant="raised" style={styles.monthlyCard}>
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardSectionTitle}>
-              {monthlySummary?.monthYear || 'November 2026'} Performance
+              {monthlySummary?.monthYear ||
+                new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' })}{' '}
+              Performance
             </Text>
-            <Text style={styles.txCount}>
-              {monthlySummary?.transactionCount || 28} Collections
-            </Text>
+            <ClayBadge
+              label={`${monthlySummary?.transactionCount ?? 0} Pours`}
+              variant="neutral"
+            />
           </View>
 
           <View style={styles.monthlyGrid}>
             <View style={styles.gridCell}>
               <Text style={styles.gridCellLabel}>Total Volume</Text>
               <Text style={styles.gridCellValue}>
-                {monthlySummary?.totalLiters || 382.4} L
+                {(monthlySummary?.totalLiters ?? 0).toFixed(1)} L
               </Text>
             </View>
             <View style={styles.gridCell}>
               <Text style={styles.gridCellLabel}>Avg Fat / SNF</Text>
               <Text style={styles.gridCellValue}>
-                {monthlySummary?.avgFat || 4.85}% / {monthlySummary?.avgSnf || 8.78}%
+                {(monthlySummary?.avgFat ?? 0).toFixed(1)}% /{' '}
+                {(monthlySummary?.avgSnf ?? 0).toFixed(1)}%
               </Text>
             </View>
             <View style={styles.gridCell}>
               <Text style={styles.gridCellLabel}>Cow Volume</Text>
               <Text style={styles.gridCellValue}>
-                {monthlySummary?.cowLiters || 242.0} L
+                {(monthlySummary?.cowLiters ?? 0).toFixed(1)} L
               </Text>
             </View>
             <View style={styles.gridCell}>
               <Text style={styles.gridCellLabel}>Buffalo Volume</Text>
               <Text style={styles.gridCellValue}>
-                {monthlySummary?.buffaloLiters || 140.4} L
+                {(monthlySummary?.buffaloLiters ?? 0).toFixed(1)} L
               </Text>
             </View>
           </View>
@@ -185,35 +277,40 @@ export default function DashboardScreen() {
         <View style={styles.quickActionsRow}>
           <Pressable
             onPress={() => router.push('/(main)/collection')}
-            style={styles.quickActionBox}
+            style={({ pressed }) => [styles.quickActionBox, pressed && styles.pressed]}
           >
             <ClayCard variant="raised" style={styles.quickActionInner}>
-              <Text style={styles.quickActionIcon}>📋</Text>
+              <NavMilkIcon size={26} color={DFARM_COLORS.primaryOrange} />
               <Text style={styles.quickActionTitle}>Shift History</Text>
             </ClayCard>
           </Pressable>
 
           <Pressable
             onPress={() => router.push('/(main)/bills')}
-            style={styles.quickActionBox}
+            style={({ pressed }) => [styles.quickActionBox, pressed && styles.pressed]}
           >
             <ClayCard variant="raised" style={styles.quickActionInner}>
-              <Text style={styles.quickActionIcon}>🧾</Text>
+              <NavBillsIcon size={26} color={DFARM_COLORS.primaryOrange} />
               <Text style={styles.quickActionTitle}>Statements</Text>
             </ClayCard>
           </Pressable>
 
           <Pressable
             onPress={() => router.push('/(main)/profile/diagnostics')}
-            style={styles.quickActionBox}
+            style={({ pressed }) => [styles.quickActionBox, pressed && styles.pressed]}
           >
             <ClayCard variant="raised" style={styles.quickActionInner}>
-              <Text style={styles.quickActionIcon}>🔍</Text>
-              <Text style={styles.quickActionTitle}>Biometrics</Text>
+              <BiometricSuccessBadge size={26} />
+              <Text style={styles.quickActionTitle}>Face Sensor</Text>
             </ClayCard>
           </Pressable>
         </View>
       </ScrollView>
+
+      <DairySwitchModal
+        visible={switchModalVisible}
+        onClose={() => setSwitchModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -245,19 +342,88 @@ const styles = StyleSheet.create({
     ...DFARM_TYPOGRAPHY.h2,
     color: DFARM_COLORS.primaryText,
   },
+  dairyTagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
   dairyTag: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.primaryOrange,
-    marginTop: 2,
     fontWeight: '600',
+    flex: 1,
+  },
+  switchPill: {
+    backgroundColor: '#FFE9D6',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginLeft: 6,
+  },
+  switchPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryOrange,
   },
   diagBadgeBtn: {
     alignSelf: 'center',
   },
   scrollContent: {
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 84,
+    paddingVertical: 14,
+    paddingBottom: 28,
+  },
+  enrollmentBanner: {
+    marginBottom: 16,
+    padding: 16,
+    backgroundColor: '#FFF7ED',
+    borderWidth: 1.5,
+    borderColor: DFARM_COLORS.primaryOrange,
+  },
+  enrollmentBannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 12,
+  },
+  enrollmentBannerIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: DFARM_RADIUS.md,
+    backgroundColor: '#FFEDD5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  enrollmentBannerEmoji: {
+    fontSize: 20,
+  },
+  enrollmentBannerTextBox: {
+    flex: 1,
+  },
+  enrollmentBannerTitle: {
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryText,
+    marginBottom: 4,
+  },
+  enrollmentBannerSubtitle: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    color: DFARM_COLORS.secondaryText,
+    lineHeight: 16,
+  },
+  enrollmentActionBtn: {
+    backgroundColor: DFARM_COLORS.primaryOrange,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: DFARM_RADIUS.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  enrollmentActionBtnText: {
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   heroCard: {
     marginBottom: 16,
@@ -270,72 +436,93 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   shiftPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#FFFFFF',
+    paddingVertical: 5,
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 9999,
+    borderRadius: DFARM_RADIUS.pill,
+    borderWidth: 1,
+    borderColor: '#F7D6C1',
+    gap: 6,
   },
   shiftPillText: {
-    fontSize: 12,
+    ...DFARM_TYPOGRAPHY.badge,
+    color: DFARM_COLORS.primaryOrange,
     fontWeight: '700',
-    color: DFARM_COLORS.primaryText,
   },
   metricRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    justifyContent: 'space-between',
+    marginVertical: 4,
   },
   metricItem: {
     flex: 1,
-    alignItems: 'center',
   },
   metricLabel: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   metricValueLarge: {
     ...DFARM_TYPOGRAPHY.numberDisplay,
-  },
-  unitText: {
-    fontSize: 18,
     color: DFARM_COLORS.primaryText,
   },
+  unitText: {
+    ...DFARM_TYPOGRAPHY.h3,
+    color: DFARM_COLORS.secondaryText,
+  },
   metricDivider: {
-    width: 1,
+    width: 1.5,
     height: 38,
-    backgroundColor: '#E8D0C0',
+    backgroundColor: DFARM_COLORS.border,
+    marginHorizontal: 14,
   },
   qualityContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 10,
+    gap: 8,
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F7D6C1',
   },
   qualityPill: {
     flex: 1,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: DFARM_RADIUS.sm,
+    borderWidth: 1,
+    borderColor: '#F7D6C1',
     alignItems: 'center',
   },
   qualityLabel: {
+    ...DFARM_TYPOGRAPHY.bodySm,
     fontSize: 10,
-    fontWeight: '700',
     color: DFARM_COLORS.secondaryText,
     marginBottom: 2,
   },
   qualityValue: {
-    fontSize: 14,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '800',
     color: DFARM_COLORS.primaryText,
   },
   emptyToday: {
-    paddingVertical: 20,
+    paddingVertical: 14,
     alignItems: 'center',
   },
-  emptyTodayText: {
+  emptyTodayTitle: {
     ...DFARM_TYPOGRAPHY.bodyMd,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryText,
+    marginBottom: 4,
+  },
+  emptyTodayText: {
+    ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
+    textAlign: 'center',
+    lineHeight: 18,
   },
   khataCard: {
     marginBottom: 16,
@@ -352,45 +539,55 @@ const styles = StyleSheet.create({
     color: DFARM_COLORS.primaryText,
   },
   balanceAmount: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: DFARM_COLORS.success,
-    marginBottom: 14,
+    ...DFARM_TYPOGRAPHY.numberDisplay,
+    color: DFARM_COLORS.primaryOrange,
+    marginVertical: 4,
   },
   khataStatsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: 10,
     paddingTop: 10,
     borderTopWidth: 1,
     borderTopColor: DFARM_COLORS.border,
   },
+  khataStatCol: {
+    flex: 1,
+  },
   khataSubLabel: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
-    marginBottom: 2,
   },
-  khataSubValue: {
-    fontSize: 14,
+  khataSubValueCredit: {
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '700',
-    color: DFARM_COLORS.primaryText,
+    color: '#2E7D32',
+    marginTop: 2,
+  },
+  khataSubValueDebit: {
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    fontWeight: '700',
+    color: '#D32F2F',
+    marginTop: 2,
   },
   monthlyCard: {
     marginBottom: 16,
     padding: 18,
   },
-  txCount: {
-    ...DFARM_TYPOGRAPHY.bodySm,
-    color: DFARM_COLORS.secondaryText,
-  },
   monthlyGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: 8,
+    gap: 10,
+    marginTop: 10,
   },
   gridCell: {
-    width: '50%',
-    paddingVertical: 8,
+    flexBasis: '47%',
+    backgroundColor: DFARM_COLORS.surfaceInset,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: DFARM_RADIUS.sm,
+    borderWidth: 1,
+    borderColor: DFARM_COLORS.border,
   },
   gridCellLabel: {
     ...DFARM_TYPOGRAPHY.bodySm,
@@ -398,29 +595,30 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   gridCellValue: {
-    ...DFARM_TYPOGRAPHY.h3,
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    fontWeight: '700',
     color: DFARM_COLORS.primaryText,
   },
   quickActionsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+    gap: 10,
   },
   quickActionBox: {
     flex: 1,
-    marginHorizontal: 4,
   },
   quickActionInner: {
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 14,
-  },
-  quickActionIcon: {
-    fontSize: 22,
-    marginBottom: 4,
+    gap: 8,
   },
   quickActionTitle: {
-    fontSize: 12,
+    ...DFARM_TYPOGRAPHY.bodySm,
     fontWeight: '700',
     color: DFARM_COLORS.primaryText,
+  },
+  pressed: {
+    transform: [{ scale: 0.98 }],
+    opacity: 0.9,
   },
 });

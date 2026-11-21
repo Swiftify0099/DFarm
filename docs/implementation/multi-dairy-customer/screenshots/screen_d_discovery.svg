@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="375" height="812" viewBox="0 0 375 812" fill="none">
+  <!-- Background -->
+  <rect width="375" height="812" fill="#F4F8F3"/>
+  <text x="32" y="38" font-family="system-ui, sans-serif" font-size="14" font-weight="600" fill="#1C2A1E">9:41</text>
+  
+  <!-- Header -->
+  <g transform="translate(24, 60)">
+    <text x="0" y="24" font-family="system-ui, sans-serif" font-size="22" font-weight="700" fill="#1C2A1E">जवळपासच्या डेअरी शोधा</text>
+    <text x="0" y="48" font-family="system-ui, sans-serif" font-size="13" fill="#4D6352">तुमच्या परिसरातील सक्रिय दूध उत्पादक सहकारी संस्था</text>
+  </g>
+  
+  <!-- GPS Status Banner -->
+  <g transform="translate(24, 126)">
+    <rect width="327" height="44" rx="14" fill="#E8F5E9" stroke="#C8E6C9"/>
+    <text x="16" y="27" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#1B5E20">📍 लाइव्ह GPS: १६.८४° N, ७४.२८° E (वारणानगर)</text>
+  </g>
+  
+  <!-- Area Preset Pills -->
+  <g transform="translate(24, 186)">
+    <!-- Active Pill -->
+    <rect x="0" y="0" width="80" height="34" rx="17" fill="#1B5E20"/>
+    <text x="40" y="21" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#FFFFFF">सर्व जवळचे</text>
+    
+    <!-- Pill 2 -->
+    <rect x="88" y="0" width="76" height="34" rx="17" fill="#FFFFFF" stroke="#E0E8E1"/>
+    <text x="126" y="21" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#4D6352">वारणानगर</text>
+    
+    <!-- Pill 3 -->
+    <rect x="172" y="0" width="70" height="34" rx="17" fill="#FFFFFF" stroke="#E0E8E1"/>
+    <text x="207" y="21" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#4D6352">कोल्हापूर</text>
+    
+    <!-- Pill 4 -->
+    <rect x="250" y="0" width="60" height="34" rx="17" fill="#FFFFFF" stroke="#E0E8E1"/>
+    <text x="280" y="21" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" fill="#4D6352">सांगली</text>
+  </g>
+  
+  <!-- Discovery Card 1: Warna (Already Registered) -->
+  <g transform="translate(24, 238)">
+    <rect width="327" height="142" rx="20" fill="#FFFFFF" filter="drop-shadow(0px 6px 14px rgba(0,0,0,0.05))"/>
+    <rect x="0.5" y="0.5" width="326" height="141" rx="19.5" stroke="#C8E6C9" stroke-width="1.5"/>
+    
+    <!-- Already Registered Tag -->
+    <rect x="205" y="14" width="108" height="22" rx="11" fill="#E8F5E9"/>
+    <text x="259" y="29" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" font-weight="700" fill="#1B5E20">✓ आधीच नोंदणीकृत</text>
+    
+    <text x="18" y="32" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="#1C2A1E">वारणा सहकारी दूध संस्था</text>
+    <text x="18" y="52" font-family="system-ui, sans-serif" font-size="12" fill="#829787">वारणानगर, ता. पन्हाळा, कोल्हापूर</text>
+    
+    <!-- Distance Chip -->
+    <rect x="18" y="68" width="105" height="26" rx="8" fill="#F4F8F3"/>
+    <text x="26" y="85" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#1B5E20">📍 १.२ किमी अंतरावर</text>
+    
+    <!-- Action: Switch -->
+    <g transform="translate(18, 102)">
+      <rect width="291" height="30" rx="10" fill="#F4F8F3" stroke="#C8E6C9"/>
+      <text x="145" y="19" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#1B5E20">या डेअरीवर जा (Switch to this Dairy) →</text>
+    </g>
+  </g>
+  
+  <!-- Discovery Card 2: Rajarambapu Patil Dairy (New Opportunity) -->
+  <g transform="translate(24, 396)">
+    <rect width="327" height="142" rx="20" fill="#FFFFFF" filter="drop-shadow(0px 6px 14px rgba(0,0,0,0.05))"/>
+    <rect x="0.5" y="0.5" width="326" height="141" rx="19.5" stroke="#E0E8E1"/>
+    
+    <!-- Active Cooperative Badge -->
+    <rect x="225" y="14" width="88" height="22" rx="11" fill="#FFF8E1"/>
+    <text x="269" y="29" text-anchor="middle" font-family="system-ui, sans-serif" font-size="10" font-weight="700" fill="#D48B14">प्रमाणित डेअरी</text>
+    
+    <text x="18" y="32" font-family="system-ui, sans-serif" font-size="16" font-weight="700" fill="#1C2A1E">राजारामबापू पाटील दूध संघ</text>
+    <text x="18" y="52" font-family="system-ui, sans-serif" font-size="12" fill="#829787">इस्लामपूर, ता. वाळवा, सांगली</text>
+    
+    <!-- Distance Chip -->
+    <rect x="18" y="68" width="105" height="26" rx="8" fill="#F4F8F3"/>
+    <text x="26" y="85" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#4D6352">📍 ५.८ किमी अंतरावर</text>
+    
+    <!-- Action: Register -->
+    <g transform="translate(18, 102)">
+      <rect width="291" height="30" rx="10" fill="#1B5E20"/>
+      <text x="145" y="19" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="700" fill="#FFFFFF">या डेअरीमध्ये नवीन नोंदणी करा (Register) →</text>
+    </g>
+  </g>
+</svg>

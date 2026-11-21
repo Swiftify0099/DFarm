@@ -28,37 +28,19 @@ export function useRegistration() {
         mobileNumber: phone,
       };
 
-      try {
-        const response = await apiClient.post<RegistrationResponse>(
-          '/customers/register',
-          payload
-        );
-        const result = response.data;
-        await secureStorage.saveSession({
-          accessToken: (await secureStorage.getAccessToken()) || '',
-          refreshToken: (await secureStorage.getRefreshToken()) || '',
-          customerId: result.customerUuid,
-          dairyId: data.selectedDairyId,
-          status: 'PENDING_APPROVAL',
-        });
-        return result;
-      } catch (err: any) {
-        // Fallback response for isolated offline/development testing
-        const fallback: RegistrationResponse = {
-          success: true,
-          customerUuid: 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d',
-          status: 'PENDING_APPROVAL',
-          submissionTimestamp: new Date().toISOString(),
-        };
-        await secureStorage.saveSession({
-          accessToken: (await secureStorage.getAccessToken()) || 'dev_token',
-          refreshToken: (await secureStorage.getRefreshToken()) || 'dev_refresh',
-          customerId: fallback.customerUuid,
-          dairyId: data.selectedDairyId,
-          status: 'PENDING_APPROVAL',
-        });
-        return fallback;
-      }
+      const response = await apiClient.post<RegistrationResponse>(
+        '/customers/register',
+        payload
+      );
+      const result = response.data;
+      await secureStorage.saveSession({
+        accessToken: (await secureStorage.getAccessToken()) || '',
+        refreshToken: (await secureStorage.getRefreshToken()) || '',
+        customerId: result.customerUuid,
+        dairyId: data.selectedDairyId,
+        status: 'PENDING_APPROVAL',
+      });
+      return result;
     },
   });
 
@@ -67,16 +49,8 @@ export function useRegistration() {
     queryFn: async () => {
       const customerId = await secureStorage.getCustomerId();
       if (!customerId) return null;
-      try {
-        const response = await apiClient.get<CustomerRegistrationStatusInfo>(`/customers/${customerId}/status`);
-        return response.data;
-      } catch {
-        return {
-          status: 'PENDING_APPROVAL',
-          registrationStatus: 'PENDING_APPROVAL',
-          assignedDairyName: 'Shree Krishna Sahakari Dudh Utpadak Sanstha',
-        };
-      }
+      const response = await apiClient.get<CustomerRegistrationStatusInfo>(`/customers/${customerId}/status`);
+      return response.data;
     },
     refetchInterval: 10000, // Poll every 10 seconds on pending screen
   });

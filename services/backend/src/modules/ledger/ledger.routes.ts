@@ -68,6 +68,25 @@ ledgerRouter.get(
   LedgerController.getAccounts
 );
 
+// Account Summary by Customer ID (alias)
+ledgerRouter.get(
+  '/accounts/:customerId',
+  requireCustomerOwnership(req => req.params['customerId'] as string),
+  LedgerController.getSummary
+);
+
+// Farmer Self Passbook Entries Stream
+ledgerRouter.get(
+  '/entries',
+  LedgerController.getFarmerPassbookEntries
+);
+
+// Farmer Self Summary
+ledgerRouter.get(
+  '/summary',
+  LedgerController.getMySummary
+);
+
 // Account Reconciliation
 ledgerRouter.post(
   '/reconcile',

@@ -15,7 +15,7 @@ export class GetActiveShiftSessionUseCase {
     deviceName?: string;
   }): Promise<KioskShiftSession> {
     const deviceId = params.deviceIdentifier || 'KIOSK_MAIN';
-    const existing = await this.sessionRepo.findActiveSession(params.centerId, deviceId);
+    const existing = await this.sessionRepo.findActiveSession(params.centerId, deviceId, params.organizationId);
     if (existing) {
       return existing;
     }
@@ -26,11 +26,18 @@ export class GetActiveShiftSessionUseCase {
     const shift: ShiftType = currentHour >= 4 && currentHour < 15 ? 'MORNING' : 'EVENING';
     const businessDate = now.toISOString().split('T')[0] || '';
     const datePart = businessDate.replace(/-/g, '');
-    const sessionCode = `SH-${datePart}-${shift[0]}-${deviceId.substring(0, 4).toUpperCase()}`;
+    const baseCode = `SH-${datePart}-${shift[0]}-${deviceId.substring(0, 4).toUpperCase()}`;
+
+    // Check if session for today & shift already exists in database
+    const existingWithCode = await this.sessionRepo.findByCode(baseCode, params.organizationId);
+    if (existingWithCode) {
+      // If it exists in the database (even if CLOSED), return it so UI accurately displays session state
+      return existingWithCode;
+    }
 
     const newSession = new KioskShiftSession({
       id: crypto.randomUUID(),
-      sessionCode,
+      sessionCode: baseCode,
       organizationId: params.organizationId,
       centerId: params.centerId,
       businessDate,
@@ -70,7 +77,7 @@ export class OpenShiftSessionUseCase {
     deviceName?: string;
   }): Promise<KioskShiftSession> {
     const deviceId = params.deviceIdentifier || 'KIOSK_MAIN';
-    const existing = await this.sessionRepo.findActiveSession(params.centerId, deviceId);
+    const existing = await this.sessionRepo.findActiveSession(params.centerId, deviceId, params.organizationId);
     if (existing) {
       return existing;
     }
@@ -80,7 +87,21 @@ export class OpenShiftSessionUseCase {
     const shift: ShiftType = params.shift || (currentHour >= 4 && currentHour < 15 ? 'MORNING' : 'EVENING');
     const businessDate = params.businessDate || now.toISOString().split('T')[0] || '';
     const datePart = businessDate.replace(/-/g, '');
-    const sessionCode = `SH-${datePart}-${shift[0]}-${deviceId.substring(0, 4).toUpperCase()}`;
+    const baseCode = `SH-${datePart}-${shift[0]}-${deviceId.substring(0, 4).toUpperCase()}`;
+
+    // Find a unique, unconflicted session code (e.g. baseCode or baseCode-02 if previous session was concluded)
+    let sessionCode = baseCode;
+    let existingWithCode = await this.sessionRepo.findByCode(sessionCode, params.organizationId);
+    let counter = 2;
+    while (existingWithCode) {
+      if (existingWithCode.isOpen) {
+        return existingWithCode;
+      }
+      sessionCode = `${baseCode}-${String(counter).padStart(2, '0')}`;
+      existingWithCode = await this.sessionRepo.findByCode(sessionCode, params.organizationId);
+      counter++;
+      if (counter > 99) break;
+    }
 
     const newSession = new KioskShiftSession({
       id: crypto.randomUUID(),
@@ -117,13 +138,34 @@ export class CloseShiftSessionUseCase {
     sessionCode: string;
     operatorId: string;
     operatorName: string;
+    organizationId?: string;
   }): Promise<KioskShiftSession> {
-    const session = await this.sessionRepo.findByCode(params.sessionCode);
+    const session = await this.sessionRepo.findByCode(params.sessionCode, params.organizationId);
     if (!session) {
       throw new DomainValidationError(`Shift session ${params.sessionCode} was not found.`);
     }
 
     session.close(params.operatorId, params.operatorName);
+    await this.sessionRepo.save(session);
+    return session;
+  }
+}
+
+export class ReopenShiftSessionUseCase {
+  constructor(private readonly sessionRepo: IShiftSessionRepository) {}
+
+  public async execute(params: {
+    sessionCode: string;
+    operatorId?: string;
+    operatorName?: string;
+    organizationId?: string;
+  }): Promise<KioskShiftSession> {
+    const session = await this.sessionRepo.findByCode(params.sessionCode, params.organizationId);
+    if (!session) {
+      throw new DomainValidationError(`Shift session ${params.sessionCode} was not found.`);
+    }
+
+    session.reopen(params.operatorId, params.operatorName);
     await this.sessionRepo.save(session);
     return session;
   }

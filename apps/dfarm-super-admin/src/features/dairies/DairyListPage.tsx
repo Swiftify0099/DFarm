@@ -12,6 +12,7 @@ import { ClaySelect } from '@/components/ui/ClaySelect'
 import { CreateDairyModal } from './CreateDairyModal'
 import { SuspendDairyModal } from './SuspendDairyModal'
 import { ReactivateDairyModal } from './ReactivateDairyModal'
+import { DeleteDairyModal } from './DeleteDairyModal'
 import type { DairyTenant } from '@/types'
 import { formatDateOnly, formatMobile } from '@/utils/formatters'
 import {
@@ -24,6 +25,10 @@ import {
   CheckCircle2,
   Cpu,
   Activity,
+  Database,
+  CheckCircle,
+  AlertTriangle,
+  Trash2,
 } from 'lucide-react'
 
 export const DairyListPage: React.FC = () => {
@@ -36,6 +41,7 @@ export const DairyListPage: React.FC = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [selectedSuspendDairy, setSelectedSuspendDairy] = useState<DairyTenant | null>(null)
   const [selectedReactivateDairy, setSelectedReactivateDairy] = useState<DairyTenant | null>(null)
+  const [selectedDeleteDairy, setSelectedDeleteDairy] = useState<DairyTenant | null>(null)
 
   const {
     data: dairies = [],
@@ -60,17 +66,59 @@ export const DairyListPage: React.FC = () => {
       header: 'Dairy Business & Tenant Code',
       render: (d) => (
         <div className="flex flex-col">
-          <span className="font-bold text-[#211B18] hover:text-[#FF6A00] transition-colors">
+          <span className="font-bold text-[#211B18] hover:text-[#FF6A00] transition-colors cursor-pointer" onClick={() => navigate(`/databases?dairyId=${d.id}`)}>
             {d.name}
           </span>
-          <span className="font-mono text-xs text-[#817A75]">{d.code}</span>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className="font-mono text-xs text-[#817A75] bg-[#FAF2EC] px-1.5 py-0.5 rounded border border-[#F1E7E0]">{d.code}</span>
+            <span className="font-mono text-[10px] text-[#A8A19B] truncate max-w-[80px]" title={d.id}>ID: {d.id.slice(0, 8)}...</span>
+          </div>
         </div>
       ),
     },
     {
       key: 'status',
-      header: 'Tenant Status',
-      render: (d) => <ClayBadge variant={d.status} />,
+      header: 'Dairy Lifecycle',
+      render: (d) => (
+        <div className="flex flex-col gap-1 items-start">
+          <ClayBadge variant={d.status} />
+        </div>
+      ),
+    },
+    {
+      key: 'database',
+      header: 'Tenant Database & Health',
+      render: (d) => {
+        const provStatus = d.provisioningStatus || 'READY'
+        const isFailed = provStatus === 'FAILED'
+        const isReady = provStatus === 'READY' || provStatus === 'ACTIVE'
+        return (
+          <div className="flex flex-col gap-1 text-xs">
+            <div className="flex items-center gap-1.5 font-mono text-[11px] font-semibold text-[#211B18]">
+              <Database className="w-3 h-3 text-[#FF6A00]" />
+              <span className="truncate max-w-[140px]" title={`dfarm_tenant_${d.code.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${d.id.slice(0, 8)}`}>
+                dfarm_tenant_{d.code.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 10)}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                  isFailed
+                    ? 'bg-rose-100 text-rose-700'
+                    : isReady
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-amber-100 text-amber-700'
+                }`}
+              >
+                {provStatus}
+              </span>
+              <span className="text-[10px] text-emerald-700 font-semibold flex items-center gap-0.5">
+                <CheckCircle className="w-2.5 h-2.5" /> Healthy
+              </span>
+            </div>
+          </div>
+        )
+      },
     },
     {
       key: 'location',
@@ -127,6 +175,15 @@ export const DairyListPage: React.FC = () => {
       align: 'right',
       render: (d) => (
         <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+          {/* Database Manager Icon Button */}
+          <button
+            onClick={() => navigate(`/databases?dairyId=${d.id}`)}
+            className="p-1.5 rounded-lg border border-[#FFD0B5] bg-[#FFF2EA] hover:bg-[#FFE0CE] text-[#FF6A00] transition-colors"
+            title="Open Tenant Database Manager"
+          >
+            <Database className="w-3.5 h-3.5" />
+          </button>
+
           <button
             onClick={() => navigate(`/dairies/${d.id}`)}
             className="p-1.5 rounded-lg border border-[#F1E7E0] hover:bg-[#FFE9DC] text-[#211B18] hover:text-[#FF6A00] transition-colors"
@@ -134,6 +191,21 @@ export const DairyListPage: React.FC = () => {
           >
             <Eye className="w-3.5 h-3.5" />
           </button>
+
+          {d.provisioningStatus === 'FAILED' && (
+            <button
+              onClick={async () => {
+                try {
+                  await apiClient.retryTenantProvisioning(d.id)
+                  refetch()
+                } catch {}
+              }}
+              className="p-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+              title="Retry Tenant Database Provisioning"
+            >
+              <Activity className="w-3.5 h-3.5" />
+            </button>
+          )}
 
           {d.status === 'suspended' ? (
             <button
@@ -146,12 +218,20 @@ export const DairyListPage: React.FC = () => {
           ) : (
             <button
               onClick={() => setSelectedSuspendDairy(d)}
-              className="p-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors"
+              className="p-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
               title="Suspend Tenant"
             >
               <XCircle className="w-3.5 h-3.5" />
             </button>
           )}
+
+          <button
+            onClick={() => setSelectedDeleteDairy(d)}
+            className="p-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors"
+            title="Permanently Delete & Deprovision Tenant"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
         </div>
       ),
     },
@@ -246,6 +326,13 @@ export const DairyListPage: React.FC = () => {
         isOpen={!!selectedReactivateDairy}
         onClose={() => setSelectedReactivateDairy(null)}
         dairy={selectedReactivateDairy}
+        onSuccess={() => refetch()}
+      />
+
+      <DeleteDairyModal
+        isOpen={!!selectedDeleteDairy}
+        onClose={() => setSelectedDeleteDairy(null)}
+        dairy={selectedDeleteDairy}
         onSuccess={() => refetch()}
       />
     </div>

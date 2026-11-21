@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   DFARM_COLORS,
   DFARM_TYPOGRAPHY,
+  DFARM_RADIUS,
   ClayCard,
   ClayButton,
   ClayOTPInput,
@@ -20,7 +21,6 @@ import {
   ClayBadge,
 } from '../../design-system';
 import { useAuth } from '../../features/auth/useAuth';
-import { DirectDoveSmsService } from '../../services/smsService';
 
 export default function VerifyOtpScreen() {
   const router = useRouter();
@@ -47,11 +47,12 @@ export default function VerifyOtpScreen() {
     try {
       await requestOtp({ mobileNumber });
     } catch (err: any) {
-      try {
-        await DirectDoveSmsService.sendDirectDoveOtp(mobileNumber);
-      } catch {
-        setError(err?.response?.data?.message || 'Failed to resend OTP');
-      }
+      setError(
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        'Failed to resend OTP. Please retry.'
+      );
     }
   };
 
@@ -67,27 +68,34 @@ export default function VerifyOtpScreen() {
         otp,
       });
 
-      if (session.user.status === 'APPROVED') {
-        router.replace('/(main)');
-      } else if (session.user.status === 'PENDING_APPROVAL') {
-        router.replace('/(onboarding)/pending-approval');
-      } else {
+      const memberships = session.memberships || [];
+      if (memberships.length === 0) {
+        // No dairy registrations yet -> start discovery
         router.replace({
           pathname: '/(onboarding)/dairy-discovery',
+          params: { mobileNumber },
+        });
+      } else if (memberships.length === 1 && memberships[0].membershipStatus === 'APPROVED') {
+        // Exactly 1 approved dairy -> enter dashboard
+        router.replace('/(main)');
+      } else if (memberships.length === 1 && memberships[0].membershipStatus === 'PENDING_APPROVAL') {
+        // 1 pending registration -> view status
+        router.replace({
+          pathname: '/(onboarding)/pending-approval',
+          params: {
+            dairyName: memberships[0].dairyName,
+            customerId: memberships[0].id,
+            farmerCode: memberships[0].farmerCode || undefined,
+          },
+        });
+      } else {
+        // Multiple dairy accounts (or mixed statuses) -> Show Dairy Account Selector
+        router.replace({
+          pathname: '/(auth)/select-dairy',
           params: { mobileNumber },
         });
       }
     } catch (err: any) {
-      // Check emergency direct SMS verification fallback
-      const isDirectValid = await DirectDoveSmsService.verifyDirectDoveOtp(mobileNumber, otp);
-      if (isDirectValid) {
-        router.replace({
-          pathname: '/(onboarding)/dairy-discovery',
-          params: { mobileNumber },
-        });
-        return;
-      }
-
       setError(
         err?.response?.data?.message ||
         err?.response?.data?.error ||
@@ -105,7 +113,8 @@ export default function VerifyOtpScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ClayHeader
-        title="Verification"
+        title="Security Verification"
+        subtitle="ओटीपी पडताळणी"
         onBack={() => router.back()}
       />
 
@@ -116,6 +125,7 @@ export default function VerifyOtpScreen() {
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
           <ClayCard variant="raised" style={styles.card}>
             <View style={styles.badgeRow}>
@@ -124,14 +134,14 @@ export default function VerifyOtpScreen() {
 
             <Text style={styles.heading}>Enter 6-Digit Code</Text>
             <Text style={styles.subtitle}>
-              Code sent to <Text style={styles.boldText}>{maskedNumber}</Text>
+              Code dispatched via SMS to <Text style={styles.boldText}>{maskedNumber}</Text>
             </Text>
 
             <Pressable
               onPress={() => router.back()}
-              style={styles.changeNumberBtn}
+              style={({ pressed }) => [styles.changeNumberBtn, pressed && styles.pressed]}
             >
-              <Text style={styles.changeNumberText}>Edit Phone Number</Text>
+              <Text style={styles.changeNumberText}>Edit Phone Number / नंबर बदला</Text>
             </Pressable>
 
             <ClayOTPInput
@@ -143,7 +153,11 @@ export default function VerifyOtpScreen() {
               error={!!error}
             />
 
-            {error && <Text style={styles.errorText}>{error}</Text>}
+            {error && (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>⚠️ {error}</Text>
+              </View>
+            )}
 
             <ClayButton
               title="Verify & Continue"
@@ -156,10 +170,12 @@ export default function VerifyOtpScreen() {
             <View style={styles.resendRow}>
               <Text style={styles.resendLabel}>Didn't receive code? </Text>
               {timer > 0 ? (
-                <Text style={styles.timerText}>Resend in {timer}s</Text>
+                <View style={styles.timerPill}>
+                  <Text style={styles.timerText}>Resend in {timer}s</Text>
+                </View>
               ) : (
-                <Pressable onPress={handleResend}>
-                  <Text style={styles.resendAction}>Resend OTP</Text>
+                <Pressable onPress={handleResend} style={({ pressed }) => pressed && styles.pressed}>
+                  <Text style={styles.resendAction}>Resend OTP Now</Text>
                 </Pressable>
               )}
             </View>
@@ -181,7 +197,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingVertical: 24,
+    paddingVertical: 20,
     justifyContent: 'center',
   },
   card: {
@@ -199,51 +215,70 @@ const styles = StyleSheet.create({
   subtitle: {
     ...DFARM_TYPOGRAPHY.bodyMd,
     color: DFARM_COLORS.secondaryText,
-    marginBottom: 4,
+    lineHeight: 20,
+    marginBottom: 8,
   },
   boldText: {
-    fontWeight: '700',
     color: DFARM_COLORS.primaryText,
+    fontWeight: '700',
   },
   changeNumberBtn: {
     alignSelf: 'flex-start',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   changeNumberText: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.primaryOrange,
-    fontWeight: '600',
+    fontWeight: '700',
     textDecorationLine: 'underline',
+  },
+  errorBox: {
+    backgroundColor: '#FFF8F8',
+    borderColor: '#FFCDD2',
+    borderWidth: 1,
+    borderRadius: DFARM_RADIUS.sm,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginBottom: 16,
   },
   errorText: {
     ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.error,
-    textAlign: 'center',
-    marginBottom: 12,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   verifyBtn: {
-    marginTop: 6,
-    marginBottom: 16,
+    marginTop: 8,
+    marginBottom: 18,
   },
   resendRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 4,
+    justifyContent: 'center',
   },
   resendLabel: {
-    ...DFARM_TYPOGRAPHY.bodyMd,
+    ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
+  },
+  timerPill: {
+    backgroundColor: DFARM_COLORS.surfaceInset,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: DFARM_RADIUS.pill,
+    borderWidth: 1,
+    borderColor: DFARM_COLORS.border,
   },
   timerText: {
-    ...DFARM_TYPOGRAPHY.bodyMd,
-    color: DFARM_COLORS.secondaryText,
-    fontWeight: '600',
-  },
-  resendAction: {
-    ...DFARM_TYPOGRAPHY.bodyMd,
+    ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.primaryOrange,
     fontWeight: '700',
+  },
+  resendAction: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    color: DFARM_COLORS.primaryOrange,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
+  pressed: {
+    opacity: 0.75,
   },
 });

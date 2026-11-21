@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { MockDairyBackend } from '@/api/mock-server'
+import { MockDairyBackend } from './mocks/mock-server'
 
 describe('Feed Inventory & Customer Sales Synchronization', () => {
   it('deducts physical inventory and creates server-authoritative ledger debit on customer sale', async () => {

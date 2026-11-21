@@ -7,10 +7,24 @@ import { SessionSummaryModal } from './SessionSummaryModal'
 import { Clock, Milk, Wallet, Activity, Users, Printer, XCircle, PlusCircle, CheckCircle } from 'lucide-react'
 
 export const SessionManagement: React.FC = () => {
-  const { activeSession, refreshSession } = useHardware()
+  const { activeSession, refreshSession, reopenSession } = useHardware()
   const [isCloseModalOpen, setIsCloseModalOpen] = useState(false)
   const [isOpenModalOpen, setIsOpenModalOpen] = useState(false)
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false)
+  const [isReopening, setIsReopening] = useState(false)
+
+  const handleReopen = async () => {
+    if (!activeSession?.sessionCode) return
+    setIsReopening(true)
+    try {
+      await reopenSession(activeSession.sessionCode)
+      await refreshSession()
+    } catch (err: any) {
+      alert(`Reopen failed: ${err.message}`)
+    } finally {
+      setIsReopening(false)
+    }
+  }
 
   if (!activeSession) {
     return (
@@ -62,15 +76,28 @@ export const SessionManagement: React.FC = () => {
 
         <div className="flex items-center space-x-2">
           {!isOpen && (
-            <ClayButton
-              variant="primary"
-              size="sm"
-              onClick={() => setIsOpenModalOpen(true)}
-              className="flex items-center space-x-1.5 text-xs"
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span>Open New Shift</span>
-            </ClayButton>
+            <>
+              <ClayButton
+                variant="primary"
+                size="sm"
+                onClick={handleReopen}
+                disabled={isReopening}
+                className="flex items-center space-x-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                <CheckCircle className="w-4 h-4" />
+                <span>{isReopening ? 'Reopening...' : 'Reopen Shift'}</span>
+              </ClayButton>
+
+              <ClayButton
+                variant="outline"
+                size="sm"
+                onClick={() => setIsOpenModalOpen(true)}
+                className="flex items-center space-x-1.5 text-xs"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>Open New Shift</span>
+              </ClayButton>
+            </>
           )}
 
           <ClayButton

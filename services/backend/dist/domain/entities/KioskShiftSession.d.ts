@@ -51,9 +51,11 @@ export declare class KioskShiftSession {
     get openingOperatorName(): string;
     recordTransaction(category: 'COW' | 'BUFFALO', weightLiters: number, fat: number, snf: number, amount: number): void;
     close(operatorId: string, operatorName: string): void;
+    reopen(operatorId?: string, operatorName?: string): void;
     toJSON(): {
         id: string;
         sessionCode: string;
+        organizationId: string;
         dairyId: string;
         centerId: string;
         date: string;

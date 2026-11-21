@@ -17,13 +17,13 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
   onClose,
 }) => {
   const navigate = useNavigate()
-  const { simulateFaceDetection } = useHardware()
+  const { selectManualCustomer } = useHardware()
 
   if (!customer) return null
 
-  const handleSelectForIntake = async () => {
+  const handleSelectForIntake = () => {
     onClose()
-    await simulateFaceDetection(customer.customerCode)
+    selectManualCustomer(customer)
     navigate('/collection')
   }
 
@@ -32,7 +32,7 @@ export const CustomerDetailModal: React.FC<CustomerDetailModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Patron Profile & Biometric Ledger"
-      description={`Customer #${customer.customerCode} • Enrolled under Dairy Gokul`}
+      description={`Customer #${customer.customerCode} • Active Producer Profile`}
       size="md"
     >
       <div className="space-y-4">

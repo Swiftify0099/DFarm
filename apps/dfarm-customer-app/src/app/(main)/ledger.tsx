@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   DFARM_COLORS,
   DFARM_TYPOGRAPHY,
+  DFARM_RADIUS,
   ClayCard,
   ClayBadge,
   ClayHeader,
@@ -19,11 +20,15 @@ import { useLedger } from '../../features/ledger/useLedger';
 export default function LedgerScreen() {
   const { entries, summary, isLoadingEntries } = useLedger();
 
+  const currentBalance = summary?.currentBalance ?? 0;
+  const totalCredits = summary?.totalMilkEarnings ?? 0;
+  const totalDebits = summary?.totalDeductions ?? 0;
+
   return (
     <SafeAreaView style={styles.container}>
       <ClayHeader
         title="Customer Khata"
-        subtitle="Authoritative Ledger & Financial Balance"
+        subtitle="अधिकृत दुग्ध खाते व ताळेबंद"
       />
 
       {/* Top Ledger Summary Card */}
@@ -32,31 +37,36 @@ export default function LedgerScreen() {
           <View style={styles.summaryTopRow}>
             <Text style={styles.summaryTitle}>Current Account Balance</Text>
             <ClayBadge
-              label={
-                (summary?.currentBalance || 0) >= 0
-                  ? 'Payable to You'
-                  : 'Due to Dairy'
-              }
-              variant={(summary?.currentBalance || 0) >= 0 ? 'success' : 'error'}
+              label={currentBalance >= 0 ? 'Payable to You' : 'Due to Dairy'}
+              variant={currentBalance >= 0 ? 'success' : 'error'}
             />
           </View>
 
           <Text style={styles.balanceBig}>
-            ₹{summary?.currentBalance.toLocaleString('en-IN') || '12,480.00'}
+            ₹{currentBalance.toLocaleString('en-IN', {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
           </Text>
 
           <View style={styles.summaryBreakdown}>
             <View style={styles.breakdownItem}>
               <Text style={styles.breakdownLabel}>Total Milk Credits</Text>
               <Text style={styles.creditValue}>
-                +₹{summary?.totalMilkEarnings.toLocaleString('en-IN') || '28,530.00'}
+                +₹{totalCredits.toLocaleString('en-IN', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </Text>
             </View>
             <View style={styles.verticalDivider} />
             <View style={styles.breakdownItem}>
               <Text style={styles.breakdownLabel}>Feed / Deductions</Text>
               <Text style={styles.debitValue}>
-                -₹{summary?.totalDeductions.toLocaleString('en-IN') || '16,050.00'}
+                -₹{totalDebits.toLocaleString('en-IN', {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </Text>
             </View>
           </View>
@@ -64,9 +74,9 @@ export default function LedgerScreen() {
 
         {/* Audit Guarantee Note */}
         <View style={styles.auditNotice}>
+          <View style={styles.auditDot} />
           <Text style={styles.auditNoticeText}>
-            🔒 Official Dairy Khata: Server-authoritative audit trail. Records
-            are verified and locked by the dairy administration.
+            Official Dairy Khata: Double-entry audit trail certified by dairy administration.
           </Text>
         </View>
       </View>
@@ -82,26 +92,26 @@ export default function LedgerScreen() {
           data={entries}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
           renderItem={({ item }) => {
             const isCredit = item.type === 'MILK_CREDIT';
-            const isDebit =
-              item.type === 'FEED_DEBIT' ||
-              item.type === 'CASH_ADVANCE_DEBIT' ||
-              item.type === 'BANK_PAYOUT';
+            const categoryLabel =
+              item.type === 'MILK_CREDIT'
+                ? 'Milk Intake Credit'
+                : item.type === 'FEED_DEBIT'
+                ? 'Cattle Feed Debit'
+                : item.type === 'BANK_PAYOUT'
+                ? 'Bank Disbursal'
+                : 'Adjustment';
 
             return (
               <ClayCard variant="raised" style={styles.entryCard}>
                 <View style={styles.entryHeader}>
                   <View style={styles.entryLeft}>
-                    <Text style={styles.entryTypeTag}>
-                      {item.type === 'MILK_CREDIT'
-                        ? '🥛 Milk Collection'
-                        : item.type === 'FEED_DEBIT'
-                        ? '🌾 Cattle Feed'
-                        : item.type === 'BANK_PAYOUT'
-                        ? '🏦 Bank Settlement'
-                        : '⚙️ Adjustment'}
-                    </Text>
+                    <ClayBadge
+                      label={categoryLabel}
+                      variant={isCredit ? 'cow' : 'neutral'}
+                    />
                     <Text style={styles.entryDesc}>{item.description}</Text>
                   </View>
 
@@ -113,8 +123,8 @@ export default function LedgerScreen() {
                       ]}
                     >
                       {isCredit
-                        ? `+₹${item.creditAmount.toFixed(2)}`
-                        : `-₹${item.debitAmount.toFixed(2)}`}
+                        ? `+₹${((item.creditAmount ?? 0)).toFixed(2)}`
+                        : `-₹${((item.debitAmount ?? 0)).toFixed(2)}`}
                     </Text>
                   </View>
                 </View>
@@ -122,7 +132,7 @@ export default function LedgerScreen() {
                 <View style={styles.entryFooter}>
                   <Text style={styles.footerRef}>Ref: #{item.referenceId || item.id}</Text>
                   <Text style={styles.runningBalance}>
-                    Balance: ₹{item.runningBalance.toFixed(2)}
+                    Balance: ₹{((item.runningBalance ?? 0)).toFixed(2)}
                   </Text>
                 </View>
               </ClayCard>
@@ -153,67 +163,79 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   summaryTitle: {
-    ...DFARM_TYPOGRAPHY.bodySm,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     color: DFARM_COLORS.secondaryText,
   },
   balanceBig: {
-    fontSize: 30,
-    fontWeight: '800',
-    color: DFARM_COLORS.success,
-    marginBottom: 12,
+    ...DFARM_TYPOGRAPHY.numberDisplay,
+    fontSize: 32,
+    color: DFARM_COLORS.primaryOrange,
+    marginVertical: 6,
   },
   summaryBreakdown: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: 10,
     paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: '#E8D0C0',
+    borderTopColor: '#F7D6C1',
   },
   breakdownItem: {
     flex: 1,
   },
   breakdownLabel: {
-    fontSize: 11,
+    ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
-    marginBottom: 2,
   },
   creditValue: {
-    fontSize: 14,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '700',
-    color: DFARM_COLORS.success,
+    color: '#2E7D32',
+    marginTop: 2,
   },
   debitValue: {
-    fontSize: 14,
+    ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '700',
-    color: DFARM_COLORS.error,
+    color: '#D32F2F',
+    marginTop: 2,
   },
   verticalDivider: {
-    width: 1,
-    height: 30,
-    backgroundColor: '#E8D0C0',
-    marginHorizontal: 12,
+    width: 1.5,
+    height: 32,
+    backgroundColor: '#F7D6C1',
+    marginHorizontal: 14,
   },
   auditNotice: {
-    backgroundColor: DFARM_COLORS.surfaceInset,
-    borderRadius: 8,
-    padding: 8,
-    marginTop: 8,
-    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF9F5',
     borderWidth: 1,
     borderColor: DFARM_COLORS.border,
+    borderRadius: DFARM_RADIUS.sm,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 4,
+    gap: 8,
+  },
+  auditDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#2E7D32',
   },
   auditNoticeText: {
-    fontSize: 11,
+    ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
-    lineHeight: 15,
+    flex: 1,
+    lineHeight: 16,
   },
   listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 84,
+    padding: 16,
+    gap: 12,
+    paddingBottom: 24,
   },
   entryCard: {
-    marginBottom: 10,
     padding: 14,
   },
   entryHeader: {
@@ -225,44 +247,41 @@ const styles = StyleSheet.create({
   entryLeft: {
     flex: 1,
     marginRight: 10,
-  },
-  entryTypeTag: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: DFARM_COLORS.secondaryText,
-    marginBottom: 2,
+    gap: 4,
   },
   entryDesc: {
     ...DFARM_TYPOGRAPHY.bodyMd,
     fontWeight: '600',
     color: DFARM_COLORS.primaryText,
+    marginTop: 2,
   },
   entryAmountCol: {
     alignItems: 'flex-end',
   },
   entryAmount: {
-    fontSize: 15,
+    ...DFARM_TYPOGRAPHY.h3,
     fontWeight: '800',
   },
   creditAmount: {
-    color: DFARM_COLORS.success,
+    color: '#2E7D32',
   },
   debitAmount: {
-    color: DFARM_COLORS.error,
+    color: '#D32F2F',
   },
   entryFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingTop: 8,
+    alignItems: 'center',
     borderTopWidth: 1,
     borderTopColor: DFARM_COLORS.border,
+    paddingTop: 8,
   },
   footerRef: {
-    fontSize: 11,
+    ...DFARM_TYPOGRAPHY.bodySm,
     color: DFARM_COLORS.secondaryText,
   },
   runningBalance: {
-    fontSize: 11,
+    ...DFARM_TYPOGRAPHY.bodySm,
     fontWeight: '700',
     color: DFARM_COLORS.primaryText,
   },

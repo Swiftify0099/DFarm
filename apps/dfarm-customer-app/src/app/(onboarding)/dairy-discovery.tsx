@@ -6,6 +6,7 @@ import {
   FlatList,
   Pressable,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +14,7 @@ import {
   DFARM_COLORS,
   DFARM_TYPOGRAPHY,
   DFARM_RADIUS,
+  DFARM_SHADOWS,
   ClayCard,
   ClayButton,
   ClayInput,
@@ -20,6 +22,7 @@ import {
   ClayHeader,
   ClayLoadingState,
   ClayEmptyState,
+  DistanceBadge,
 } from '../../design-system';
 import {
   useDairyDiscovery,
@@ -28,6 +31,12 @@ import {
 } from '../../features/dairy/useDairyDiscovery';
 import { Dairy } from '../../types/dairy';
 import { locationService } from '../../services/location-service';
+import { useAuth } from '../../features/auth/useAuth';
+import {
+  LocationPinIcon,
+  GpsPulseIcon,
+  DairyCenterIcon,
+} from '../../assets/vectors/LocationAssets';
 
 type LocationState =
   | { kind: 'detecting' }
@@ -39,23 +48,32 @@ type LocationState =
 export default function DairyDiscoveryScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ mobileNumber?: string }>();
+  const { memberships, switchDairy } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDairy, setSelectedDairy] = useState<Dairy | null>(null);
   const [activeArea, setActiveArea] = useState<string>('gps');
   const [locationState, setLocationState] = useState<LocationState>({ kind: 'detecting' });
+  const [isSwitchingExisting, setIsSwitchingExisting] = useState(false);
 
   // Derive selectedCoords from locationState for query dependency
-  const selectedCoords = locationState.kind === 'ready' || locationState.kind === 'manual'
-    ? { latitude: locationState.latitude, longitude: locationState.longitude }
-    : locationState.kind === 'detecting'
-    ? undefined  // undefined = will try GPS in hook
-    : null;      // null = "All Areas" — fetch all without radius filter
+  const selectedCoords =
+    locationState.kind === 'ready'
+      ? { latitude: locationState.latitude, longitude: locationState.longitude }
+      : locationState.kind === 'manual'
+      ? locationState.latitude !== undefined && locationState.longitude !== undefined
+        ? { latitude: locationState.latitude, longitude: locationState.longitude }
+        : null
+      : locationState.kind === 'detecting'
+      ? undefined
+      : null;
 
   const {
     data: dairies,
     isLoading,
     refetch,
-  } = useDairyDiscovery(searchQuery, selectedCoords);
+  } = useDairyDiscovery(searchQuery, selectedCoords, {
+    enabled: locationState.kind !== 'detecting',
+  });
 
   const [isRefreshingLocation, setIsRefreshingLocation] = useState(false);
 
@@ -76,7 +94,6 @@ export default function DairyDiscoveryScreen() {
             label: 'GPS Current Location',
           });
         } else {
-          // GPS returned null — permission denied or unavailable
           setLocationState({ kind: 'denied' });
           setActiveArea('all');
         }
@@ -88,7 +105,9 @@ export default function DairyDiscoveryScreen() {
       }
     }
     detectLocation();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleSelectArea = (area: AreaFilter) => {
@@ -109,11 +128,9 @@ export default function DairyDiscoveryScreen() {
     setIsRefreshingLocation(true);
     setLocationState({ kind: 'detecting' });
     try {
-      const coords = await locationService.getCurrentLocation();
+      const coords = await locationService.getCurrentLocation(true);
       if (coords) {
         setActiveArea('gps');
-        // Setting locationState drives selectedCoords which is a queryKey dependency
-        // TanStack Query will auto-refetch when queryKey changes — no manual refetch needed
         setLocationState({
           kind: 'ready',
           latitude: coords.latitude,
@@ -136,8 +153,41 @@ export default function DairyDiscoveryScreen() {
     setSelectedDairy(dairy);
   };
 
-  const handleProceed = () => {
+  const handleProceed = async () => {
     if (!selectedDairy) return;
+    if (selectedDairy.isOperational === false || (selectedDairy as any).provisioningStatus === 'FAILED') {
+      Alert.alert(
+        'Dairy Database Offline',
+        `The selected dairy (${selectedDairy.name}) is currently undergoing database setup and cannot accept producer registrations at this moment. Please choose another nearby operational dairy.`
+      );
+      return;
+    }
+    const existing = memberships.find((m) => m.organizationId === selectedDairy.id);
+
+    if (existing) {
+      if (existing.membershipStatus === 'APPROVED') {
+        try {
+          setIsSwitchingExisting(true);
+          await switchDairy({ dairyId: selectedDairy.id });
+          router.replace('/(main)');
+        } finally {
+          setIsSwitchingExisting(false);
+        }
+        return;
+      }
+      if (existing.membershipStatus === 'PENDING_APPROVAL') {
+        router.push({
+          pathname: '/(onboarding)/pending-approval',
+          params: {
+            dairyName: selectedDairy.name,
+            customerId: existing.tenantCustomerId || existing.id,
+            farmerCode: existing.farmerCode || undefined,
+          },
+        });
+        return;
+      }
+    }
+
     router.push({
       pathname: '/(onboarding)/register',
       params: {
@@ -151,47 +201,40 @@ export default function DairyDiscoveryScreen() {
   };
 
   const getAreaBannerText = () => {
-    if (locationState.kind === 'detecting') return '📡 Detecting your GPS location...';
-    if (locationState.kind === 'denied') return '📍 Location permission denied — showing all dairies';
-    if (locationState.kind === 'unavailable') return '📍 GPS unavailable — showing all dairies';
-    if (isRefreshingLocation) return '🔄 Refreshing GPS location...';
-    if (!dairies || dairies.length === 0) return '🔍 No registered dairies found in this area';
+    if (locationState.kind === 'detecting') return 'Detecting your GPS location...';
+    if (locationState.kind === 'denied') return 'Location permission denied — showing all dairies';
+    if (locationState.kind === 'unavailable') return 'GPS unavailable — showing all dairies';
+    if (isRefreshingLocation) return 'Refreshing GPS location...';
+    if (!dairies || dairies.length === 0) return 'No registered dairies found in this area';
     const areaLabel =
       locationState.kind === 'ready' || locationState.kind === 'manual'
         ? locationState.label
         : 'this area';
-    return `📍 ${areaLabel}: ${dairies.length} registered ${dairies.length === 1 ? 'dairy' : 'dairies'}`;
+    const nearestDist = dairies[0]?.distanceKm !== undefined && dairies[0]?.distanceKm !== null
+      ? (dairies[0].distanceKm < 1 ? `${Math.round(dairies[0].distanceKm * 1000)} m` : `${dairies[0].distanceKm.toFixed(1)} km`)
+      : null;
+    return `${areaLabel}: ${dairies.length} registered ${dairies.length === 1 ? 'dairy' : 'dairies'}${nearestDist ? ` (closest: ${nearestDist})` : ''}`;
   };
 
   const renderLocationBanner = () => {
-    if (locationState.kind === 'denied') {
+    if (locationState.kind === 'denied' || locationState.kind === 'unavailable') {
       return (
-        <View style={styles.permissionBanner}>
-          <Text style={styles.permissionBannerText}>
-            📍 Location permission is required for nearby dairy discovery.
-          </Text>
+        <View style={styles.permissionCard}>
+          <View style={styles.permissionIconCol}>
+            <LocationPinIcon size={24} color={DFARM_COLORS.primaryOrange} />
+          </View>
+          <View style={styles.permissionTextCol}>
+            <Text style={styles.permissionTitle}>GPS Location Offline</Text>
+            <Text style={styles.permissionSubtitle}>
+              Enable device location or tap an area chip below to find your village dairy.
+            </Text>
+          </View>
           <ClayButton
             title="Enable GPS"
             variant="outline"
             size="sm"
             onPress={handleDetectGPS}
-            style={styles.permissionButton}
-          />
-        </View>
-      );
-    }
-    if (locationState.kind === 'unavailable') {
-      return (
-        <View style={styles.permissionBanner}>
-          <Text style={styles.permissionBannerText}>
-            ⚠️ GPS unavailable. Select an area below or tap Retry.
-          </Text>
-          <ClayButton
-            title="Retry GPS"
-            variant="outline"
-            size="sm"
-            onPress={handleDetectGPS}
-            style={styles.permissionButton}
+            style={styles.permissionBtn}
           />
         </View>
       );
@@ -208,12 +251,14 @@ export default function DairyDiscoveryScreen() {
 
       {renderLocationBanner()}
 
+      {/* Search & Area Filter Bar */}
       <View style={styles.searchSection}>
         <ClayInput
-          placeholder="Search by dairy, village, center, or in-charge..."
+          placeholder="Search by dairy, village, or in-charge..."
           value={searchQuery}
           onChangeText={setSearchQuery}
           containerStyle={styles.searchInput}
+          leftElement={<LocationPinIcon size={18} color={DFARM_COLORS.secondaryText} />}
         />
 
         {/* Quick Area Filter Chips */}
@@ -223,20 +268,27 @@ export default function DairyDiscoveryScreen() {
           contentContainerStyle={styles.areaChipsContainer}
         >
           <Pressable
-            style={[
+            style={({ pressed }) => [
               styles.areaChip,
               activeArea === 'gps' && styles.areaChipActive,
+              pressed && styles.pressed,
             ]}
             onPress={handleDetectGPS}
             disabled={isRefreshingLocation || locationState.kind === 'detecting'}
           >
+            <GpsPulseIcon
+              size={16}
+              color={activeArea === 'gps' ? '#FFFFFF' : DFARM_COLORS.primaryOrange}
+            />
             <Text
               style={[
                 styles.areaChipText,
                 activeArea === 'gps' && styles.areaChipTextActive,
               ]}
             >
-              {isRefreshingLocation || locationState.kind === 'detecting' ? '🔄 GPS...' : '📍 GPS Live'}
+              {isRefreshingLocation || locationState.kind === 'detecting'
+                ? 'Detecting GPS...'
+                : 'GPS Live'}
             </Text>
           </Pressable>
 
@@ -245,11 +297,20 @@ export default function DairyDiscoveryScreen() {
             return (
               <Pressable
                 key={area.id}
-                style={[styles.areaChip, isActive && styles.areaChipActive]}
+                style={({ pressed }) => [
+                  styles.areaChip,
+                  isActive && styles.areaChipActive,
+                  pressed && styles.pressed,
+                ]}
                 onPress={() => handleSelectArea(area)}
               >
-                <Text style={[styles.areaChipText, isActive && styles.areaChipTextActive]}>
-                  {area.label}
+                <Text
+                  style={[
+                    styles.areaChipText,
+                    isActive && styles.areaChipTextActive,
+                  ]}
+                >
+                  {area.name}
                 </Text>
               </Pressable>
             );
@@ -257,8 +318,9 @@ export default function DairyDiscoveryScreen() {
         </ScrollView>
       </View>
 
-      {/* Area Banner */}
+      {/* Area Status Banner */}
       <View style={styles.areaBanner}>
+        <View style={styles.bannerDot} />
         <Text style={styles.areaBannerText}>{getAreaBannerText()}</Text>
       </View>
 
@@ -266,48 +328,96 @@ export default function DairyDiscoveryScreen() {
       {locationState.kind === 'detecting' ? (
         <ClayLoadingState message="Detecting your GPS location..." />
       ) : isLoading ? (
-        <ClayLoadingState message="Searching nearby dairies..." />
+        <ClayLoadingState message="Searching nearby registered dairies..." />
       ) : !dairies || dairies.length === 0 ? (
         <ClayEmptyState
           title="No Dairies Found"
-          description="No registered dairies found in this area. Try expanding your search area or search by name."
+          description="No registered dairies found in this area. Try searching by name or expanding your location to All Areas."
           actionTitle="Search All Areas"
-          onAction={() => handleSelectArea({ id: 'all', name: 'All Areas', label: '📍 All Areas' })}
+          onAction={() =>
+            handleSelectArea({
+              id: 'all',
+              name: 'All Areas',
+              label: '📍 All Areas',
+            })
+          }
         />
       ) : (
         <FlatList
           data={dairies}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
           renderItem={({ item }) => {
             const isSelected = selectedDairy?.id === item.id;
+            const existing = memberships.find((m) => m.organizationId === item.id);
+            const isApproved = existing?.membershipStatus === 'APPROVED';
+            const isPending = existing?.membershipStatus === 'PENDING_APPROVAL';
+
             return (
-              <Pressable onPress={() => handleSelectDairy(item)}>
+              <Pressable
+                onPress={() => handleSelectDairy(item)}
+                style={({ pressed }) => pressed && styles.pressed}
+              >
                 <ClayCard
-                  style={[styles.dairyCard, isSelected && styles.dairyCardSelected]}
+                  variant={isSelected ? 'highlight' : 'raised'}
+                  active={isSelected}
+                  style={styles.dairyCard}
                 >
-                  <View style={styles.dairyCardHeader}>
-                    <Text style={styles.dairyName}>{item.name}</Text>
-                    {item.distanceKm !== undefined && item.distanceKm !== null && (
-                      <ClayBadge
-                        label={
-                          item.distanceKm < 1
-                            ? `${Math.round(item.distanceKm * 1000)} m`
-                            : `${item.distanceKm.toFixed(1)} km`
-                        }
-                        variant="orange"
-                      />
-                    )}
+                  <View style={styles.dairyCardRow}>
+                    <DairyCenterIcon size={40} />
+
+                    <View style={styles.dairyInfoCol}>
+                      <View style={styles.dairyCardHeader}>
+                        <Text style={styles.dairyName} numberOfLines={1}>
+                          {item.name}
+                        </Text>
+                        <DistanceBadge distanceKm={item.distanceKm} />
+                      </View>
+
+                      <Text style={styles.dairyVillage}>
+                        📍 {item.village}
+                        {item.district ? `, ${item.district}` : ''}
+                      </Text>
+
+                      {item.associatedPerson && (
+                        <Text style={styles.dairyAdmin}>
+                          👤 In-charge: {item.associatedPerson}
+                        </Text>
+                      )}
+
+                      {(!item.isOperational || item.provisioningStatus === 'FAILED') && (
+                        <View style={{ marginTop: 6, alignSelf: 'flex-start' }}>
+                          <ClayBadge
+                            label="Setup In Progress / डेटाबेस तयार नाही"
+                            variant="orange"
+                          />
+                        </View>
+                      )}
+
+                      {existing && (
+                        <View style={{ marginTop: 6, alignSelf: 'flex-start' }}>
+                          <ClayBadge
+                            label={isApproved ? 'Already Registered / नोंदणीकृत' : isPending ? 'Pending Approval / पडताळणी सुरू' : existing.membershipStatus}
+                            variant={isApproved ? 'success' : 'orange'}
+                          />
+                        </View>
+                      )}
+                    </View>
                   </View>
-                  <Text style={styles.dairyVillage}>
-                    📍 {item.village}{item.district ? `, ${item.district}` : ''}
-                  </Text>
-                  {item.associatedPerson && (
-                    <Text style={styles.dairyAdmin}>👤 {item.associatedPerson}</Text>
-                  )}
+
                   {isSelected && (
                     <View style={styles.selectedIndicator}>
-                      <Text style={styles.selectedText}>✓ Selected</Text>
+                      <View style={styles.checkCircle}>
+                        <Text style={styles.checkIcon}>✓</Text>
+                      </View>
+                      <Text style={styles.selectedText}>
+                        {isApproved
+                          ? 'Select to Switch Active Dairy'
+                          : isPending
+                          ? 'Tap to View Application Status'
+                          : 'Selected for Affiliation'}
+                      </Text>
                     </View>
                   )}
                 </ClayCard>
@@ -317,14 +427,42 @@ export default function DairyDiscoveryScreen() {
         />
       )}
 
-      {/* Proceed Button */}
+      {/* Sticky Proceed Container */}
       {selectedDairy && (
         <View style={styles.proceedSection}>
-          <ClayButton
-            title={`Continue with ${selectedDairy.name}`}
-            onPress={handleProceed}
-            variant="primary"
-          />
+          {(() => {
+            const existing = memberships.find((m) => m.organizationId === selectedDairy.id);
+            const isApproved = existing?.membershipStatus === 'APPROVED';
+            const isPending = existing?.membershipStatus === 'PENDING_APPROVAL';
+
+            const isOffline = selectedDairy.isOperational === false || (selectedDairy as any).provisioningStatus === 'FAILED';
+
+            const buttonTitle = isSwitchingExisting
+              ? 'Switching Dairy...'
+              : isOffline
+              ? `${selectedDairy.name} Setup In Progress`
+              : isApproved
+              ? `Switch to ${selectedDairy.name} / डेअरी बदला`
+              : isPending
+              ? `View Status for ${selectedDairy.name}`
+              : `Continue with ${selectedDairy.name} / नोंदणी करा`;
+
+            return (
+              <View>
+                <ClayButton
+                  title={buttonTitle}
+                  onPress={handleProceed}
+                  variant={isOffline ? 'secondary' : isApproved ? 'secondary' : 'primary'}
+                  disabled={isSwitchingExisting || isOffline}
+                />
+                {isOffline && (
+                  <Text style={{ color: '#D32F2F', fontSize: 12, textAlign: 'center', marginTop: 6 }}>
+                    This dairy is currently undergoing system setup. Please select another nearby dairy.
+                  </Text>
+                )}
+              </View>
+            );
+          })()}
         </View>
       )}
     </SafeAreaView>
@@ -336,55 +474,75 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: DFARM_COLORS.primaryCream,
   },
-  permissionBanner: {
-    backgroundColor: '#FFF3CD',
-    borderColor: '#FFC107',
-    borderWidth: 1,
-    marginHorizontal: 16,
-    marginTop: 8,
-    borderRadius: DFARM_RADIUS.md,
-    padding: 12,
+  permissionCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
+    backgroundColor: DFARM_COLORS.peach,
+    borderWidth: 1.5,
+    borderColor: '#FAD1BA',
+    marginHorizontal: 16,
+    marginTop: 10,
+    borderRadius: DFARM_RADIUS.md,
+    padding: 12,
+    gap: 10,
   },
-  permissionBannerText: {
-    ...DFARM_TYPOGRAPHY.bodySm,
-    color: '#856404',
+  permissionIconCol: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  permissionTextCol: {
     flex: 1,
   },
-  permissionButton: {
+  permissionTitle: {
+    ...DFARM_TYPOGRAPHY.bodyMd,
+    fontWeight: '700',
+    color: DFARM_COLORS.primaryText,
+  },
+  permissionSubtitle: {
+    ...DFARM_TYPOGRAPHY.bodySm,
+    color: DFARM_COLORS.secondaryText,
+    marginTop: 2,
+  },
+  permissionBtn: {
     flexShrink: 0,
   },
   searchSection: {
     paddingHorizontal: 16,
     paddingTop: 12,
-    gap: 10,
   },
   searchInput: {
-    marginBottom: 0,
+    marginBottom: 8,
   },
   areaChipsContainer: {
-    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
-    paddingRight: 16,
+    paddingVertical: 4,
   },
   areaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: DFARM_COLORS.surfaceInset,
+    paddingVertical: 8,
+    borderRadius: DFARM_RADIUS.pill,
+    backgroundColor: DFARM_COLORS.surfaceWhite,
     borderWidth: 1.5,
     borderColor: DFARM_COLORS.border,
+    ...DFARM_SHADOWS.claySecondaryButton,
   },
   areaChipActive: {
     backgroundColor: DFARM_COLORS.primaryOrange,
     borderColor: DFARM_COLORS.primaryOrange,
+    ...DFARM_SHADOWS.clayButton,
   },
   areaChipText: {
     ...DFARM_TYPOGRAPHY.bodySm,
-    color: DFARM_COLORS.secondaryText,
+    color: DFARM_COLORS.primaryText,
     fontWeight: '600',
   },
   areaChipTextActive: {
@@ -392,42 +550,55 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   areaBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginHorizontal: 16,
     marginTop: 10,
     marginBottom: 4,
-    padding: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderRadius: DFARM_RADIUS.sm,
-    backgroundColor: '#F0FDF4',
+    backgroundColor: '#FFF9F5',
     borderWidth: 1,
-    borderColor: '#BBF7D0',
+    borderColor: DFARM_COLORS.border,
+    gap: 8,
+  },
+  bannerDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: DFARM_COLORS.primaryOrange,
   },
   areaBannerText: {
     ...DFARM_TYPOGRAPHY.bodySm,
-    color: '#166534',
+    color: DFARM_COLORS.primaryText,
     fontWeight: '600',
+    flex: 1,
   },
   listContent: {
     padding: 16,
-    gap: 10,
+    gap: 12,
+    paddingBottom: 24,
   },
   dairyCard: {
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1.5,
-    borderColor: DFARM_COLORS.border,
+    padding: 16,
   },
-  dairyCardSelected: {
-    borderColor: DFARM_COLORS.primaryOrange,
-    backgroundColor: '#FFF9F5',
+  dairyCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  dairyInfoCol: {
+    flex: 1,
   },
   dairyCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 4,
   },
   dairyName: {
-    ...DFARM_TYPOGRAPHY.bodyMd,
+    ...DFARM_TYPOGRAPHY.bodyLg,
     fontWeight: '700',
     color: DFARM_COLORS.primaryText,
     flex: 1,
@@ -443,10 +614,26 @@ const styles = StyleSheet.create({
     color: DFARM_COLORS.secondaryText,
   },
   selectedIndicator: {
-    marginTop: 8,
-    paddingTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: DFARM_COLORS.border,
+    borderTopColor: '#F7D6C1',
+  },
+  checkCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: DFARM_COLORS.primaryOrange,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkIcon: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
   },
   selectedText: {
     ...DFARM_TYPOGRAPHY.bodySm,
@@ -455,6 +642,12 @@ const styles = StyleSheet.create({
   },
   proceedSection: {
     padding: 16,
-    paddingBottom: 20,
+    paddingBottom: 24,
+    backgroundColor: DFARM_COLORS.primaryCream,
+    borderTopWidth: 1,
+    borderTopColor: DFARM_COLORS.border,
+  },
+  pressed: {
+    opacity: 0.85,
   },
 });

@@ -2,6 +2,7 @@ import React from 'react'
 import type { ActiveCollectionSession } from '@/types'
 import { ClayModal, ClayButton, ClayBadge } from '@/components/ui'
 import { Printer, CheckCircle, FileText } from 'lucide-react'
+import { useAuth } from '@/context/AuthContext'
 
 interface SessionSummaryModalProps {
   session: ActiveCollectionSession | null
@@ -14,18 +15,21 @@ export const SessionSummaryModal: React.FC<SessionSummaryModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  const { operator } = useAuth()
   if (!session) return null
 
   const handlePrint = () => {
     window.print()
   }
 
+  const dairyName = operator?.dairyName || 'Dairy Cooperative'
+
   return (
     <ClayModal
       isOpen={isOpen}
       onClose={onClose}
       title="Shift Reconciliation Summary Sheet"
-      description={`Session #${session.sessionCode} • Gokul Dairy Farmers Cooperative`}
+      description={`Session #${session.sessionCode} • ${dairyName}`}
       size="md"
     >
       <div className="space-y-4">
@@ -36,7 +40,7 @@ export const SessionSummaryModal: React.FC<SessionSummaryModalProps> = ({
               DFarm Shift Collection Summary
             </h4>
             <p className="text-[10px] text-text-muted">
-              Gokul Dairy Farmers Co-op • Terminal: {session.deviceId}
+              {dairyName} • Terminal: {session.deviceId}
             </p>
           </div>
 

@@ -5,6 +5,7 @@ export interface ProcessMilkIntakeDTO {
     sessionId?: string;
     sessionCode?: string;
     customerId: string;
+    organizationId?: string;
     milkCategory: MilkCategory;
     weightLiters: number;
     fatPercentage: number;
@@ -33,7 +34,13 @@ export declare class ProcessMilkIntakeUseCase {
 export declare class GetCustomerCollectionHistoryUseCase {
     private readonly transactionRepo;
     constructor(transactionRepo: ICollectionTransactionRepository);
-    execute(customerId: string, limit?: number, offset?: number): Promise<{
+    execute(customerId: string, limit?: number, offset?: number, organizationId?: string): Promise<{
+        quantityLiters: number;
+        ratePerLiter: number;
+        animalType: "COW" | "BUFFALO";
+        receiptNumber: string;
+        collectionDate: string;
+        collectionTime: string;
         id: string;
         transactionCode: string;
         sessionId: string;
@@ -63,7 +70,7 @@ export declare class GetCustomerCollectionHistoryUseCase {
 export declare class GetMonthlyMilkSummaryUseCase {
     private readonly transactionRepo;
     constructor(transactionRepo: ICollectionTransactionRepository);
-    execute(customerId: string, monthYear?: string): Promise<{
+    execute(customerId: string, monthYear?: string, organizationId?: string): Promise<{
         monthYear: string;
         totalLiters: number;
         cowLiters: number;

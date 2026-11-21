@@ -1,3 +1,16 @@
 export declare const MIGRATION_PATH = "../../supabase/migrations";
-export declare const MIGRATION_FILES: readonly ["001_extensions_and_common.sql", "002_organizations_and_centers.sql", "003_user_identity_foundation.sql", "004_customer_identity.sql", "005_face_and_rfid.sql", "006_customer_identification_audit.sql", "007_rate_management.sql", "008_collection_sessions_and_transactions.sql", "009_customer_ledger.sql", "010_devices_sync_and_audit.sql", "011_customer_lifecycle_and_auth_mapping.sql", "012_sync_engine_enhancements.sql", "013_face_model_version_metadata.sql", "014_feed_inventory_procurement_and_sales.sql", "015_p05_p10_master_remediation.sql", "016_employee_management_attendance_and_payroll.sql", "017_milk_collection_workflow_and_atomic_ledger.sql", "018_milk_rate_management_system.sql", "019_customer_accounting_and_double_entry_ledger.sql", "020_automated_monthly_billing_and_settlements.sql", "021_customer_payouts_batches_and_reconciliation.sql", "022_customer_notifications.sql", "023_notification_engine_push_and_whatsapp_automation.sql", "024_p11_p15_master_remediation.sql", "025_payout_api_contract_and_privilege_hardening.sql", "026_harmonize_eligible_payout_balance.sql", "027_kiosk_shift_sessions_and_sface128_seed.sql", "028_dairy_location_coordinates_and_address.sql"];
+export declare enum MigrationTarget {
+    CONTROL_PLANE = "CONTROL_PLANE",
+    TENANT_OPERATIONAL = "TENANT_OPERATIONAL",
+    SHARED = "SHARED",
+    MANUAL_REVIEW_REQUIRED = "MANUAL_REVIEW_REQUIRED"
+}
+export interface MigrationManifestEntry {
+    version: string;
+    filename: string;
+    target: MigrationTarget;
+    description: string;
+}
+export declare const MIGRATION_MANIFEST: MigrationManifestEntry[];
+export declare const MIGRATION_FILES: string[];
 //# sourceMappingURL=index.d.ts.map

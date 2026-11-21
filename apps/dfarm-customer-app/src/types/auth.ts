@@ -28,12 +28,39 @@ export type CustomerRegistrationStatus =
   | 'REJECTED'
   | 'SUSPENDED';
 
+export const CustomerMembershipSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  dairyId: z.string(),
+  tenantCustomerId: z.string().optional(),
+  dairyName: z.string(),
+  dairyCode: z.string().nullable().optional(),
+  dairyAddress: z.string().nullable().optional(),
+  centerId: z.string().nullable().optional(),
+  centerName: z.string().nullable().optional(),
+  farmerCode: z.string().nullable().optional(),
+  membershipStatus: z.enum([
+    'UNREGISTERED',
+    'PENDING_APPROVAL',
+    'APPROVED',
+    'REJECTED',
+    'SUSPENDED',
+  ]),
+  status: z.string(),
+  isApproved: z.boolean(),
+  createdAt: z.string().optional(),
+});
+export type CustomerMembership = z.infer<typeof CustomerMembershipSchema>;
+
 export const AuthSessionSchema = z.object({
   accessToken: z.string(),
   refreshToken: z.string(),
   expiresIn: z.number(),
+  globalCustomerId: z.string().optional(),
+  memberships: z.array(CustomerMembershipSchema).optional(),
   user: z.object({
-    id: z.string().uuid(),
+    id: z.string(),
+    globalCustomerId: z.string().optional(),
     mobileNumber: z.string(),
     status: z.enum([
       'UNREGISTERED',
@@ -42,7 +69,7 @@ export const AuthSessionSchema = z.object({
       'REJECTED',
       'SUSPENDED',
     ]),
-    selectedDairyId: z.string().uuid().nullable(),
+    selectedDairyId: z.string().nullable(),
     customerProfile: z
       .object({
         name: z.string(),
@@ -53,3 +80,44 @@ export const AuthSessionSchema = z.object({
   }),
 });
 export type AuthSessionResponse = z.infer<typeof AuthSessionSchema>;
+
+export interface SwitchDairyRequest {
+  dairyId: string;
+}
+
+export interface SwitchDairyResponse {
+  success: boolean;
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  selectedDairy: {
+    dairyId: string;
+    dairyName: string;
+    dairyCode?: string | null;
+    farmerCode?: string | null;
+    tenantCustomerId: string;
+    membershipStatus: string;
+    centerId?: string | null;
+    centerName?: string | null;
+  };
+  user: {
+    id: string;
+    globalCustomerId?: string;
+    selectedDairyId: string;
+    status: string;
+    farmerCode?: string | null;
+    customerProfile: {
+      name: string;
+      dairyName: string;
+      village?: string;
+    };
+  };
+}
+
+export interface MembershipsResponse {
+  success: boolean;
+  count: number;
+  globalCustomerId: string;
+  data: CustomerMembership[];
+  memberships: CustomerMembership[];
+}

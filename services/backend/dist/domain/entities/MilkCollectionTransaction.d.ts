@@ -39,6 +39,12 @@ export declare class MilkCollectionTransaction {
     get appliedRatePerLiter(): number;
     get idempotencyKey(): string | undefined;
     toJSON(): {
+        quantityLiters: number;
+        ratePerLiter: number;
+        animalType: "COW" | "BUFFALO";
+        receiptNumber: string;
+        collectionDate: string;
+        collectionTime: string;
         id: string;
         transactionCode: string;
         sessionId: string;

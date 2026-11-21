@@ -1,0 +1,47 @@
+{
+  "clusterEngine": "PostgreSQL 16.2 (Managed Cluster)",
+  "isolationMode": "DATABASE_PER_DAIRY",
+  "centralDatabase": "dfarm_central",
+  "totalProvisionedTenants": 3,
+  "tenantDatabases": [
+    {
+      "dairyId": "a0000000-0000-0000-0000-000000000001",
+      "dairyCode": "GOKUL_KOLHAPUR",
+      "dairyName": "Gokul Kolhapur Zilla Sahakari Dudh Utpadak Sangh",
+      "databaseName": "dfarm_tenant_gokul_kolhapur_a00000000000",
+      "resourceType": "PHYSICAL_DATABASE",
+      "provisioningStatus": "READY",
+      "connectionHealth": "HEALTHY",
+      "schemaVersion": "v1.0.0",
+      "tablesCount": 27,
+      "viewsCount": 0,
+      "lastVerifiedAt": "2026-11-20T01:18:08.655Z"
+    },
+    {
+      "dairyId": "b0000000-0000-0000-0000-000000000002",
+      "dairyCode": "WARANA_DAIRY",
+      "dairyName": "Shree Warana Sahakari Dudh Utpadak Prakriya Sangh",
+      "databaseName": "dfarm_tenant_warana_dairy_b00000000000",
+      "resourceType": "PHYSICAL_DATABASE",
+      "provisioningStatus": "READY",
+      "connectionHealth": "HEALTHY",
+      "schemaVersion": "v1.0.0",
+      "tablesCount": 27,
+      "viewsCount": 0,
+      "lastVerifiedAt": "2026-11-20T01:18:09.627Z"
+    },
+    {
+      "dairyId": "d0000000-0000-0000-0000-000000000001",
+      "dairyCode": "BARAMATI_COOP",
+      "dairyName": "Baramati Cooperative Milk Producers Union",
+      "databaseName": "dfarm_tenant_baramati_coop_d00000000000",
+      "resourceType": "PHYSICAL_DATABASE",
+      "provisioningStatus": "READY",
+      "connectionHealth": "HEALTHY",
+      "schemaVersion": "v1.0.0",
+      "tablesCount": 27,
+      "viewsCount": 0,
+      "lastVerifiedAt": "2026-11-20T01:18:11.839Z"
+    }
+  ]
+}

@@ -48,14 +48,16 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileSidebar }) => {
           <div>
             <div className="flex items-center gap-2">
               <span className="font-extrabold text-sm sm:text-base text-[#211B18] tracking-tight">
-                {user?.dairyName || 'DFarm Dairy Admin'}
+                {user?.dairyName || 'DFarm Dairy Platform'}
               </span>
-              <ClayBadge variant="neutral" className="hidden md:inline-flex text-[11px] py-0.5">
-                {user?.dairyCode || 'TENANT-DEFAULT'}
-              </ClayBadge>
+              {user?.dairyCode && (
+                <ClayBadge variant="neutral" className="hidden md:inline-flex text-[11px] py-0.5 font-mono">
+                  {user.dairyCode}
+                </ClayBadge>
+              )}
             </div>
             <p className="text-[11px] text-[#817A75] font-medium hidden sm:block">
-              Isolated Dairy Management Platform
+              {user?.dairyName ? `Authorized Dairy Workspace • ${user.dairyCode}` : 'Dairy Management Workspace'}
             </p>
           </div>
         </div>

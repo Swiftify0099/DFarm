@@ -38,6 +38,31 @@ export function normalizeL2(vector: number[]): number[] {
   return vector.map((v) => v / norm)
 }
 
+export function isFiniteEmbedding(vector: number[]): boolean {
+  if (!Array.isArray(vector) || vector.length !== 128) return false
+  return vector.every((val) => typeof val === 'number' && Number.isFinite(val))
+}
+
+/**
+ * Averages multiple quality-checked 128-D embedding vectors and applies L2 unit normalization
+ */
+export function averageAndNormalizeEmbeddings(vectors: number[][]): number[] {
+  if (!Array.isArray(vectors) || vectors.length === 0) {
+    return new Array(128).fill(0)
+  }
+  const dim = vectors[0].length
+  const accumulator = new Array(dim).fill(0)
+
+  for (const vec of vectors) {
+    for (let i = 0; i < dim; i++) {
+      accumulator[i] += vec[i] || 0
+    }
+  }
+
+  const averaged = accumulator.map((val) => val / vectors.length)
+  return normalizeL2(averaged)
+}
+
 /**
  * Computes Cosine Similarity between two embedding vectors
  */

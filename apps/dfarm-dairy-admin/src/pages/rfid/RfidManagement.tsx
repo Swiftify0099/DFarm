@@ -31,12 +31,12 @@ export const RfidManagement: React.FC = () => {
   const [notice, setNotice] = useState<{ type: 'success' | 'danger'; message: string } | null>(null)
 
   const { data: cards = [], isLoading } = useQuery({
-    queryKey: ['rfidCards'],
+    queryKey: ['rfidCards', user?.dairyId],
     queryFn: () => api.rfid.getAll(),
   })
 
   const { data: customers = [] } = useQuery({
-    queryKey: ['customers'],
+    queryKey: ['customers', user?.dairyId],
     queryFn: () => api.customers.getAll(),
   })
 
@@ -45,8 +45,8 @@ export const RfidManagement: React.FC = () => {
     mutationFn: ({ cardUid, customerId }: { cardUid: string; customerId: string }) =>
       api.rfid.assign(cardUid, customerId, user?.fullName || 'Dairy Admin'),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['rfidCards'] })
-      queryClient.invalidateQueries({ queryKey: ['customers'] })
+      queryClient.invalidateQueries({ queryKey: ['rfidCards', user?.dairyId] })
+      queryClient.invalidateQueries({ queryKey: ['customers', user?.dairyId] })
       setShowAssignModal(false)
       setCardUidInput('')
       setSelectedCustomerId('')
@@ -62,8 +62,8 @@ export const RfidManagement: React.FC = () => {
     mutationFn: ({ cardUid, reason }: { cardUid: string; reason: string }) =>
       api.rfid.markLost(cardUid, reason, user?.fullName || 'Dairy Admin'),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['rfidCards'] })
-      queryClient.invalidateQueries({ queryKey: ['customers'] })
+      queryClient.invalidateQueries({ queryKey: ['rfidCards', user?.dairyId] })
+      queryClient.invalidateQueries({ queryKey: ['customers', user?.dairyId] })
       setShowLostModal(false)
       setNotice({ type: 'success', message: 'RFID card marked as LOST. Prevented future kiosk scans.' })
     },
@@ -192,6 +192,17 @@ export const RfidManagement: React.FC = () => {
           }
         />
       )}
+
+      {/* Hardware Reader Status Banner */}
+      <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 flex items-center justify-between text-xs text-amber-800">
+        <div className="flex items-center gap-2">
+          <Smartphone size={16} className="text-amber-600 shrink-0" />
+          <span>
+            <strong>Physical Desktop USB RFID Reader:</strong> Not Detected / Disconnected. Direct manual UID entry is active.
+          </span>
+        </div>
+        <ClayBadge variant="neutral">MANUAL ENTRY MODE</ClayBadge>
+      </div>
 
       {/* Rules Banner */}
       <div className="p-4 bg-white rounded-xl border border-[#F1E7E0] flex items-start gap-3 shadow-xs text-xs text-[#817A75] leading-relaxed">

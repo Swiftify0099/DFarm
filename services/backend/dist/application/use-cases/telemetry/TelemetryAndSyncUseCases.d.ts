@@ -69,11 +69,24 @@ export declare class ProcessOfflineSyncBatchUseCase {
         syncedCount: number;
         failedCount: number;
         totalCount: number;
+        total: number;
+        succeeded: number;
+        failed: number;
+        items: {
+            clientIntakeUuid: string;
+            success: boolean;
+            error?: string;
+            transactionId?: string;
+            receiptNumber?: string;
+            isIdempotentReplay?: boolean;
+        }[];
         details: {
             clientIntakeUuid: string;
             success: boolean;
             error?: string;
             transactionId?: string;
+            receiptNumber?: string;
+            isIdempotentReplay?: boolean;
         }[];
     }>;
 }
