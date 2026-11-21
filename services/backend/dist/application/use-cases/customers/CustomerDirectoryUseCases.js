@@ -161,7 +161,7 @@ export class RegisterCustomerUseCase {
                 await db.query(`INSERT INTO customer_milk_categories (customer_id, milk_category, is_authorized, authorized_by)
            VALUES (
              $1, $2, TRUE,
-             (SELECT id FROM users WHERE role IN ('DAIRY_ADMIN', 'SUPER_ADMIN') LIMIT 1)
+             COALESCE((SELECT id FROM users WHERE role IN ('DAIRY_ADMIN', 'SUPER_ADMIN') LIMIT 1), '00000000-0000-0000-0000-000000000099')
            )
            ON CONFLICT (customer_id, milk_category) DO NOTHING;`, [customer.id, cat]);
             }

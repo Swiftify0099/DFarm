@@ -370,6 +370,29 @@ export class PostgresCustomerRepository implements ICustomerRepository {
         );
       }
 
+      // Guarantee system operator / dairy admin user exists in tenant DB to satisfy foreign key constraints
+      let authorizedBy = '00000000-0000-0000-0000-000000000099';
+      try {
+        const uRes = await dbClient.query(
+          `SELECT id FROM users WHERE organization_id = $1 OR role IN ('DAIRY_ADMIN', 'SUPER_ADMIN') LIMIT 1;`,
+          [customer.organizationId]
+        );
+        if (uRes.rows.length > 0 && uRes.rows[0].id) {
+          authorizedBy = uRes.rows[0].id;
+        } else {
+          await dbClient.query(
+            `INSERT INTO users (
+               id, organization_id, username, full_name, email, phone_number, role, status
+             ) VALUES (
+               $1, $2, 'system_dairy_admin', 'System Dairy Admin', 'admin@dfarm.internal', '+919999999999', 'DAIRY_ADMIN', 'ACTIVE'
+             ) ON CONFLICT (id) DO NOTHING;`,
+            [authorizedBy, customer.organizationId]
+          );
+        }
+      } catch {
+        // Fallback if users table is non-standard
+      }
+
       const upsertCustomerSql = `
         INSERT INTO customers (
           id, organization_id, primary_center_id, farmer_code, full_name,
@@ -428,10 +451,10 @@ export class PostgresCustomerRepository implements ICustomerRepository {
         for (const cat of customer.permittedCategories) {
           await dbClient.query(
             `INSERT INTO customer_milk_categories (customer_id, milk_category, is_authorized, authorized_by)
-             VALUES ($1, $2, TRUE, '00000000-0000-0000-0000-000000000099')
+             VALUES ($1, $2, TRUE, $3)
              ON CONFLICT (customer_id, milk_category) DO NOTHING;`,
-            [customer.id, cat]
-          ).catch(() => {});
+            [customer.id, cat, authorizedBy]
+          );
         }
       }
 

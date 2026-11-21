@@ -259,20 +259,44 @@ export default function FaceEnrollScreen() {
             }
           : undefined;
 
-      const registrationResult = await register({
-        selectedDairyId: params.dairyId || '00000000-0000-0000-0000-000000000001',
-        fullName: params.fullName || 'Registered Farmer',
-        village: params.village || 'Local Village',
-        mobileNumber: params.mobileNumber,
-        milkSupplyType: params.milkSupplyType || 'COW',
-        biometricConsent: true,
-        bankDetails,
-        faceTemplate: {
-          modelVersion: 'sface_int8_2021dec',
-          embedding: finalTemplate,
-          confidence: 0.98,
-        },
-      });
+      let registrationResult: any;
+      let regAttempts = 0;
+      const MAX_REG_ATTEMPTS = 3;
+      while (regAttempts < MAX_REG_ATTEMPTS) {
+        regAttempts++;
+        try {
+          registrationResult = await register({
+            selectedDairyId: params.dairyId || '00000000-0000-0000-0000-000000000001',
+            fullName: params.fullName || 'Registered Farmer',
+            village: params.village || 'Local Village',
+            mobileNumber: params.mobileNumber,
+            milkSupplyType: params.milkSupplyType || 'COW',
+            biometricConsent: true,
+            bankDetails,
+            faceTemplate: {
+              modelVersion: 'sface_int8_2021dec',
+              embedding: finalTemplate,
+              confidence: 0.98,
+            },
+          });
+          break;
+        } catch (regErr: any) {
+          const status = regErr?.response?.status;
+          const isRetryable =
+            regErr?.isNetworkError ||
+            !regErr?.response ||
+            status === 502 ||
+            status === 503 ||
+            status === 504 ||
+            status === 500;
+          if (isRetryable && regAttempts < MAX_REG_ATTEMPTS) {
+            setStatusMessage(`Finalizing registration with cloud, retrying (${regAttempts}/${MAX_REG_ATTEMPTS})...`);
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            continue;
+          }
+          throw regErr;
+        }
+      }
 
       setProgress(100);
       setStatusMessage('Biometric enrollment complete!');
