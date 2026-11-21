@@ -7,6 +7,7 @@ import { PostgresCustomerRepository } from '../../infrastructure/repositories/Po
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 import { biometricInferenceService } from '../../infrastructure/services/BiometricInferenceService.js';
+import { logger } from '../../shared/logger/index.js';
 
 const router = Router();
 const getFaceTemplates = new GetFaceTemplatesUseCase();
@@ -89,7 +90,7 @@ router.get('/face/templates', optionalAuthenticate, async (req: Request, res: Re
 });
 
 // 2. Real Neural Inference Endpoint for Mobile & Kiosk (OpenCV YuNet + SFace INT8)
-router.post('/face/detect-and-embed', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.post('/face/detect-and-embed', optionalAuthenticate, async (req: Request, res: Response, _next: NextFunction): Promise<void> => {
   try {
     const { imageBase64 } = req.body;
     if (!imageBase64 || typeof imageBase64 !== 'string') {
@@ -162,8 +163,14 @@ router.post('/face/detect-and-embed', optionalAuthenticate, async (req: Request,
       modelVersion: result.modelVersion,
       latencyMs: result.latencyMs,
     });
-  } catch (err) {
-    next(err);
+  } catch (err: any) {
+    logger.error({ err }, '[identity.routes] /face/detect-and-embed error');
+    res.status(400).json({
+      success: false,
+      faceCount: 0,
+      isAligned: false,
+      error: err?.message || 'Face biometric processing failed. Please ensure good lighting and face the camera directly.',
+    });
   }
 });
 

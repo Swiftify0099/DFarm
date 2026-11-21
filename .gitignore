@@ -87,6 +87,9 @@ web-build/
 # 6. Biometric Models, Cache & Local Embeddings
 # ------------------------------------------------------------------------------
 *.onnx
+!apps/dfarm-customer-app/assets/models/*.onnx
+!apps/dfarm-collection-app/public/models/*.onnx
+!services/backend/assets/models/*.onnx
 *.tflite
 models/downloaded/
 cache/biometrics/
