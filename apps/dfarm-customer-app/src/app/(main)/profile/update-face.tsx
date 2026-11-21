@@ -46,6 +46,9 @@ export default function UpdateFaceScreen() {
   // FIX: Pre-load models on mount so they are ready before the user taps capture.
   // Prevents the button from staying disabled due to model not ready.
   useEffect(() => {
+    // Pre-warm backend immediately when opening face update screen
+    apiClient.get('/health/live').catch(() => {});
+
     async function loadModels() {
       try {
         await yuNetDetector.initialize();
@@ -76,21 +79,22 @@ export default function UpdateFaceScreen() {
       await sFaceEmbedder.initialize();
 
       const sampleEmbeddings: number[][] = [];
-      const TOTAL_SAMPLES = 5;
+      const TOTAL_SAMPLES = 2; // Capture 2 high-quality samples: fast, resilient over cellular
 
       for (let sampleIdx = 1; sampleIdx <= TOTAL_SAMPLES; sampleIdx++) {
         setStatusMessage(`Capturing quality sample ${sampleIdx} of ${TOTAL_SAMPLES}...`);
 
         if (sampleIdx > 1) {
-          await new Promise((r) => setTimeout(r, 180));
+          await new Promise((r) => setTimeout(r, 200));
         }
 
         let embedding: number[] | null = null;
 
         if (cameraRef.current?.takePictureAsync) {
+          // Use quality: 0.35 to keep upload payload ~150KB instead of 6MB (96% bandwidth reduction)
           const photo = await cameraRef.current.takePictureAsync({
             base64: true,
-            quality: 0.6,
+            quality: 0.35,
             shutterSound: false,
           });
 
@@ -98,10 +102,71 @@ export default function UpdateFaceScreen() {
             throw new Error(`Sample ${sampleIdx}: Camera photo capture returned empty data.`);
           }
 
-          try {
-            const detectRes = await apiClient.post('/identity/face/detect-and-embed', {
-              imageBase64: photo.base64,
-            });
+          let detectRes: any = null;
+          let postErr: any = null;
+
+          // Attempt with automatic retry in case Render server was waking up
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              if (attempt > 1) {
+                setStatusMessage(`Cloud server is warming up, retrying (${attempt}/3)...`);
+                await new Promise((r) => setTimeout(r, 2000));
+              }
+              detectRes = await apiClient.post('/identity/face/detect-and-embed', {
+                imageBase64: photo.base64,
+              });
+              postErr = null;
+              break;
+            } catch (err: any) {
+              postErr = err;
+              const status = err?.response?.status;
+              const isRetryable =
+                err?.isNetworkError ||
+                !err?.response ||
+                status === 502 ||
+                status === 503 ||
+                status === 504 ||
+                status === 500;
+              if (isRetryable && attempt < 3) {
+                continue;
+              }
+              break;
+            }
+          }
+
+          if (postErr) {
+            const sMsg =
+              postErr?.response?.data?.error?.message ||
+              postErr?.response?.data?.message ||
+              (typeof postErr?.response?.data?.error === 'string' ? postErr.response.data.error : null) ||
+              postErr?.message;
+            if (sMsg) {
+              throw new Error(`Sample ${sampleIdx}: ${sMsg}`);
+            }
+
+            if (yuNetDetector.isModelReady() && sFaceEmbedder.isModelReady()) {
+              const detectionResult = await yuNetDetector.detectFaces({ width: 640, height: 640 });
+              const faces = detectionResult.faces;
+              if (faces && faces.length === 1) {
+                const primaryFace = faces[0];
+                const alignment = checkAlignmentQuality(primaryFace.landmarks);
+                if (alignment.isAligned) {
+                  const embRes = await sFaceEmbedder.generateEmbedding(primaryFace.landmarks);
+                  if (embRes.embedding && embRes.embedding.length === 128) {
+                    embedding = embRes.embedding;
+                  }
+                }
+              }
+            }
+
+            if (!embedding) {
+              if (sampleEmbeddings.length > 0) {
+                console.warn(`[Biometrics] Sample ${sampleIdx} failed, proceeding with ${sampleEmbeddings.length} captured samples.`);
+                break;
+              }
+              throw postErr;
+            }
+          } else {
             const data = detectRes.data;
 
             if (!data.success || data.faceCount === 0) {
@@ -131,33 +196,6 @@ export default function UpdateFaceScreen() {
             }
 
             embedding = data.embedding;
-          } catch (postErr: any) {
-            const sMsg =
-              postErr?.response?.data?.error?.message ||
-              postErr?.response?.data?.message ||
-              (typeof postErr?.response?.data?.error === 'string' ? postErr.response.data.error : null);
-            if (sMsg) {
-              throw new Error(`Sample ${sampleIdx}: ${sMsg}`);
-            }
-
-            if (yuNetDetector.isModelReady() && sFaceEmbedder.isModelReady()) {
-              const detectionResult = await yuNetDetector.detectFaces({ width: 640, height: 640 });
-              const faces = detectionResult.faces;
-              if (faces && faces.length === 1) {
-                const primaryFace = faces[0];
-                const alignment = checkAlignmentQuality(primaryFace.landmarks);
-                if (alignment.isAligned) {
-                  const embRes = await sFaceEmbedder.generateEmbedding(primaryFace.landmarks);
-                  if (embRes.embedding && embRes.embedding.length === 128) {
-                    embedding = embRes.embedding;
-                  }
-                }
-              }
-            }
-
-            if (!embedding) {
-              throw postErr;
-            }
           }
         } else {
           const detection = await yuNetDetector.detectFaces({ width: 640, height: 640 });
@@ -199,7 +237,7 @@ export default function UpdateFaceScreen() {
         setProgress(Math.round((sampleIdx / TOTAL_SAMPLES) * 85));
       }
 
-      setStatusMessage('Averaging 5 samples & applying L2 unit normalization...');
+      setStatusMessage('Averaging quality samples & applying L2 unit normalization...');
       const finalTemplate = averageAndNormalizeEmbeddings(sampleEmbeddings);
 
       setStatusMessage('Persisting biometric template to Dairy Tenant DB...');
@@ -214,7 +252,7 @@ export default function UpdateFaceScreen() {
       if (updateRes && (updateRes.success || updateRes.isBiometricEnrolled)) {
         setProgress(100);
         setSuccess(true);
-        setStatusMessage('Biometric enrollment complete (5 quality samples verified)!');
+        setStatusMessage('Biometric enrollment complete (quality samples verified)!');
       } else {
         throw new Error('Backend failed to confirm biometric template persistence.');
       }
@@ -223,10 +261,26 @@ export default function UpdateFaceScreen() {
         err?.response?.data?.error?.message ||
         err?.response?.data?.error ||
         err?.response?.data?.message;
-      const msg = backendMsg || err?.message || 'Failed to update face biometrics. Please retry.';
+      let msg = backendMsg || err?.message || 'Failed to update face biometrics. Please retry.';
+
+      if (
+        msg.includes('502') ||
+        msg.includes('503') ||
+        msg.includes('504') ||
+        err?.response?.status === 502 ||
+        err?.response?.status === 503 ||
+        err?.response?.status === 504
+      ) {
+        msg =
+          'DFarm cloud server is waking up from standby (HTTP 502/503). Please wait a few seconds and tap Retry.';
+      }
+
       setErrorMessage(msg);
       setStatusMessage('Update failed: ' + msg);
-      Alert.alert('Update Failed', msg);
+      Alert.alert('Update Failed', msg, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Retry', onPress: () => handleUpdate() },
+      ]);
     } finally {
       setIsCapturing(false);
     }

@@ -155,7 +155,7 @@ class ApiClientService {
   constructor() {
     this.client = axios.create({
       baseURL: API_BASE_URL,
-      timeout: 20000,
+      timeout: 45000,
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
@@ -231,18 +231,36 @@ class ApiClientService {
           customError.isNetworkError = true;
           if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
             customError.code = 'REQUEST_TIMEOUT';
-            customError.message = `Connection timed out (${customError.baseURL}${customError.endpoint}). Verify server load and network connection.`;
+            customError.message = `Connection timed out (${customError.baseURL}${customError.endpoint}). The server may be waking up from standby. Please retry.`;
           } else {
             customError.code = 'FACE_API_UNREACHABLE';
-            customError.message = `Cannot reach DFarm backend at ${customError.baseURL}. Check network connectivity and server status.`;
+            customError.message = `Cannot reach DFarm backend at ${customError.baseURL}. The cloud server may be waking up from standby or network connectivity is limited. Please check your data connection and retry.`;
           }
         } else if (error.response.status === 404) {
           customError.code = 'FACE_ROUTE_NOT_FOUND';
         } else if (error.response.status === 413) {
           customError.code = 'PAYLOAD_TOO_LARGE';
           customError.message = 'Camera capture payload exceeds maximum upload size (10MB). Image compression recommended.';
-        } else if (error.response.status === 503) {
-          customError.code = 'TENANT_DATABASE_UNAVAILABLE';
+        } else if (
+          error.response.status === 502 ||
+          error.response.status === 503 ||
+          error.response.status === 504
+        ) {
+          customError.code = 'SERVER_WARMING_UP';
+          customError.message =
+            'DFarm cloud server is waking up from standby (HTTP 502/503). Please tap Retry in a few seconds.';
+        } else if (error.response.status === 500) {
+          customError.code = 'SERVER_INTERNAL_ERROR';
+          const backendErr =
+            error.response.data?.error?.message ||
+            error.response.data?.message ||
+            (typeof error.response.data?.error === 'string' ? error.response.data.error : null);
+          if (backendErr) {
+            customError.message = backendErr;
+          } else {
+            customError.message =
+              'DFarm server encountered a temporary processing error. Please tap Retry.';
+          }
         }
 
         return Promise.reject(customError);

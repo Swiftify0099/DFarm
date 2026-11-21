@@ -64,6 +64,10 @@ export declare class BiometricInferenceService {
      */
     private detectFacesFallback;
     /**
+     * Run YuNet face detection on a pre-loaded Jimp image with automatic resilient fallback.
+     */
+    detectFacesFromImage(img: any): Promise<DetectedFace[]>;
+    /**
      * Run YuNet face detection on an image buffer (JPEG/PNG) with automatic resilient fallback.
      */
     detectFacesFromBuffer(buffer: Buffer): Promise<DetectedFace[]>;
@@ -74,9 +78,10 @@ export declare class BiometricInferenceService {
     /**
      * Extract 128-D L2-normalized SFace embedding from detected face crop
      */
-    extractEmbedding(buffer: Buffer, face: DetectedFace): Promise<number[]>;
+    extractEmbedding(buffer: Buffer, face: DetectedFace, preloadedImg?: any): Promise<number[]>;
     /**
-     * End-to-end detection, alignment verification, and 128-D embedding extraction
+     * End-to-end detection, alignment verification, and 128-D embedding extraction.
+     * Single-pass Jimp decoding with oversized capture downscaling to protect memory & CPU on free tier.
      */
     processImage(buffer: Buffer): Promise<BiometricDetectionResult>;
 }

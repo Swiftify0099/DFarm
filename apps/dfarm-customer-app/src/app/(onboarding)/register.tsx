@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { apiClient } from '../../services/api-client';
 import {
   DFARM_COLORS,
   DFARM_TYPOGRAPHY,
@@ -48,6 +49,11 @@ export default function RegisterScreen() {
   const [confirmAccountNumber, setConfirmAccountNumber] = useState('');
   const [ifscCode, setIfscCode] = useState('');
   const [bankName, setBankName] = useState('');
+
+  // Pre-warm the backend so cold-start services on Render wake up while farmer fills Step 1
+  useEffect(() => {
+    apiClient.get('/health/live').catch(() => {});
+  }, []);
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 

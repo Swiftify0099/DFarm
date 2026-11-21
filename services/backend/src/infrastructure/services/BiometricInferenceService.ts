@@ -259,18 +259,11 @@ export class BiometricInferenceService {
   }
 
   /**
-   * Run YuNet face detection on an image buffer (JPEG/PNG) with automatic resilient fallback.
+   * Run YuNet face detection on a pre-loaded Jimp image with automatic resilient fallback.
    */
-  async detectFacesFromBuffer(buffer: Buffer): Promise<DetectedFace[]> {
+  async detectFacesFromImage(img: any): Promise<DetectedFace[]> {
     if (!this.isReady()) {
       await this.initialize();
-    }
-
-    let img: any;
-    try {
-      img = await Jimp.read(buffer);
-    } catch {
-      return [];
     }
 
     const origW = img.bitmap.width;
@@ -386,10 +379,34 @@ export class BiometricInferenceService {
   }
 
   /**
+   * Run YuNet face detection on an image buffer (JPEG/PNG) with automatic resilient fallback.
+   */
+  async detectFacesFromBuffer(buffer: Buffer): Promise<DetectedFace[]> {
+    let img: any;
+    try {
+      img = await Jimp.read(buffer);
+    } catch {
+      return [];
+    }
+
+    const origW = img.bitmap.width;
+    const origH = img.bitmap.height;
+
+    // Downscale oversized captures to protect memory & CPU
+    if (origW > 1024 || origH > 1024) {
+      const maxDim = Math.max(origW, origH);
+      const scale = 1024 / maxDim;
+      img.resize(Math.round(origW * scale), Math.round(origH * scale));
+    }
+
+    return this.detectFacesFromImage(img);
+  }
+
+  /**
    * Resilient deterministic 128-D L2-normalized feature extraction fallback.
    */
-  private async extractEmbeddingFallback(buffer: Buffer, face: DetectedFace): Promise<number[]> {
-    const img = await Jimp.read(buffer);
+  private async extractEmbeddingFallback(buffer: Buffer, face: DetectedFace, preloadedImg?: any): Promise<number[]> {
+    const img = preloadedImg || (await Jimp.read(buffer));
     const origW = img.bitmap.width;
     const origH = img.bitmap.height;
 
@@ -441,14 +458,14 @@ export class BiometricInferenceService {
   /**
    * Extract 128-D L2-normalized SFace embedding from detected face crop
    */
-  async extractEmbedding(buffer: Buffer, face: DetectedFace): Promise<number[]> {
+  async extractEmbedding(buffer: Buffer, face: DetectedFace, preloadedImg?: any): Promise<number[]> {
     if (!this.isReady()) {
       await this.initialize();
     }
 
     if (this.isReady()) {
       try {
-        const img = await Jimp.read(buffer);
+        const img = preloadedImg || (await Jimp.read(buffer));
         const origW = img.bitmap.width;
         const origH = img.bitmap.height;
 
@@ -497,16 +514,52 @@ export class BiometricInferenceService {
       }
     }
 
-    return this.extractEmbeddingFallback(buffer, face);
+    return this.extractEmbeddingFallback(buffer, face, preloadedImg);
   }
 
   /**
-   * End-to-end detection, alignment verification, and 128-D embedding extraction
+   * End-to-end detection, alignment verification, and 128-D embedding extraction.
+   * Single-pass Jimp decoding with oversized capture downscaling to protect memory & CPU on free tier.
    */
   async processImage(buffer: Buffer): Promise<BiometricDetectionResult> {
     const startTime = Date.now();
     try {
-      const faces = await this.detectFacesFromBuffer(buffer);
+      if (!this.isReady()) {
+        await this.initialize();
+      }
+
+      let img: any;
+      try {
+        img = await Jimp.read(buffer);
+      } catch {
+        return {
+          faces: [],
+          faceCount: 0,
+          latencyMs: Date.now() - startTime,
+          modelVersion: 'YuNet-Fallback + SFace-Fallback-INT8',
+        };
+      }
+
+      const origW = img.bitmap.width;
+      const origH = img.bitmap.height;
+
+      if (origW < 40 || origH < 40) {
+        return {
+          faces: [],
+          faceCount: 0,
+          latencyMs: Date.now() - startTime,
+          modelVersion: 'YuNet-Fallback + SFace-Fallback-INT8',
+        };
+      }
+
+      // Auto-downscale oversized captures (e.g. 12MP-64MP mobile photos) to max 1024
+      if (origW > 1024 || origH > 1024) {
+        const maxDim = Math.max(origW, origH);
+        const scale = 1024 / maxDim;
+        img.resize(Math.round(origW * scale), Math.round(origH * scale));
+      }
+
+      const faces = await this.detectFacesFromImage(img);
 
       if (faces.length === 0) {
         return {
@@ -524,7 +577,8 @@ export class BiometricInferenceService {
 
       let embedding: number[] | undefined;
       if (alignment.isAligned && faces.length === 1) {
-        embedding = await this.extractEmbedding(buffer, topFace);
+        // Reuse pre-decoded img to avoid expensive re-decoding
+        embedding = await this.extractEmbedding(buffer, topFace, img);
       }
 
       return {
