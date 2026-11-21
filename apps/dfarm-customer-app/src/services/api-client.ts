@@ -66,6 +66,11 @@ const resolveDefaultBaseUrl = (): string => {
     ''
   ).trim();
 
+  // 0. Explicit HTTPS remote URL: Always honor it across all platforms, emulators, and release builds
+  if (envUrl && envUrl.startsWith('https://')) {
+    return envUrl;
+  }
+
   // 1. Web platform: use browser hostname or localhost
   if (Platform.OS === 'web') {
     if (envUrl && (envUrl.startsWith('https://') || (!envUrl.includes('10.') && !envUrl.includes('192.168.')))) {

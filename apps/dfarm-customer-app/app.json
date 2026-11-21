@@ -15,7 +15,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/branding/adaptive-icon.png",
-        "backgroundColor": "#FFF5EE"
+        "backgroundColor": "#FF6A00"
       },
       "package": "com.dfarm.customer",
       "permissions": [

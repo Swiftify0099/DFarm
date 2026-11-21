@@ -8,7 +8,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   return {
     ...config,
-    name: isProduction ? 'DFarm Customer' : 'DFarm Customer (Dev)',
+    name: 'DFarm Customer',
     slug: config.slug || 'dfarm-customer-app',
     android: {
       ...config.android,
