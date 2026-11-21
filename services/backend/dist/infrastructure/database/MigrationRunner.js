@@ -48,6 +48,7 @@ export const MIGRATION_MANIFEST = [
     { version: '035', filename: '035_customer_lifecycle_and_registration_hardening.sql', target: MigrationTarget.SHARED, description: 'Additive migration ensuring customer registration and lifecycle statuses across all databases' },
     { version: '036', filename: '036_seed_warna_dairy_admin.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Provision Warna Dairy Admin (+917507495615) and expand role check constraint' },
     { version: '037', filename: '037_multi_dairy_customer_identity_and_membership.sql', target: MigrationTarget.SHARED, description: 'Global customer identities and multi-dairy membership discovery directory' },
+    { version: '038', filename: '038_platform_federation_database_mapping.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Register platform federation control plane database mapping' },
 ];
 export const CONTROL_PLANE_MIGRATIONS = MIGRATION_MANIFEST.filter(m => m.target === MigrationTarget.CONTROL_PLANE || m.target === MigrationTarget.SHARED);
 export const TENANT_OPERATIONAL_MIGRATIONS = MIGRATION_MANIFEST.filter(m => m.target === MigrationTarget.TENANT_OPERATIONAL || m.target === MigrationTarget.SHARED);

@@ -43,7 +43,13 @@ const getSummaryUseCase = new GetMonthlyMilkSummaryUseCase(transactionRepo);
 // 1. Get all shift sessions for dairy
 router.get('/sessions', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+    const organizationId =
+      req.user?.organizationId ||
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.headers['x-dairy-id'] as string) ||
+      (req.headers['x-organization-id'] as string) ||
+      (req.query['organizationId'] as string) ||
+      (req.query['dairyId'] as string);
     if (!organizationId) {
       res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
       return;
@@ -119,10 +125,25 @@ router.get('/sessions', optionalAuthenticate, async (req: Request, res: Response
 // 1b. Get active shift session
 router.get('/sessions/active', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const centerId = (req.query['centerId'] as string) || req.user?.centerId || '00000000-0000-0000-0000-000000000002';
-    const organizationId = req.user?.organizationId || '00000000-0000-0000-0000-000000000001';
-    const operatorId = req.user?.userId || '00000000-0000-0000-0000-000000000003';
-    const deviceId = (req.query['deviceId'] as string) || 'KIOSK_MAIN';
+    const centerId =
+      (req.query['centerId'] as string) ||
+      (req.headers['x-center-id'] as string) ||
+      req.user?.centerId ||
+      '00000000-0000-0000-0000-000000000002';
+    const organizationId =
+      req.user?.organizationId ||
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.headers['x-dairy-id'] as string) ||
+      (req.headers['x-organization-id'] as string) ||
+      (req.query['organizationId'] as string) ||
+      (req.query['dairyId'] as string) ||
+      '00000000-0000-0000-0000-000000000001';
+    const operatorId =
+      (req.query['operatorId'] as string) ||
+      (req.headers['x-operator-id'] as string) ||
+      req.user?.userId ||
+      '00000000-0000-0000-0000-000000000003';
+    const deviceId = (req.query['deviceId'] as string) || (req.headers['x-device-id'] as string) || 'KIOSK_MAIN';
 
     const session = await getActiveSessionUseCase.execute({
       centerId,
@@ -305,7 +326,13 @@ router.post('/intake', authenticate, handleIntakeTransaction);
 // 4b. All Dairy-Scoped Transactions (Dairy Admin & Kiosk Register)
 const handleGetTransactions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+    const organizationId =
+      req.user?.organizationId ||
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.headers['x-dairy-id'] as string) ||
+      (req.headers['x-organization-id'] as string) ||
+      (req.query['organizationId'] as string) ||
+      (req.query['dairyId'] as string);
     if (!organizationId) {
       res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
       return;
@@ -488,7 +515,13 @@ router.post('/transactions/:id/adjust', optionalAuthenticate, async (req: Reques
 // 4d. Dairy Quality Readings Register
 router.get('/quality/readings', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+    const organizationId =
+      req.user?.organizationId ||
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.headers['x-dairy-id'] as string) ||
+      (req.headers['x-organization-id'] as string) ||
+      (req.query['organizationId'] as string) ||
+      (req.query['dairyId'] as string);
     if (!organizationId) {
       res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
       return;

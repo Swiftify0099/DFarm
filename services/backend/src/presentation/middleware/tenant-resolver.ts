@@ -81,29 +81,53 @@ export function requireTenantContext(options: TenantResolverOptions = {}) {
       // 4. Resolve central mapping
       let mapping = tenantDbManager.getTenantMapping(targetDairyId);
       if (!mapping) {
-        // Query central control plane database
-        const controlDb = tenantDbManager.getControlPlaneDb();
-        const res = await controlDb.query(
-          'SELECT * FROM dairy_database_mappings WHERE dairy_id = $1;',
-          [targetDairyId]
-        );
-        if (res.rows.length === 0) {
-          throw new NotFoundError(`No database mapping found for dairy: ${targetDairyId}`, 'TENANT_NOT_FOUND');
+        if (tenantDbManager.isPlatformFederationDairy(targetDairyId)) {
+          mapping = tenantDbManager.getPlatformFederationMapping();
+        } else {
+          // Query central control plane database
+          const controlDb = tenantDbManager.getControlPlaneDb();
+          const res = await controlDb.query(
+            'SELECT * FROM dairy_database_mappings WHERE dairy_id = $1;',
+            [targetDairyId]
+          );
+          if (res.rows.length === 0) {
+            // Check if organization exists in control plane organizations table
+            const orgRes = await controlDb.query(
+              'SELECT id, name, code, status FROM organizations WHERE id = $1;',
+              [targetDairyId]
+            );
+            if (orgRes.rows.length > 0 && orgRes.rows[0].status === 'ACTIVE') {
+              mapping = {
+                id: orgRes.rows[0].id,
+                dairyId: orgRes.rows[0].id,
+                dairyCode: orgRes.rows[0].code,
+                databaseName: 'postgres',
+                resourceType: 'PHYSICAL_DATABASE',
+                schemaVersion: 'v1.0.0',
+                provisioningStatus: 'ACTIVE',
+                provisionedAt: new Date().toISOString(),
+                lastVerifiedAt: new Date().toISOString(),
+              };
+            } else {
+              throw new NotFoundError(`No database mapping found for dairy: ${targetDairyId}`, 'TENANT_NOT_FOUND');
+            }
+          } else {
+            const row = res.rows[0];
+            mapping = {
+              id: row.id,
+              dairyId: row.dairy_id,
+              dairyCode: row.dairy_code,
+              databaseName: row.database_name,
+              resourceType: row.resource_type === 'ISOLATED_TEST_INSTANCE' ? 'ISOLATED_TEST_INSTANCE' : 'PHYSICAL_DATABASE',
+              connectionUriEncrypted: row.connection_uri_encrypted,
+              schemaVersion: row.schema_version,
+              provisioningStatus: row.provisioning_status,
+              provisioningError: row.provisioning_error,
+              provisionedAt: row.provisioned_at?.toISOString?.() || row.provisioned_at,
+              lastVerifiedAt: row.last_verified_at?.toISOString?.() || row.last_verified_at,
+            };
+          }
         }
-        const row = res.rows[0];
-        mapping = {
-          id: row.id,
-          dairyId: row.dairy_id,
-          dairyCode: row.dairy_code,
-          databaseName: row.database_name,
-          resourceType: row.resource_type === 'ISOLATED_TEST_INSTANCE' ? 'ISOLATED_TEST_INSTANCE' : 'PHYSICAL_DATABASE',
-          connectionUriEncrypted: row.connection_uri_encrypted,
-          schemaVersion: row.schema_version,
-          provisioningStatus: row.provisioning_status,
-          provisioningError: row.provisioning_error,
-          provisionedAt: row.provisioned_at?.toISOString?.() || row.provisioned_at,
-          lastVerifiedAt: row.last_verified_at?.toISOString?.() || row.last_verified_at,
-        };
       }
 
       if (mapping.provisioningStatus !== 'ACTIVE') {

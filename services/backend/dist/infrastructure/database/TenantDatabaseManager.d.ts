@@ -24,6 +24,7 @@ export interface ProvisionTenantParams {
     dairyName: string;
     adminConnectionString?: string;
 }
+export declare const PLATFORM_FEDERATION_DAIRY_ID = "00000000-0000-0000-0000-000000000001";
 export declare class TenantDatabaseUnavailableError extends Error {
     readonly dairyId: string;
     readonly status: string;
@@ -44,6 +45,8 @@ export declare class TenantDatabaseManager {
     getControlPlaneDb(): IDatabaseClient;
     setControlPlaneDb(db: IDatabaseClient): void;
     initialize(controlPlaneDb?: IDatabaseClient): Promise<void>;
+    isPlatformFederationDairy(dairyId?: string): boolean;
+    getPlatformFederationMapping(): TenantDatabaseMapping;
     getTenantMapping(dairyId: string): TenantDatabaseMapping | null;
     getAllMappings(): TenantDatabaseMapping[];
     getAllTenantDbs(): IDatabaseClient[];

@@ -152,6 +152,7 @@ export class KioskShiftSession {
       dairyId: this.props.organizationId,
       centerId: this.props.centerId,
       date: this.props.businessDate,
+      businessDate: this.props.businessDate,
       shift: this.props.shift,
       status: this.props.status,
       openedAt: this.props.openedAt,
@@ -159,8 +160,16 @@ export class KioskShiftSession {
       openingOperatorName: this.props.openingOperatorName,
       closingOperatorName: this.props.closingOperatorName,
       deviceId: this.props.deviceIdentifier,
+      deviceIdentifier: this.props.deviceIdentifier,
       deviceName: this.props.deviceName,
       totals: this.totals,
+      totalLiters: this.totals.totalLiters,
+      cowLiters: this.totals.cowLiters,
+      buffaloLiters: this.totals.buffaloLiters,
+      transactionCount: this.totals.transactionCount,
+      totalAmount: this.totals.totalAmount,
+      averageFat: this.totals.averageFat,
+      averageSnf: this.totals.averageSnf,
     };
   }
 }

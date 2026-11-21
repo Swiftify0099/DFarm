@@ -129,7 +129,10 @@ const resolveDefaultBaseUrl = (): string => {
     return `http://${metroHost}:4000/api/v1`;
   }
 
-  // 6. Default fallback to loopback
+  // 6. Default fallback: in production, always point to live production backend
+  if (!isDev) {
+    return 'https://dfarm-backend.onrender.com/api/v1';
+  }
   return 'http://localhost:4000/api/v1';
 };
 

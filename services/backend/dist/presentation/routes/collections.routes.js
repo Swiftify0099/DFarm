@@ -20,7 +20,12 @@ const getSummaryUseCase = new GetMonthlyMilkSummaryUseCase(transactionRepo);
 // 1. Get all shift sessions for dairy
 router.get('/sessions', optionalAuthenticate, async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const organizationId = req.user?.organizationId ||
+            req.headers['x-dairy-tenant-id'] ||
+            req.headers['x-dairy-id'] ||
+            req.headers['x-organization-id'] ||
+            req.query['organizationId'] ||
+            req.query['dairyId'];
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;
@@ -93,10 +98,22 @@ router.get('/sessions', optionalAuthenticate, async (req, res, next) => {
 // 1b. Get active shift session
 router.get('/sessions/active', optionalAuthenticate, async (req, res, next) => {
     try {
-        const centerId = req.query['centerId'] || req.user?.centerId || '00000000-0000-0000-0000-000000000002';
-        const organizationId = req.user?.organizationId || '00000000-0000-0000-0000-000000000001';
-        const operatorId = req.user?.userId || '00000000-0000-0000-0000-000000000003';
-        const deviceId = req.query['deviceId'] || 'KIOSK_MAIN';
+        const centerId = req.query['centerId'] ||
+            req.headers['x-center-id'] ||
+            req.user?.centerId ||
+            '00000000-0000-0000-0000-000000000002';
+        const organizationId = req.user?.organizationId ||
+            req.headers['x-dairy-tenant-id'] ||
+            req.headers['x-dairy-id'] ||
+            req.headers['x-organization-id'] ||
+            req.query['organizationId'] ||
+            req.query['dairyId'] ||
+            '00000000-0000-0000-0000-000000000001';
+        const operatorId = req.query['operatorId'] ||
+            req.headers['x-operator-id'] ||
+            req.user?.userId ||
+            '00000000-0000-0000-0000-000000000003';
+        const deviceId = req.query['deviceId'] || req.headers['x-device-id'] || 'KIOSK_MAIN';
         const session = await getActiveSessionUseCase.execute({
             centerId,
             organizationId,
@@ -265,7 +282,12 @@ router.post('/intake', authenticate, handleIntakeTransaction);
 // 4b. All Dairy-Scoped Transactions (Dairy Admin & Kiosk Register)
 const handleGetTransactions = async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const organizationId = req.user?.organizationId ||
+            req.headers['x-dairy-tenant-id'] ||
+            req.headers['x-dairy-id'] ||
+            req.headers['x-organization-id'] ||
+            req.query['organizationId'] ||
+            req.query['dairyId'];
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;
@@ -434,7 +456,12 @@ router.post('/transactions/:id/adjust', optionalAuthenticate, async (req, res, n
 // 4d. Dairy Quality Readings Register
 router.get('/quality/readings', optionalAuthenticate, async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const organizationId = req.user?.organizationId ||
+            req.headers['x-dairy-tenant-id'] ||
+            req.headers['x-dairy-id'] ||
+            req.headers['x-organization-id'] ||
+            req.query['organizationId'] ||
+            req.query['dairyId'];
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;

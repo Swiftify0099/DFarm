@@ -9,6 +9,7 @@ import { db as defaultControlPlaneDb } from './PostgresPool.js';
 import { CredentialEncryption } from '../security/CredentialEncryption.js';
 import { MigrationRunner } from './MigrationRunner.js';
 import { inMemoryDairies } from './InMemoryDairyStore.js';
+export const PLATFORM_FEDERATION_DAIRY_ID = '00000000-0000-0000-0000-000000000001';
 export class TenantDatabaseUnavailableError extends Error {
     dairyId;
     status;
@@ -104,6 +105,8 @@ export class TenantDatabaseManager {
                 };
                 this.tenantMappings.set(mapping.dairyId, mapping);
             }
+            // Pre-seed platform federation central mapping in memory
+            this.tenantMappings.set(PLATFORM_FEDERATION_DAIRY_ID, this.getPlatformFederationMapping());
             this.isInitialized = true;
             logger.info({ loadedTenantCount: this.tenantMappings.size }, 'TenantDatabaseManager initialized with authoritative database-per-dairy routing.');
         }
@@ -115,7 +118,32 @@ export class TenantDatabaseManager {
             }
         }
     }
+    isPlatformFederationDairy(dairyId) {
+        if (!dairyId)
+            return true;
+        const normalized = dairyId.trim().toLowerCase();
+        return (normalized === PLATFORM_FEDERATION_DAIRY_ID ||
+            normalized === 'df-platform' ||
+            normalized === 'platform' ||
+            normalized === 'default');
+    }
+    getPlatformFederationMapping() {
+        return {
+            id: PLATFORM_FEDERATION_DAIRY_ID,
+            dairyId: PLATFORM_FEDERATION_DAIRY_ID,
+            dairyCode: 'DF-PLATFORM',
+            databaseName: 'postgres',
+            resourceType: 'PHYSICAL_DATABASE',
+            schemaVersion: 'v1.0.0',
+            provisioningStatus: 'ACTIVE',
+            provisionedAt: '2026-01-01T00:00:00.000Z',
+            lastVerifiedAt: new Date().toISOString(),
+        };
+    }
     getTenantMapping(dairyId) {
+        if (this.isPlatformFederationDairy(dairyId)) {
+            return this.getPlatformFederationMapping();
+        }
         return this.tenantMappings.get(dairyId) || null;
     }
     getAllMappings() {
@@ -341,7 +369,7 @@ export class TenantDatabaseManager {
      * Throws if no active mapping exists. Never falls back to central DB or creates a fake DB.
      */
     async getTenantDb(dairyId) {
-        if (!dairyId) {
+        if (!dairyId || this.isPlatformFederationDairy(dairyId)) {
             return this.getControlPlaneDb();
         }
         // 1. Check active pool cache
@@ -402,6 +430,21 @@ export class TenantDatabaseManager {
             if (mapping?.provisioningStatus === 'PROVISIONING' || mapping?.provisioningStatus === 'MIGRATING' || mapping?.provisioningStatus === 'VERIFYING') {
                 throw new TenantDatabaseUnavailableError(dairyId, mapping.provisioningStatus, 'Tenant database is currently being provisioned');
             }
+            if (this.isPlatformFederationDairy(dairyId)) {
+                return this.getControlPlaneDb();
+            }
+            // If registered organization exists in control plane, serve via partitioned control plane database
+            const controlDb = this.getControlPlaneDb();
+            try {
+                const orgCheck = await controlDb.query('SELECT id, name, code, status FROM organizations WHERE id = $1;', [dairyId]);
+                if (orgCheck.rows.length > 0 && orgCheck.rows[0].status === 'ACTIVE') {
+                    logger.info({ dairyId, dairyName: orgCheck.rows[0].name }, 'Registered organization has no isolated tenant database; serving via partitioned control plane database.');
+                    return this.getControlPlaneDb();
+                }
+            }
+            catch (checkErr) {
+                logger.warn({ dairyId, error: checkErr.message }, 'Failed to check organization existence in control plane');
+            }
             if (config.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production') {
                 logger.info({ dairyId }, 'No isolated tenant database found; using control plane database fallback in development.');
                 return this.getControlPlaneDb();
@@ -418,7 +461,11 @@ export class TenantDatabaseManager {
             return memClient;
         }
         if (!mapping.connectionUriEncrypted) {
-            if (config.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production') {
+            if (config.NODE_ENV === 'development' ||
+                process.env.NODE_ENV !== 'production' ||
+                this.isPlatformFederationDairy(dairyId) ||
+                mapping.databaseName === 'postgres' ||
+                mapping.databaseName === 'dfarm_control_plane') {
                 return this.getControlPlaneDb();
             }
             throw new Error(`Tenant database connection credentials missing for dairy: ${dairyId}`);

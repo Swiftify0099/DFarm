@@ -307,6 +307,7 @@ export class PostgresDatabase {
       '032_central_super_admin_features.sql',
       '033_central_platform_policies_and_support.sql',
       '037_multi_dairy_customer_identity_and_membership.sql',
+      '038_platform_federation_database_mapping.sql',
     ];
 
     const possibleDirs = [

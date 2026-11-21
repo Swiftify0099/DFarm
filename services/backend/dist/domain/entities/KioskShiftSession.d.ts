@@ -59,6 +59,7 @@ export declare class KioskShiftSession {
         dairyId: string;
         centerId: string;
         date: string;
+        businessDate: string;
         shift: ShiftType;
         status: ShiftSessionStatus;
         openedAt: string;
@@ -66,6 +67,7 @@ export declare class KioskShiftSession {
         openingOperatorName: string;
         closingOperatorName: string | null | undefined;
         deviceId: string;
+        deviceIdentifier: string;
         deviceName: string;
         totals: {
             totalLiters: number;
@@ -76,6 +78,13 @@ export declare class KioskShiftSession {
             averageFat: number;
             averageSnf: number;
         };
+        totalLiters: number;
+        cowLiters: number;
+        buffaloLiters: number;
+        transactionCount: number;
+        totalAmount: number;
+        averageFat: number;
+        averageSnf: number;
     };
 }
 //# sourceMappingURL=KioskShiftSession.d.ts.map

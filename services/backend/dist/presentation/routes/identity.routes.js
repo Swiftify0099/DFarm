@@ -28,8 +28,13 @@ function computeCosineSimilarity(vecA, vecB) {
 // 1. Get Dairy-Scoped Face Templates (Encrypted + Decrypted for Authorized Terminals)
 router.get('/face/templates', optionalAuthenticate, async (req, res, next) => {
     try {
-        const headerOrgId = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
-        let organizationId = req.user?.organizationId || req.query['organizationId'] || headerOrgId;
+        const headerOrgId = req.headers['x-dairy-tenant-id'] ||
+            req.headers['x-dairy-id'] ||
+            req.headers['x-organization-id'];
+        let organizationId = req.user?.organizationId ||
+            req.query['organizationId'] ||
+            req.query['dairyId'] ||
+            headerOrgId;
         if (!organizationId) {
             organizationId = '00000000-0000-0000-0000-000000000001';
         }
