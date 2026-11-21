@@ -76,7 +76,8 @@ const getAuthHeaders = (): Record<string, string> => {
 }
 
 // Resilient fast fetch with environment-aware timeouts (fast abort in tests, generous in production)
-const isTestEnv = typeof process !== 'undefined' && (process.env?.NODE_ENV === 'test' || Boolean((process.env as any)?.VITEST))
+const globalProc = (globalThis as any).process
+const isTestEnv = typeof globalProc !== 'undefined' && (globalProc?.env?.NODE_ENV === 'test' || Boolean(globalProc?.env?.VITEST))
 const safeFetch = async (url: string, options: RequestInit = {}, timeoutMs = isTestEnv ? 400 : 8000): Promise<Response> => {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)

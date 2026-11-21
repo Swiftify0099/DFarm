@@ -117,21 +117,21 @@ dfarm-monorepo/
 | Variable Name | Purpose | Required / Optional | Scope | Local Dev Value | Cloudflare Preview Value | Cloudflare Production Value |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `NODE_VERSION` | Enforces Node.js runtime on Cloudflare build container | Required | Build System | `22.10.0` | `22` | `22` |
-| `VITE_API_BASE_URL` | Canonical backend API endpoint | Required | Public (Browser) | `http://localhost:4000/api/v1` (or unset for Vite proxy `/api/v1`) | `https://api.dfarm.in/api/v1` (or staging backend) | `https://api.dfarm.in/api/v1` |
+| `VITE_API_BASE_URL` | Canonical backend API endpoint | Required | Public (Browser) | `http://localhost:4000/api/v1` (or unset for Vite proxy `/api/v1`) | `https://dfarm-backend.onrender.com/api/v1` (or staging backend) | `https://dfarm-backend.onrender.com/api/v1` (or `https://api.dfarm.in/api/v1`) |
 
 ### 2. Dairy Admin (`dfarm-dairy-admin`)
 
 | Variable Name | Purpose | Required / Optional | Scope | Local Dev Value | Cloudflare Preview Value | Cloudflare Production Value |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `NODE_VERSION` | Enforces Node.js runtime on Cloudflare build container | Required | Build System | `22.10.0` | `22` | `22` |
-| `VITE_API_BASE_URL` | Canonical backend API endpoint | Required | Public (Browser) | `http://localhost:4000/api/v1` | `https://api.dfarm.in/api/v1` (or staging backend) | `https://api.dfarm.in/api/v1` |
+| `VITE_API_BASE_URL` | Canonical backend API endpoint | Required | Public (Browser) | `http://localhost:4000/api/v1` | `https://dfarm-backend.onrender.com/api/v1` (or staging backend) | `https://dfarm-backend.onrender.com/api/v1` (or `https://api.dfarm.in/api/v1`) |
 
 ### 3. Super Admin (`dfarm-super-admin`)
 
 | Variable Name | Purpose | Required / Optional | Scope | Local Dev Value | Cloudflare Preview Value | Cloudflare Production Value |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `NODE_VERSION` | Enforces Node.js runtime on Cloudflare build container | Required | Build System | `22.10.0` | `22` | `22` |
-| `VITE_API_BASE_URL` | Canonical backend API endpoint | Required | Public (Browser) | `http://localhost:4000/api/v1` | `https://api.dfarm.in/api/v1` (or staging backend) | `https://api.dfarm.in/api/v1` |
+| `VITE_API_BASE_URL` | Canonical backend API endpoint | Required | Public (Browser) | `http://localhost:4000/api/v1` | `https://dfarm-backend.onrender.com/api/v1` (or staging backend) | `https://dfarm-backend.onrender.com/api/v1` (or `https://api.dfarm.in/api/v1`) |
 | `VITE_GOOGLE_MAPS_API_KEY` | Key for Google Maps & Places address lookup | Optional (Dev) / Recommended (Prod) | Public (Browser) | (Mock or test key) | Staging Google Maps Key | Production Google Maps Key |
 | `VITE_DAIRY_ADMIN_URL` | Dairy Admin Portal base URL for activation links | Optional | Public (Browser) | `http://localhost:5174` | `https://dfarm-dairy-admin.pages.dev` | `https://dairy.dfarm.in` |
 
@@ -440,3 +440,49 @@ Perform these smoke tests immediately after initial deployment:
 - [ ] Google Maps interactive location picker loads map tiles, accepts pin dragging, and resolves address geocoding.
 - [ ] Tenant database overview and health metrics query the backend without CORS errors.
 - [ ] Invitation links and activation links format with the correct public dairy URL.
+
+---
+
+## R. TROUBLESHOOTING: "The Cloudflare application detection logic has been run in the root of a workspace"
+
+### Error Symptoms:
+```
+Executing user deploy command: npx wrangler deploy
+✘ [ERROR] The Cloudflare application detection logic has been run in the root of a workspace instead of targeting a specific project. Change your working directory to one of the applications in the workspace and try again.
+Failed: error occurred while running deploy command
+```
+
+### Root Cause:
+The repository is an npm monorepo with multiple workspaces defined in `package.json`.
+When creating or configuring the project in Cloudflare Dashboard:
+1. The **Root directory** setting was left blank (or `/`). This forced Cloudflare to execute `npm run build` and `npx wrangler deploy` from `/` (the monorepo root), building every workspace and confusing Wrangler's project detection.
+2. In the new Cloudflare Workers & Pages dashboard, Cloudflare may auto-populate or default the "Deploy command" to `npx wrangler deploy`.
+
+### Resolution Steps in Cloudflare Dashboard:
+For EACH application, navigate to:
+**Cloudflare Dashboard** → **Workers & Pages** → Select your Project → **Settings** → **Builds & deployments** → **Build configurations** → Click **Edit configuration**:
+
+1. **Root directory (Advanced)**:
+   - For `dfarm-collection`: set to `apps/dfarm-collection-app`
+   - For `dfarm-dairy-admin`: set to `apps/dfarm-dairy-admin`
+   - For `dfarm-super-admin`: set to `apps/dfarm-super-admin`
+
+2. **Build command**:
+   - Set to `npm run build`
+
+3. **Build output directory**:
+   - Set to `dist`
+
+4. **Deploy command**:
+   - If using **Cloudflare Pages**: Leave the deploy command **BLANK** (empty). Cloudflare Pages uploads the `dist` directory automatically without needing Wrangler.
+   - If Cloudflare enforces a deploy command or if using Workers Static Assets:
+     - Clear the field or leave blank.
+     - Alternatively, each app now includes a `wrangler.json` targeting `./dist` (`"pages_build_output_dir": "./dist"`), ensuring Wrangler works properly inside that specific app folder.
+
+5. **Environment Variables**:
+   Under **Settings** → **Environment variables**:
+   - Add `NODE_VERSION` = `22`
+   - Add `VITE_API_BASE_URL` = `https://dfarm-backend.onrender.com/api/v1` (or your backend domain)
+
+6. Click **Save** and trigger a **Retry deployment** or push a new commit.
+

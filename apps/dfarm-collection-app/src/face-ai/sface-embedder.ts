@@ -47,32 +47,37 @@ export class SFaceEmbedder {
       }
 
       // 2. In Node.js / test environment
-      if (typeof process !== 'undefined' && process.versions?.node) {
+      const globalProc = (globalThis as unknown as { process?: { versions?: { node?: string }; cwd?: () => string } }).process
+      if (typeof globalProc !== 'undefined' && globalProc?.versions?.node) {
         try {
-          const ortNode = await import('onnxruntime-node')
-          const path = await import('node:path')
-          const fs = await import('node:fs')
+          const req = (globalThis as any).require
+          if (typeof req === 'function') {
+            const ortNode = req('onnxruntime-node')
+            const path = req('path')
+            const fs = req('fs')
 
-          const candidatePaths = [
-            path.resolve(process.cwd(), 'apps/dfarm-collection-app/public/models', FACE_MODEL_MANIFEST.recognizer.filename),
-            path.resolve(process.cwd(), 'public/models', FACE_MODEL_MANIFEST.recognizer.filename),
-            path.resolve(process.cwd(), 'apps/dfarm-customer-app/assets/models', FACE_MODEL_MANIFEST.recognizer.filename),
-          ]
+            const cwd = typeof globalProc.cwd === 'function' ? globalProc.cwd() : '.'
+            const candidatePaths = [
+              path.resolve(cwd, 'apps/dfarm-collection-app/public/models', FACE_MODEL_MANIFEST.recognizer.filename),
+              path.resolve(cwd, 'public/models', FACE_MODEL_MANIFEST.recognizer.filename),
+              path.resolve(cwd, 'apps/dfarm-customer-app/assets/models', FACE_MODEL_MANIFEST.recognizer.filename),
+            ]
 
-          let modelPath = ''
-          for (const p of candidatePaths) {
-            if (fs.existsSync(p)) {
-              modelPath = p
-              break
+            let modelPath = ''
+            for (const p of candidatePaths) {
+              if (fs.existsSync(p)) {
+                modelPath = p
+                break
+              }
             }
-          }
 
-          if (modelPath) {
-            this.ort = ortNode
-            this.session = await ortNode.InferenceSession.create(modelPath, { logSeverityLevel: 3 })
-            this.isLoaded = true
-            this.loadError = null
-            return true
+            if (modelPath) {
+              this.ort = ortNode
+              this.session = await ortNode.InferenceSession.create(modelPath, { logSeverityLevel: 3 })
+              this.isLoaded = true
+              this.loadError = null
+              return true
+            }
           }
         } catch (err: any) {
           this.loadError = err.message
