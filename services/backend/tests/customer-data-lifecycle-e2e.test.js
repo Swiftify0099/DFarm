@@ -32,12 +32,17 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
   const sessionAId = '11111111-1111-1111-1111-111111111111';
   const operatorAId = '00000000-0000-0000-0000-000000000011';
 
-  const testMobile = '+919876543210';
+  let testMobile = '+919876543210';
+  let farmerCodeA = 'F-101';
+  let farmerCodeB = 'K-405';
   const customerRealName = 'Pankaj Patil';
 
   let superAdminToken;
 
   before(async () => {
+    testMobile = '+9198' + Math.floor(10000000 + Math.random() * 90000000);
+    farmerCodeA = 'F-' + Math.floor(100 + Math.random() * 900);
+    farmerCodeB = 'K-' + Math.floor(100 + Math.random() * 900);
     tokenService = new HmacJwtTokenService();
     membershipRepo = new PostgresCustomerMembershipRepository();
     customerRepo = new PostgresCustomerRepository();
@@ -61,13 +66,19 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
     await tenantDbManager.initialize();
     const controlDb = tenantDbManager.getControlPlaneDb();
 
+    // Ensure clean state in control plane DB for re-runnable test isolation
+    try {
+      await controlDb.query(`DELETE FROM customer_dairy_memberships WHERE dairy_code IN ($1, $2);`, [dairyACode, dairyBCode]);
+      await controlDb.query(`DELETE FROM dairy_database_mappings WHERE dairy_code IN ($1, $2);`, [dairyACode, dairyBCode]);
+      await controlDb.query(`DELETE FROM organizations WHERE code IN ($1, $2) OR id IN ($3, $4);`, [dairyACode, dairyBCode, dairyAId, dairyBId]);
+    } catch {}
+
     // Register organizations in control plane DB
     await controlDb.query(`
       INSERT INTO organizations (id, name, code, status)
       VALUES 
         ($1, $2, $3, 'ACTIVE'),
-        ($4, $5, $6, 'ACTIVE')
-      ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, code = EXCLUDED.code, status = 'ACTIVE';
+        ($4, $5, $6, 'ACTIVE');
     `, [dairyAId, dairyAName, dairyACode, dairyBId, dairyBName, dairyBCode]);
 
     // Provision separate tenant databases
@@ -85,6 +96,12 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
 
     // Seed center in Dairy A
     const tenantDbA = await tenantDbManager.getTenantDb(dairyAId);
+    await tenantDbA.query(`
+      INSERT INTO organizations (id, name, code, status)
+      VALUES ($1, $2, $3, 'ACTIVE')
+      ON CONFLICT (id) DO NOTHING;
+    `, [dairyAId, dairyAName, dairyACode]);
+
     await tenantDbA.query(`
       INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
       VALUES ($1, $2, 'C-01', 'Sahyadri Main Center', 'Main Road', 'Piran', 'Sangli', 'Maharashtra', '416417', '+919876543210', 'ACTIVE')
@@ -113,10 +130,24 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
     // Seed center in Dairy B
     const tenantDbB = await tenantDbManager.getTenantDb(dairyBId);
     await tenantDbB.query(`
+      INSERT INTO organizations (id, name, code, status)
+      VALUES ($1, $2, $3, 'ACTIVE')
+      ON CONFLICT (id) DO NOTHING;
+    `, [dairyBId, dairyBName, dairyBCode]);
+
+    await tenantDbB.query(`
       INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
       VALUES ($1, $2, 'C-02', 'Krishna Main Center', 'River Road', 'Miraj', 'Sangli', 'Maharashtra', '416410', '+919876543211', 'ACTIVE')
       ON CONFLICT (id) DO NOTHING;
     `, [centerBId, dairyBId]);
+
+    // Clean any residual test customer records for idempotent test execution
+    try {
+      await controlDb.query(`DELETE FROM customer_dairy_memberships WHERE global_customer_id IN (SELECT id FROM global_customer_identities WHERE phone_number = $1);`, [testMobile]);
+      await controlDb.query(`DELETE FROM global_customer_identities WHERE phone_number = $1;`, [testMobile]);
+      await tenantDbA.query(`DELETE FROM customers WHERE normalized_mobile_number = $1;`, [testMobile]);
+      await tenantDbB.query(`DELETE FROM customers WHERE normalized_mobile_number = $1;`, [testMobile]);
+    } catch {}
   });
 
   after(async () => {
@@ -144,8 +175,8 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
         id, organization_id, primary_center_id, farmer_code, full_name,
         normalized_mobile_number, status, registration_status,
         is_deleted, global_customer_id, created_at, updated_at
-      ) VALUES ($1, $2, $3, 'F-101', $4, $5, 'ACTIVE', 'APPROVED', FALSE, $6, NOW(), NOW());
-    `, [tenantCustAId, dairyAId, centerAId, customerRealName, testMobile, globalId]);
+      ) VALUES ($1, $2, $3, $7, $4, $5, 'ACTIVE', 'APPROVED', FALSE, $6, NOW(), NOW());
+    `, [tenantCustAId, dairyAId, centerAId, customerRealName, testMobile, globalId, farmerCodeA]);
 
     // 3. Save central membership with customerName
     const { CustomerMembership } = await import('../dist/domain/entities/CustomerMembership.js');
@@ -154,7 +185,7 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
       globalCustomerId: globalId,
       organizationId: dairyAId,
       tenantCustomerId: tenantCustAId,
-      farmerCode: 'F-101',
+      farmerCode: farmerCodeA,
       customerName: customerRealName,
       membershipStatus: 'APPROVED',
       dairyName: dairyAName,
@@ -205,7 +236,7 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
     assert.equal(data.dairyName, dairyAName);
     assert.equal(data.dairyCode, dairyACode);
     assert.equal(data.membershipStatus, 'APPROVED');
-    assert.equal(data.farmerCode, 'F-101');
+    assert.equal(data.farmerCode, farmerCodeA);
   });
 
   test('Step 4: Customer registers at Dairy B; shares global identity with zero operational leakage', async () => {
@@ -217,8 +248,8 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
         id, organization_id, primary_center_id, farmer_code, full_name,
         normalized_mobile_number, status, registration_status,
         is_deleted, global_customer_id, created_at, updated_at
-      ) VALUES ($1, $2, $3, 'K-405', $4, $5, 'ACTIVE', 'APPROVED', FALSE, $6, NOW(), NOW());
-    `, [tenantCustBId, dairyBId, centerBId, customerRealName, testMobile, globalId]);
+      ) VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE', 'APPROVED', FALSE, $7, NOW(), NOW());
+    `, [tenantCustBId, dairyBId, centerBId, farmerCodeB, customerRealName, testMobile, globalId]);
 
     // Save central membership for Dairy B
     const { CustomerMembership } = await import('../dist/domain/entities/CustomerMembership.js');
@@ -227,7 +258,7 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
       globalCustomerId: globalId,
       organizationId: dairyBId,
       tenantCustomerId: tenantCustBId,
-      farmerCode: 'K-405',
+      farmerCode: farmerCodeB,
       customerName: customerRealName,
       membershipStatus: 'APPROVED',
       dairyName: dairyBName,
@@ -241,8 +272,8 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
     const memberships = await membershipRepo.listMembershipsByGlobalId(globalId);
     assert.equal(memberships.length, 2);
     const codes = memberships.map((m) => m.farmerCode);
-    assert.ok(codes.includes('F-101'));
-    assert.ok(codes.includes('K-405'));
+    assert.ok(codes.includes(farmerCodeA));
+    assert.ok(codes.includes(farmerCodeB));
   });
 
   test('Step 5: Switch dairy to Dairy B preserves customer real name', async () => {
@@ -274,7 +305,7 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
       dairyId: dairyAId,
       centerId: centerAId,
       customerId: tenantCustAId,
-      customerCode: 'F-101',
+      customerCode: farmerCodeA,
       customerName: customerRealName,
       timestamp: new Date().toISOString(),
       date: today,
@@ -295,6 +326,37 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
     });
 
     await transactionRepo.save(txn);
+
+    // 2. Post double-entry financial ledger journal
+    const { CustomerLedgerAccount } = await import('../dist/domain/entities/CustomerLedgerAccount.js');
+    let ledgerA = await ledgerRepo.findByCustomer(tenantCustAId, dairyAId);
+    if (!ledgerA) {
+      ledgerA = new CustomerLedgerAccount({
+        id: crypto.randomUUID(),
+        customerId: tenantCustAId,
+        organizationId: dairyAId,
+        currency: 'INR',
+        currentBalance: 0.0,
+      });
+    }
+    const ledgerEntry = ledgerA.postCredit(861.0, 'Milk Intake Credit (COW 20.5L @ ₹42/L)', txn.id);
+    await ledgerRepo.save(ledgerA, ledgerEntry);
+
+    // Verify balanced double-entry in physical tenant database: SUM(Debit) = SUM(Credit)
+    const tenantDbA = await tenantDbManager.getTenantDb(dairyAId);
+    const journalRes = await tenantDbA.query(`
+      SELECT entry_type, account_type, amount 
+      FROM ledger_entries 
+      WHERE transaction_id = $1;
+    `, [ledgerEntry.id]);
+    assert.equal(journalRes.rows.length, 2, 'Must have exactly 2 balanced journal lines');
+    const debitLine = journalRes.rows.find(r => r.entry_type === 'DEBIT');
+    const creditLine = journalRes.rows.find(r => r.entry_type === 'CREDIT');
+    assert.ok(debitLine && creditLine, 'Must have both DEBIT and CREDIT lines');
+    assert.equal(debitLine.account_type, 'MILK_PURCHASE_EXPENSE');
+    assert.equal(creditLine.account_type, 'CUSTOMER_PAYABLE');
+    assert.equal(Number(debitLine.amount), 861.00);
+    assert.equal(Number(creditLine.amount), 861.00);
 
     // Query collection history in Dairy A
     const resA = await fetch(`${baseUrl}/api/v1/collection/history?limit=10&page=1`, {
@@ -407,7 +469,7 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
     const profileData = (await profileRes.json()).data;
     assert.equal(profileData.fullName, customerRealName);
     assert.equal(profileData.dairyName, dairyBName);
-    assert.equal(profileData.farmerCode, 'K-405');
+    assert.equal(profileData.farmerCode, farmerCodeB);
   });
 
   test('Step 9: Clean recreation of Dairy with fresh empty tenant DB', async () => {
