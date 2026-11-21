@@ -293,6 +293,19 @@ export class TenantDatabaseManager {
           database_name = EXCLUDED.database_name,
           last_verified_at = NOW();
       `, [dairyId, code, name, dbName, 'v1.0.0']);
+            // 5.1 Ensure parent organizations record exists in tenant database for foreign keys
+            try {
+                await tenantClient.query(`
+          INSERT INTO organizations (id, name, code, status)
+          VALUES ($1, $2, $3, 'ACTIVE')
+          ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            code = EXCLUDED.code;
+        `, [dairyId, name, code]);
+            }
+            catch (orgErr) {
+                logger.warn({ dairyId, error: orgErr.message }, 'Failed seeding organization root record into tenant DB');
+            }
             // 6. VERIFYING Phase
             currentMapping.provisioningStatus = 'VERIFYING';
             const verifyRes = await tenantClient.query('SELECT dairy_id, database_name FROM tenant_metadata WHERE dairy_id = $1;', [dairyId]);

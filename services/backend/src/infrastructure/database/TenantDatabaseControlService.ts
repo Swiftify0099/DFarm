@@ -270,7 +270,6 @@ export class TenantDatabaseControlService {
       `);
       tableRows = res.rows;
     } catch {
-      // Fallback for isolated catalog drivers
       try {
         const res = await client.query(`
           SELECT tablename as table_name, 'BASE TABLE' as table_type
@@ -281,42 +280,99 @@ export class TenantDatabaseControlService {
       } catch {}
     }
 
+    // 1. Bulk Column Counts
+    const columnCountMap = new Map<string, number>();
+    try {
+      const colRes = await client.query(`
+        SELECT table_name, COUNT(*)::int as col_count
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+        GROUP BY table_name;
+      `);
+      for (const row of colRes.rows) {
+        columnCountMap.set(row.table_name, Number(row.col_count));
+      }
+    } catch {}
+
+    // 2. Bulk Primary Keys
+    const pkMap = new Map<string, string[]>();
+    try {
+      const pkRes = await client.query(`
+        SELECT tc.table_name, kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+        WHERE tc.constraint_type = 'PRIMARY KEY'
+          AND tc.table_schema = 'public'
+        ORDER BY tc.table_name, kcu.ordinal_position;
+      `);
+      for (const row of pkRes.rows) {
+        const cols = pkMap.get(row.table_name) || [];
+        cols.push(row.column_name);
+        pkMap.set(row.table_name, cols);
+      }
+    } catch {}
+
+    // 3. Bulk Foreign Keys
+    const fkMap = new Map<string, { column: string; targetTable: string; targetColumn: string }[]>();
+    try {
+      const fkRes = await client.query(`
+        SELECT
+          tc.table_name,
+          kcu.column_name as column,
+          ccu.table_name AS target_table,
+          ccu.column_name AS target_column
+        FROM information_schema.table_constraints AS tc
+        JOIN information_schema.key_column_usage AS kcu
+          ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage AS ccu
+          ON ccu.constraint_name = tc.constraint_name
+          AND ccu.table_schema = tc.table_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_schema = 'public';
+      `);
+      for (const row of fkRes.rows) {
+        const fks = fkMap.get(row.table_name) || [];
+        fks.push({
+          column: row.column,
+          targetTable: row.target_table,
+          targetColumn: row.target_column,
+        });
+        fkMap.set(row.table_name, fks);
+      }
+    } catch {}
+
+    // 4. Bulk Estimated Row Counts
+    const rowCountMap = new Map<string, number>();
+    try {
+      const rowRes = await client.query(`
+        SELECT relname as table_name, GREATEST(reltuples::bigint, 0)::int as row_count
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public';
+      `);
+      for (const row of rowRes.rows) {
+        rowCountMap.set(row.table_name, Number(row.row_count));
+      }
+    } catch {}
+
     const summaries: TableSummary[] = [];
 
     for (const r of tableRows) {
       const tableName = r.table_name;
       const isView = r.table_type === 'VIEW';
-
-      // Measure row count safely
-      let rowCount = 0;
-      try {
-        const countRes = await client.query(`SELECT COUNT(*) as cnt FROM ${this.quoteIdent(tableName)};`);
-        rowCount = Number(countRes.rows[0]?.cnt || 0);
-      } catch {}
-
-      // Measure column count
-      let columnCount = 0;
-      try {
-        const colsRes = await client.query(
-          `SELECT COUNT(*) as cnt FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1;`,
-          [tableName]
-        );
-        columnCount = Number(colsRes.rows[0]?.cnt || 0);
-      } catch {
-        columnCount = 10;
-      }
+      const rowCount = rowCountMap.get(tableName) || 0;
+      const columnCount = columnCountMap.get(tableName) || 10;
+      const primaryKey = pkMap.get(tableName) || ['id'];
+      const foreignKeys = fkMap.get(tableName) || [];
 
       // Check classification
       const classInfo = TABLE_CLASSIFICATION[tableName] || {
         category: 'CATEGORY_A_OPERATIONAL',
         accessMode: 'CONTROLLED_CRUD',
       };
-
-      // Detect Primary Key
-      const primaryKey = await this.getPrimaryKeyColumns(client, tableName);
-
-      // Foreign Keys
-      const foreignKeys = await this.getForeignKeys(client, tableName);
 
       summaries.push({
         tableName,
