@@ -25,8 +25,11 @@ export const corsOptions: CorsOptions = {
       return callback(null, true);
     }
 
-    // Permit Cloudflare Pages preview and production projects safely (*.pages.dev for DFarm apps)
-    if (/^https:\/\/([a-zA-Z0-9_-]+\.)?(dfarm-collection|dfarm-dairy-admin|dfarm-super-admin)\.pages\.dev$/.test(requestOrigin)) {
+    // Permit Cloudflare Pages, Workers, and DFarm custom domains
+    if (
+      /^https:\/\/([a-zA-Z0-9_-]+\.)*(pages|workers)\.dev$/.test(requestOrigin) ||
+      /^https:\/\/([a-zA-Z0-9_-]+\.)*dfarm\.in$/.test(requestOrigin)
+    ) {
       return callback(null, true);
     }
 
