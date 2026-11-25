@@ -14,7 +14,8 @@ export function requireRole(allowedRoles) {
         if (req.auth.role === UserRole.SUPER_ADMIN) {
             return next();
         }
-        if (!allowedRoles.includes(req.auth.role)) {
+        const effectiveRole = (req.auth.role === 'PRIMARY_DAIRY_ADMIN' ? UserRole.DAIRY_ADMIN : req.auth.role);
+        if (!allowedRoles.includes(req.auth.role) && !allowedRoles.includes(effectiveRole)) {
             return next(new ForbiddenError(`Actor with role '${req.auth.role}' is not authorized to perform this operation. Required: [${allowedRoles.join(', ')}]`, 'FORBIDDEN'));
         }
         next();

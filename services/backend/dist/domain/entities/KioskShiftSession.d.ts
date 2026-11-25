@@ -23,6 +23,7 @@ export interface KioskShiftSessionProps {
     totalAmount: number;
     averageFat: number;
     averageSnf: number;
+    timezone?: string;
 }
 export declare class KioskShiftSession {
     private props;
@@ -31,6 +32,7 @@ export declare class KioskShiftSession {
     get sessionCode(): string;
     get organizationId(): string;
     get centerId(): string;
+    get timezone(): string | undefined;
     get businessDate(): string;
     get shift(): ShiftType;
     get status(): ShiftSessionStatus;
@@ -48,6 +50,7 @@ export declare class KioskShiftSession {
     };
     get deviceIdentifier(): string;
     get deviceName(): string;
+    get openingOperatorId(): string;
     get openingOperatorName(): string;
     recordTransaction(category: 'COW' | 'BUFFALO', weightLiters: number, fat: number, snf: number, amount: number): void;
     close(operatorId: string, operatorName: string): void;
@@ -60,6 +63,7 @@ export declare class KioskShiftSession {
         centerId: string;
         date: string;
         businessDate: string;
+        timezone: string;
         shift: ShiftType;
         status: ShiftSessionStatus;
         openedAt: string;

@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 import { PostgresRateChartRepository } from '../../infrastructure/repositories/PostgresRateChartRepository.js';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { handleRateSync } from '../../modules/rates/rate.routes.js';
+import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
 import { authorizePermission } from '../middleware/authorize.js';
 const router = Router();
 const rateChartRepo = new PostgresRateChartRepository();
@@ -78,6 +79,9 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
         next(err);
     }
 });
+// 1b. GET & POST /api/v1/rate-charts/sync - Harmonized Authoritative Rate Matrix Delivery (Prompt 4 & 5.2.1)
+router.get('/sync', authenticate, handleRateSync);
+router.post('/sync', authenticate, handleRateSync);
 // 2. Create Draft Rate Chart Version with Backend Range & Field Validation
 router.post('/draft', optionalAuthenticate, async (req, res, next) => {
     try {

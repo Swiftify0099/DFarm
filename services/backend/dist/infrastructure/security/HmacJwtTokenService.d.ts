@@ -8,6 +8,7 @@ export interface TokenClaims {
     actorType: 'STAFF' | 'CUSTOMER';
     fullName?: string;
     phoneNumber?: string;
+    deviceId?: string;
     iat?: number;
     exp?: number;
 }
@@ -21,6 +22,9 @@ export declare class HmacJwtTokenService implements ITokenService {
         globalCustomerId?: string;
         role: string;
         actorType: 'STAFF' | 'CUSTOMER';
+        fullName?: string;
+        phoneNumber?: string;
+        deviceId?: string;
     }, expiresInSeconds?: number): string;
     verifyToken(token: string): {
         userId: string;
@@ -31,6 +35,7 @@ export declare class HmacJwtTokenService implements ITokenService {
         actorType: 'STAFF' | 'CUSTOMER';
         fullName?: string;
         phoneNumber?: string;
+        deviceId?: string;
     };
 }
 //# sourceMappingURL=HmacJwtTokenService.d.ts.map

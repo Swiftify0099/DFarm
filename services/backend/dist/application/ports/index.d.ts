@@ -39,9 +39,31 @@ export interface IShiftSessionRepository {
     findById(sessionId: string, organizationId?: string): Promise<KioskShiftSession | null>;
     save(session: KioskShiftSession): Promise<void>;
 }
+export interface AtomicMilkIntakeParams {
+    transaction: MilkCollectionTransaction;
+    session: KioskShiftSession;
+    totalAmount: number;
+    weightLiters: number;
+    fatPercentage: number;
+    snfPercentage: number;
+    milkCategory: MilkCategory;
+    customerId: string;
+    organizationId: string;
+    centerId: string;
+    operatorId: string;
+    operatorName: string;
+    appliedRate: number;
+}
+export interface AtomicMilkIntakeResult {
+    transaction: MilkCollectionTransaction;
+    receiptNumber: string;
+    customerBalanceAfter: number;
+    isIdempotentReplay: boolean;
+}
 export interface ICollectionTransactionRepository {
     save(transaction: MilkCollectionTransaction): Promise<void>;
-    findByIdempotencyKey(key: string): Promise<MilkCollectionTransaction | null>;
+    saveAtomicIntake(params: AtomicMilkIntakeParams): Promise<AtomicMilkIntakeResult>;
+    findByIdempotencyKey(key: string, organizationId: string): Promise<MilkCollectionTransaction | null>;
     listRecentBySession(sessionId: string, limit?: number): Promise<MilkCollectionTransaction[]>;
     listByCustomer(customerId: string, limit?: number, offset?: number, organizationId?: string): Promise<MilkCollectionTransaction[]>;
     getMonthlySummary(customerId: string, monthYear: string, organizationId?: string): Promise<{
@@ -71,6 +93,9 @@ export interface ITokenService {
         globalCustomerId?: string;
         role: string;
         actorType: 'STAFF' | 'CUSTOMER';
+        fullName?: string;
+        phoneNumber?: string;
+        deviceId?: string;
     }, expiresInSeconds?: number): string;
     verifyToken(token: string): {
         userId: string;
@@ -79,6 +104,9 @@ export interface ITokenService {
         globalCustomerId?: string;
         role: string;
         actorType: 'STAFF' | 'CUSTOMER';
+        fullName?: string;
+        phoneNumber?: string;
+        deviceId?: string;
     };
 }
 export interface IOtpService {

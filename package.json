@@ -55,6 +55,7 @@
     "eslint": "^9.16.0",
     "onnxruntime-node": "^1.31.1",
     "pg-mem": "^3.0.14",
+    "playwright": "^1.65.1",
     "prettier": "^3.4.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",

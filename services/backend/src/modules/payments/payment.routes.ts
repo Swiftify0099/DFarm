@@ -29,6 +29,142 @@ paymentRouter.get(
 paymentRouter.use(authenticate);
 
 // ----------------------------------------------------
+// Farmer Payment Overview & Calculation (Prompt 7)
+// ----------------------------------------------------
+
+// Overview Metrics
+paymentRouter.get(
+  '/overview',
+  requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.CENTER_MANAGER,
+    UserRole.ACCOUNTANT,
+    UserRole.SUPERVISOR,
+  ]),
+  PaymentController.getFarmerPaymentOverview
+);
+
+// Preview Settlement Payable Calculation for Period
+paymentRouter.get(
+  '/settlement/preview',
+  requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.CENTER_MANAGER,
+    UserRole.ACCOUNTANT,
+  ]),
+  PaymentController.calculateSettlementPreview
+);
+
+paymentRouter.post(
+  '/settlement/preview',
+  requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.CENTER_MANAGER,
+    UserRole.ACCOUNTANT,
+  ]),
+  PaymentController.calculateSettlementPreview
+);
+
+// Beneficiary Bank Detail Management & Audit Logs
+paymentRouter.get(
+  '/beneficiaries/:customerId/history',
+  requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.CENTER_MANAGER,
+    UserRole.ACCOUNTANT,
+  ]),
+  PaymentController.getBeneficiaryAuditHistory
+);
+
+paymentRouter.put(
+  '/beneficiaries/:customerId',
+  requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.ACCOUNTANT,
+  ]),
+  PaymentController.updateBeneficiaryBankDetails
+);
+
+// Batch Workflow Actions (Prompt 7)
+paymentRouter.post(
+  '/batches/:batchId/review',
+  requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.CENTER_MANAGER,
+    UserRole.ACCOUNTANT,
+  ]),
+  PaymentController.submitForReview
+);
+
+paymentRouter.post(
+  '/batches/:batchId/reject',
+  requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.SUPERVISOR,
+  ]),
+  PaymentController.rejectBatch
+);
+
+paymentRouter.post(
+  '/batches/:batchId/submit-union-bank',
+  requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.ACCOUNTANT,
+  ]),
+  PaymentController.submitBatchToUnionBank
+);
+
+paymentRouter.post(
+  '/batches/:batchId/reconcile-union-bank',
+  requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.ACCOUNTANT,
+  ]),
+  PaymentController.reconcileBatchWithUnionBank
+);
+
+paymentRouter.get(
+  '/items/:itemId/status-inquiry',
+  requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.ACCOUNTANT,
+    UserRole.SUPERVISOR,
+  ]),
+  PaymentController.queryBatchItemStatus
+);
+
+paymentRouter.post(
+  '/batches/:batchId/timeout',
+  requireRole([
+    UserRole.SUPER_ADMIN,
+    UserRole.DAIRY_OWNER,
+    UserRole.DAIRY_ADMIN,
+    UserRole.ACCOUNTANT,
+  ]),
+  PaymentController.markBatchTimeout
+);
+
+// ----------------------------------------------------
 // Individual Farmer Payouts
 // ----------------------------------------------------
 

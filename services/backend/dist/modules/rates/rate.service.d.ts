@@ -1,4 +1,4 @@
-import { MilkCategory } from '@dfarm/shared-types';
+import { MilkCategory, RateSyncResponseDTO, CenterScope } from '@dfarm/shared-types';
 import type { RateChartDTO, RateChartVersionDTO, RateCalculationResultDTO } from '@dfarm/shared-types';
 export declare class RateService {
     /**
@@ -15,6 +15,7 @@ export declare class RateService {
     static createRateChart(organizationId: string, dto: {
         name: string;
         milkCategory: MilkCategory;
+        centerScope?: 'ORGANIZATION_WIDE' | 'CENTER_SPECIFIC';
         centerId?: string | null;
         pricingType?: string;
         description?: string | null;
@@ -105,5 +106,55 @@ export declare class RateService {
      * - Half-Even banker's rounding to 2 decimals.
      */
     static calculateRate(centerId: string, organizationId: string, milkCategory: MilkCategory, fat: number, snf: number, netWeight: number, overrideVersionId?: string, businessDate?: string, explicitUnit?: string): Promise<RateCalculationResultDTO>;
+    /**
+     * Generates a deterministic, composite cache key for rate matrix caches.
+     * Encodes: tenant (organizationId), explicit scope, center identity, chart identity, and version identity.
+     * Guarantees strict isolation across organizations, scopes, centers, and published versions.
+     */
+    static getRateCacheKey(params: {
+        organizationId: string;
+        scope: 'ORGANIZATION_WIDE' | 'CENTER_SPECIFIC';
+        centerId?: string | null;
+        chartId: string;
+        versionNumber: number;
+        milkCategory: 'COW' | 'BUFFALO';
+    }): string;
+    /**
+     * Complete Rate Matrix Delivery for Offline Sync (Prompt 4)
+     * Fetches full active rate charts with exact GRID matrix cells or FORMULA factors.
+     * Priority: Center-specific override first, dairy-wide fallback second.
+     */
+    static getSyncRateCharts(organizationId: string, centerId?: string | null, businessDate?: string, scope?: CenterScope): Promise<RateSyncResponseDTO>;
+    /**
+     * Validate offline rate calculation against authoritative historical rate version (Prompt 4).
+     * Strict invariants:
+     * - Must belong to the organization
+     * - Must be effective on collection businessDate
+     * - Must match exact GRID cell if pricingType is GRID
+     * - Must match formula if pricingType is FORMULA
+     * - Total amount must match banker's rounding of netWeight * rate
+     */
+    static validateHistoricalRate(params: {
+        organizationId: string;
+        centerId?: string | null;
+        milkCategory: 'COW' | 'BUFFALO';
+        fat: number;
+        snf: number;
+        weightLiters: number;
+        ratePerLiter: number;
+        totalAmount: number;
+        businessDate: string;
+        rateChartVersionId?: string;
+        rateChartId?: string;
+        rateChartVersionNumber?: number;
+    }): Promise<{
+        isValid: boolean;
+        rateChartVersionId: string;
+        versionNumber: number;
+        authoritativeRate: number;
+        authoritativeTotal: number;
+        errorCode?: string;
+        errorMessage?: string;
+    }>;
 }
 //# sourceMappingURL=rate.service.d.ts.map

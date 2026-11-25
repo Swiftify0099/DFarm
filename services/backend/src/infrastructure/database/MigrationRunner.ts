@@ -57,6 +57,8 @@ export const MIGRATION_MANIFEST: MigrationManifestEntry[] = [
   { version: '036', filename: '036_seed_warna_dairy_admin.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Provision Warna Dairy Admin (+917507495615) and expand role check constraint' },
   { version: '037', filename: '037_multi_dairy_customer_identity_and_membership.sql', target: MigrationTarget.SHARED, description: 'Global customer identities and multi-dairy membership discovery directory' },
   { version: '038', filename: '038_platform_federation_database_mapping.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Register platform federation control plane database mapping' },
+  { version: '039', filename: '039_milk_collections_organization_idempotency.sql', target: MigrationTarget.SHARED, description: 'Composite uniqueness constraint on organization_id and idempotency_key for concurrent idempotency' },
+  { version: '040', filename: '040_device_auth_challenges.sql', target: MigrationTarget.SHARED, description: 'Distributed device authentication challenges, atomic single-use replay protection, and bounded failed attempt tracking' },
 ];
 
 export const CONTROL_PLANE_MIGRATIONS = MIGRATION_MANIFEST.filter(
@@ -124,6 +126,18 @@ export class MigrationRunner {
         execution_time_ms INTEGER NOT NULL
       );
     `);
+
+    // Synchronize historical records from supabase_migrations.schema_migrations if present
+    try {
+      await client.query(`
+        INSERT INTO schema_migrations (version, name, checksum, applied_at, execution_time_ms)
+        SELECT version, name, 'HISTORICAL_SUPABASE_RECORD', inserted_at, 0
+        FROM supabase_migrations.schema_migrations
+        ON CONFLICT (version) DO NOTHING;
+      `);
+    } catch {
+      // In case supabase_migrations table is absent or restricted
+    }
   }
 
   public static computeChecksum(content: string): string {
@@ -205,6 +219,15 @@ export class MigrationRunner {
              ON CONFLICT (version) DO UPDATE SET checksum = EXCLUDED.checksum, applied_at = NOW();`,
             [entry.version, entry.filename, checksum, durationMs]
           );
+
+          try {
+            await clientOrPool.query(
+              `INSERT INTO supabase_migrations.schema_migrations (version, name, inserted_at)
+               VALUES ($1, $2, NOW())
+               ON CONFLICT (version) DO NOTHING;`,
+              [entry.version, entry.filename]
+            );
+          } catch {}
 
           results.push({
             version: entry.version,

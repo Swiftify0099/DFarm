@@ -1,13 +1,14 @@
 // DFarm Domain Value Objects
 import { DomainValidationError } from '../errors/index.js';
+import { roundHalfUp } from '@dfarm/shared-types';
 export class Money {
     amount;
     constructor(amount) {
         if (isNaN(amount) || !isFinite(amount) || amount < 0) {
             throw new DomainValidationError('Invalid monetary amount: must be a non-negative number');
         }
-        // Round Half-Even to 2 decimals
-        this.amount = Math.round((amount + Number.EPSILON) * 100) / 100;
+        // DFarm Authoritative Commercial Round-Half-Up to exact 2 decimals (paise)
+        this.amount = roundHalfUp(amount, 2);
     }
     get value() {
         return this.amount;

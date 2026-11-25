@@ -5,7 +5,7 @@ export interface ProcessMilkIntakeDTO {
     sessionId?: string;
     sessionCode?: string;
     customerId: string;
-    organizationId?: string;
+    organizationId: string;
     milkCategory: MilkCategory;
     weightLiters: number;
     fatPercentage: number;

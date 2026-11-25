@@ -26,6 +26,7 @@ export interface KioskShiftSessionProps {
   totalAmount: number;
   averageFat: number;
   averageSnf: number;
+  timezone?: string;
 }
 
 export class KioskShiftSession {
@@ -49,6 +50,10 @@ export class KioskShiftSession {
 
   public get centerId(): string {
     return this.props.centerId;
+  }
+
+  public get timezone(): string | undefined {
+    return this.props.timezone;
   }
 
   public get businessDate(): string {
@@ -93,6 +98,10 @@ export class KioskShiftSession {
 
   public get deviceName(): string {
     return this.props.deviceName;
+  }
+
+  public get openingOperatorId(): string {
+    return this.props.openingOperatorId;
   }
 
   public get openingOperatorName(): string {
@@ -153,6 +162,7 @@ export class KioskShiftSession {
       centerId: this.props.centerId,
       date: this.props.businessDate,
       businessDate: this.props.businessDate,
+      timezone: this.props.timezone || 'Asia/Kolkata',
       shift: this.props.shift,
       status: this.props.status,
       openedAt: this.props.openedAt,

@@ -47,6 +47,18 @@ export class MilkCollectionTransaction {
     return this.props.id;
   }
 
+  public get dairyId(): string {
+    return this.props.dairyId;
+  }
+
+  public get organizationId(): string {
+    return this.props.dairyId;
+  }
+
+  public get centerId(): string {
+    return this.props.centerId;
+  }
+
   public get transactionCode(): string {
     return this.props.transactionCode;
   }
@@ -65,6 +77,26 @@ export class MilkCollectionTransaction {
 
   public get weightLiters(): number {
     return this.props.weightLiters;
+  }
+
+  public get milkCategory(): 'COW' | 'BUFFALO' {
+    return this.props.milkCategory;
+  }
+
+  public get fatPercentage(): number {
+    return this.props.fatPercentage;
+  }
+
+  public get snfPercentage(): number {
+    return this.props.snfPercentage;
+  }
+
+  public get date(): string {
+    return this.props.date;
+  }
+
+  public get shift(): 'MORNING' | 'EVENING' {
+    return this.props.shift;
   }
 
   public get totalAmount(): number {

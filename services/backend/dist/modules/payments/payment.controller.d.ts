@@ -13,7 +13,17 @@ export declare class PaymentController {
     static createReceipt(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
     static confirmReceipt(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
     static getReceiptById(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    static calculateSettlementPreview(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
     static createBatch(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    static submitForReview(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    static rejectBatch(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    static submitBatchToUnionBank(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    static reconcileBatchWithUnionBank(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    static queryBatchItemStatus(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    static markBatchTimeout(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    static getBeneficiaryAuditHistory(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    static updateBeneficiaryBankDetails(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
+    static getFarmerPaymentOverview(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
     static getBatchById(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
     static approveBatch(req: Request, res: Response, next: NextFunction): Promise<Response | void>;
     static submitBatch(req: Request, res: Response, next: NextFunction): Promise<Response | void>;

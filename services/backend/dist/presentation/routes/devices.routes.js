@@ -1,9 +1,203 @@
 import { Router } from 'express';
 import { GetDeviceTelemetryUseCase } from '../../application/use-cases/index.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
+import { realtimePublisher } from '../../infrastructure/realtime/RealtimeEventPublisher.js';
 const router = Router();
 const getTelemetryUseCase = new GetDeviceTelemetryUseCase();
+// ============================================================================
+// 0. AUTHENTICATED STATION HEARTBEAT & TELEMETRY
+// Endpoint: POST /api/v1/devices/heartbeat
+// ============================================================================
+router.post('/heartbeat', authenticate, async (req, res, next) => {
+    try {
+        const tokenOrgId = req.user?.organizationId;
+        const headerOrgId = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.headers['x-organization-id'];
+        const bodyOrgId = req.body?.organizationId || req.body?.dairyId;
+        const organizationId = tokenOrgId || headerOrgId || bodyOrgId;
+        if (!organizationId) {
+            res.status(401).json({
+                success: false,
+                errorCode: 'AUTHENTICATION_REQUIRED',
+                error: 'Dairy organization context is required for station heartbeat.',
+            });
+            return;
+        }
+        // Fail closed if header/body org contradicts cryptographically verified token
+        if (tokenOrgId) {
+            const requestedOrg = headerOrgId || bodyOrgId;
+            if (requestedOrg && requestedOrg !== tokenOrgId && req.user?.role !== 'SUPER_ADMIN') {
+                res.status(403).json({
+                    success: false,
+                    errorCode: 'CROSS_TENANT_ACCESS_DENIED',
+                    error: 'Cross-tenant heartbeat rejected: Organization mismatch with authenticated token.',
+                });
+                return;
+            }
+        }
+        // Device identity comes from cryptographically verified token claims where available.
+        // Client-supplied device IDs cannot override authenticated token device identity.
+        const tokenDeviceId = req.user?.deviceId;
+        const rawDeviceId = req.body?.deviceId || req.body?.deviceIdentifier || req.headers['x-device-id'];
+        if (tokenDeviceId && rawDeviceId && rawDeviceId !== tokenDeviceId) {
+            res.status(403).json({
+                success: false,
+                errorCode: 'DEVICE_IDENTITY_MISMATCH',
+                error: 'Forbidden: Client-supplied device ID cannot override authenticated device identity.',
+            });
+            return;
+        }
+        const cleanDeviceId = (tokenDeviceId || rawDeviceId || '').trim();
+        if (!cleanDeviceId) {
+            res.status(400).json({
+                success: false,
+                errorCode: 'INVALID_DEVICE_ID',
+                error: 'Station deviceId or deviceIdentifier is required.',
+            });
+            return;
+        }
+        const tenantDb = await tenantDbManager.getTenantDb(organizationId);
+        // 1. Resolve registered station from trusted server records
+        const devRes = await tenantDb.query(`SELECT id, organization_id, center_id, device_identifier, name, status, is_blocked,
+              public_key, device_token_hash, revoked_at, revocation_reason
+       FROM devices
+       WHERE (id::text = $1 OR device_identifier = $1)
+         AND organization_id = $2
+       LIMIT 1;`, [cleanDeviceId, organizationId]);
+        if (devRes.rows.length === 0) {
+            res.status(404).json({
+                success: false,
+                errorCode: 'DEVICE_NOT_FOUND',
+                error: `Station '${cleanDeviceId}' is not registered in this dairy organization.`,
+            });
+            return;
+        }
+        const dev = devRes.rows[0];
+        // 2a. Strict permanent revocation check: credentials wiped or status REVOKED / DECOMMISSIONED or revoked_at set
+        // Replaying an unexpired JWT cannot bypass permanent revocation
+        if (dev.status === 'REVOKED' ||
+            dev.status === 'DECOMMISSIONED' ||
+            dev.revoked_at !== null ||
+            (dev.public_key === null && dev.device_token_hash === null && dev.status !== 'ACTIVE')) {
+            res.status(403).json({
+                success: false,
+                errorCode: 'DEVICE_REVOKED',
+                error: `Station '${dev.device_identifier}' credentials have been permanently revoked. Access denied.`,
+                data: {
+                    stationId: dev.id,
+                    deviceIdentifier: dev.device_identifier,
+                    operationalStatus: 'REVOKED',
+                },
+            });
+            return;
+        }
+        // 2b. Administrative block check: Blocked stations fail closed with 403
+        if (dev.status === 'BLOCKED' || dev.is_blocked === true) {
+            // Record heartbeat attempt timestamp on server
+            await tenantDb.query(`UPDATE devices SET last_seen_at = NOW() WHERE id = $1;`, [dev.id]).catch(() => { });
+            res.status(403).json({
+                success: false,
+                errorCode: 'DEVICE_BLOCKED',
+                error: `Station '${dev.device_identifier}' is revoked or blocked. Telemetry rejected.`,
+                data: {
+                    stationId: dev.id,
+                    deviceIdentifier: dev.device_identifier,
+                    operationalStatus: 'BLOCKED',
+                },
+            });
+            return;
+        }
+        // 3. Telemetry payload validation & sanitization
+        const clientAppVersion = typeof req.body?.clientAppVersion === 'string'
+            ? req.body.clientAppVersion.slice(0, 50)
+            : 'v2.4.1';
+        const pendingQueueCount = Number.isInteger(Number(req.body?.pendingQueueCount))
+            ? Math.max(0, Number(req.body.pendingQueueCount))
+            : 0;
+        const lastSyncError = typeof req.body?.lastSyncError === 'string'
+            ? req.body.lastSyncError.slice(0, 500)
+            : null;
+        const syncFailureCategory = typeof req.body?.syncFailureCategory === 'string'
+            ? req.body.syncFailureCategory.slice(0, 50)
+            : null;
+        const batteryLevel = Number.isFinite(Number(req.body?.batteryLevel))
+            ? Math.max(0, Math.min(100, Number(req.body.batteryLevel)))
+            : null;
+        const networkMode = typeof req.body?.networkMode === 'string'
+            ? req.body.networkMode.slice(0, 20)
+            : 'ETHERNET';
+        // 4. Update devices.last_seen_at with server time (NOW())
+        await tenantDb.query(`UPDATE devices SET last_seen_at = NOW() WHERE id = $1;`, [dev.id]);
+        // 5. Upsert operational telemetry in device_sync_state
+        await tenantDb.query(`INSERT INTO device_sync_state (
+        device_id, client_app_version, pending_queue_count,
+        last_sync_error, sync_failure_category, battery_level,
+        network_mode, last_heartbeat_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      ON CONFLICT (device_id) DO UPDATE SET
+        client_app_version = COALESCE(EXCLUDED.client_app_version, device_sync_state.client_app_version),
+        pending_queue_count = EXCLUDED.pending_queue_count,
+        last_sync_error = EXCLUDED.last_sync_error,
+        sync_failure_category = EXCLUDED.sync_failure_category,
+        battery_level = COALESCE(EXCLUDED.battery_level, device_sync_state.battery_level),
+        network_mode = COALESCE(EXCLUDED.network_mode, device_sync_state.network_mode),
+        last_heartbeat_at = NOW(),
+        updated_at = NOW();`, [
+            dev.id,
+            clientAppVersion,
+            pendingQueueCount,
+            lastSyncError,
+            syncFailureCategory,
+            batteryLevel,
+            networkMode,
+        ]);
+        const operationalStatus = pendingQueueCount > 10 || syncFailureCategory ? 'DEGRADED' : 'ONLINE';
+        // 6. Emit Realtime STATION_HEARTBEAT event to Dairy Admin subscribers
+        realtimePublisher.broadcast({
+            eventId: `EVT-HBT-${Date.now()}-${dev.id.slice(0, 6)}`,
+            eventType: 'STATION_HEARTBEAT',
+            schemaVersion: 1,
+            organizationId,
+            centerId: dev.center_id,
+            entityId: dev.device_identifier,
+            aggregateVersion: 1,
+            occurredAt: new Date().toISOString(),
+            publishedAt: new Date().toISOString(),
+            payload: {
+                stationId: dev.id,
+                deviceIdentifier: dev.device_identifier,
+                centerId: dev.center_id,
+                operationalStatus,
+                pendingQueueCount,
+                clientAppVersion,
+                lastSyncError,
+                syncFailureCategory,
+                batteryLevel,
+                networkMode,
+                serverTime: new Date().toISOString(),
+            },
+        });
+        res.json({
+            success: true,
+            message: 'Station heartbeat telemetry recorded successfully.',
+            data: {
+                stationId: dev.id,
+                deviceId: dev.id,
+                deviceIdentifier: dev.device_identifier,
+                centerId: dev.center_id,
+                serverTime: new Date().toISOString(),
+                registrationStatus: dev.status || 'ACTIVE',
+                isBlocked: Boolean(dev.is_blocked),
+                operationalStatus,
+                statusClassification: operationalStatus,
+                pendingQueueCount,
+            },
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+});
 // 1. Get Devices List for Dairy (Cross-referenced with Central Hardware Inventory)
 router.get('/', optionalAuthenticate, async (req, res, next) => {
     try {

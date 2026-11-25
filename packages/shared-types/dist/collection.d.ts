@@ -87,4 +87,83 @@ export interface ShiftSummary {
     avgBuffaloSnf: number;
     totalAmount: number;
 }
+export interface OfflineSessionAuthorizationPayload {
+    authorizationId: string;
+    version: 1;
+    organizationId: string;
+    centerId: string;
+    sessionId: string;
+    sessionCode: string;
+    businessDate: string;
+    shift: 'MORNING' | 'EVENING';
+    deviceIdentifier: string;
+    operatorId: string;
+    operatorName?: string;
+    timezone: string;
+    validFrom: string;
+    validUntil: string;
+    issuedAt: string;
+    maxReconciliationDays?: number;
+}
+export interface OfflineSessionAuthorizationDTO {
+    token: string;
+    payload: OfflineSessionAuthorizationPayload;
+}
+export interface BulkCollectionItemDTO {
+    clientIntakeUuid: string;
+    idempotencyKey: string;
+    customerId: string;
+    sessionId?: string;
+    sessionCode?: string;
+    centerId?: string;
+    milkCategory: MilkCategory;
+    quantityLiters?: number;
+    weightLiters?: number;
+    fat?: number;
+    fatPercentage?: number;
+    snf?: number;
+    snfPercentage?: number;
+    clrDensity?: number;
+    collectionTimestamp: string;
+    businessDate: string;
+    shift?: SessionType | string;
+    rateChartId?: string;
+    rateChartVersionId?: string;
+    rateChartVersion?: number;
+    ratePerLiter: number;
+    totalAmount: number;
+    identificationMethod?: IdentificationMethod | string;
+    deviceId?: string;
+    offlineAuthorizationToken?: string;
+}
+export interface BulkCollectionSyncRequestDTO {
+    batchId: string;
+    schemaVersion: number;
+    deviceId?: string;
+    offlineAuthorizationToken?: string;
+    transactions: BulkCollectionItemDTO[];
+}
+export type BulkItemSyncStatus = 'ACCEPTED' | 'REPLAYED' | 'REJECTED' | 'RETRYABLE';
+export interface BulkCollectionResultItemDTO {
+    clientIntakeUuid: string;
+    idempotencyKey: string;
+    status: BulkItemSyncStatus;
+    serverTransactionId?: string;
+    receiptNumber?: string;
+    isIdempotentReplay: boolean;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+}
+export interface BulkCollectionSyncResponseDTO {
+    batchId: string;
+    requestId: string;
+    summary: {
+        received: number;
+        accepted: number;
+        replayed: number;
+        rejected: number;
+        retryable: number;
+    };
+    results: BulkCollectionResultItemDTO[];
+}
 //# sourceMappingURL=collection.d.ts.map

@@ -1383,28 +1383,43 @@ export declare const CreatePaymentBatchSchema: z.ZodObject<{
     billingCycleId: z.ZodNullable<z.ZodOptional<z.ZodString>>;
     billingPeriodStart: z.ZodNullable<z.ZodOptional<z.ZodString>>;
     billingPeriodEnd: z.ZodNullable<z.ZodOptional<z.ZodString>>;
-    paymentMethod: z.ZodDefault<z.ZodNativeEnum<typeof PaymentMethod>>;
+    periodStart: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    periodEnd: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    paymentMethod: z.ZodDefault<z.ZodUnion<[z.ZodNativeEnum<typeof PaymentMethod>, z.ZodString]>>;
     customerIds: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     payoutIds: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     idempotencyKey: z.ZodString;
+    excludeUnverifiedBankDetails: z.ZodOptional<z.ZodBoolean>;
+    debitAccountNumber: z.ZodOptional<z.ZodString>;
+    initialStatus: z.ZodOptional<z.ZodEnum<["DRAFT", "CALCULATED"]>>;
 }, "strip", z.ZodTypeAny, {
     idempotencyKey: string;
-    paymentMethod: PaymentMethod;
+    paymentMethod: string;
     centerId?: string | null | undefined;
     billingCycleId?: string | null | undefined;
     billingPeriodStart?: string | null | undefined;
     billingPeriodEnd?: string | null | undefined;
+    periodStart?: string | null | undefined;
+    periodEnd?: string | null | undefined;
     customerIds?: string[] | undefined;
     payoutIds?: string[] | undefined;
+    excludeUnverifiedBankDetails?: boolean | undefined;
+    debitAccountNumber?: string | undefined;
+    initialStatus?: "DRAFT" | "CALCULATED" | undefined;
 }, {
     idempotencyKey: string;
     centerId?: string | null | undefined;
-    paymentMethod?: PaymentMethod | undefined;
+    paymentMethod?: string | undefined;
     billingCycleId?: string | null | undefined;
     billingPeriodStart?: string | null | undefined;
     billingPeriodEnd?: string | null | undefined;
+    periodStart?: string | null | undefined;
+    periodEnd?: string | null | undefined;
     customerIds?: string[] | undefined;
     payoutIds?: string[] | undefined;
+    excludeUnverifiedBankDetails?: boolean | undefined;
+    debitAccountNumber?: string | undefined;
+    initialStatus?: "DRAFT" | "CALCULATED" | undefined;
 }>;
 export declare const ReconcileBatchItemInputSchema: z.ZodObject<{
     itemId: z.ZodString;
@@ -1639,6 +1654,7 @@ export declare const BillingSchedulerRunSchema: z.ZodObject<{
 export declare const CreateRateChartSchema: z.ZodObject<{
     name: z.ZodString;
     milkCategory: z.ZodNativeEnum<typeof MilkCategory>;
+    centerScope: z.ZodOptional<z.ZodEnum<["ORGANIZATION_WIDE", "CENTER_SPECIFIC"]>>;
     centerId: z.ZodNullable<z.ZodOptional<z.ZodString>>;
     pricingType: z.ZodDefault<z.ZodEnum<["GRID", "TOTAL_SOLIDS_FORMULA", "TWO_AXIS_FORMULA"]>>;
     description: z.ZodNullable<z.ZodOptional<z.ZodString>>;
@@ -1648,11 +1664,13 @@ export declare const CreateRateChartSchema: z.ZodObject<{
     pricingType: "GRID" | "TOTAL_SOLIDS_FORMULA" | "TWO_AXIS_FORMULA";
     centerId?: string | null | undefined;
     description?: string | null | undefined;
+    centerScope?: "ORGANIZATION_WIDE" | "CENTER_SPECIFIC" | undefined;
 }, {
     milkCategory: MilkCategory;
     name: string;
     centerId?: string | null | undefined;
     description?: string | null | undefined;
+    centerScope?: "ORGANIZATION_WIDE" | "CENTER_SPECIFIC" | undefined;
     pricingType?: "GRID" | "TOTAL_SOLIDS_FORMULA" | "TWO_AXIS_FORMULA" | undefined;
 }>;
 export declare const CreateRateVersionSchema: z.ZodObject<{

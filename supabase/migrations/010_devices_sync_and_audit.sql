@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS devices (
     device_identifier VARCHAR(100) NOT NULL UNIQUE,
     device_type VARCHAR(30) NOT NULL,
     public_key TEXT,
+    device_token_hash TEXT,
     status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
     last_seen_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

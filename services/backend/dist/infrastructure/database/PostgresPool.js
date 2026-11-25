@@ -6,6 +6,8 @@ import { newDb } from 'pg-mem';
 import { config } from '../../config/env.js';
 import { logger } from '../../shared/logger/index.js';
 const { Pool } = pg;
+// Ensure PostgreSQL DATE (type OID 1082) is parsed as string 'YYYY-MM-DD' without local timezone skew
+pg.types.setTypeParser(1082, (val) => val);
 export class PostgresDatabase {
     static instance;
     pool;
@@ -278,6 +280,7 @@ export class PostgresDatabase {
             '008_collection_sessions_and_transactions.sql',
             '009_customer_ledger.sql',
             '010_devices_sync_and_audit.sql',
+            '012_sync_engine_enhancements.sql',
             '014_feed_inventory_procurement_and_sales.sql',
             '020_automated_monthly_billing_and_settlements.sql',
             '021_customer_payouts_batches_and_reconciliation.sql',
@@ -507,7 +510,8 @@ export class PostgresDatabase {
         // 1. Try real PostgreSQL pool
         if (this.isPostgresConnected !== false) {
             try {
-                const res = await this.withTimeout(this.pool.query(text, params), 3000, 'PostgreSQL query');
+                const timeoutMs = config.TENANT_POOL_CONNECTION_TIMEOUT_MS || 15000;
+                const res = await this.withTimeout(this.pool.query(text, params), timeoutMs, 'PostgreSQL query');
                 this.isPostgresConnected = true;
                 return res;
             }
@@ -544,7 +548,8 @@ export class PostgresDatabase {
     async getClient() {
         if (this.isPostgresConnected !== false) {
             try {
-                const client = await this.withTimeout(this.pool.connect(), 3000, 'PostgreSQL connect');
+                const timeoutMs = config.TENANT_POOL_CONNECTION_TIMEOUT_MS || 15000;
+                const client = await this.withTimeout(this.pool.connect(), timeoutMs, 'PostgreSQL connect');
                 this.isPostgresConnected = true;
                 return client;
             }
@@ -581,7 +586,8 @@ export class PostgresDatabase {
     async withTransaction(callback) {
         if (this.isPostgresConnected !== false) {
             try {
-                const client = await this.withTimeout(this.pool.connect(), 3000, 'PostgreSQL transaction connect');
+                const timeoutMs = config.TENANT_POOL_CONNECTION_TIMEOUT_MS || 15000;
+                const client = await this.withTimeout(this.pool.connect(), timeoutMs, 'PostgreSQL transaction connect');
                 try {
                     await client.query('BEGIN');
                     const result = await callback(client);

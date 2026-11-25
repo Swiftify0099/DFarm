@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { MilkCollectionTransaction } from '../../../domain/entities/MilkCollectionTransaction.js';
-import { DomainValidationError, CustomerNotFoundError, SessionClosedError, } from '../../../domain/errors/index.js';
+import { CustomerNotFoundError, SessionClosedError, DomainValidationError, } from '../../../domain/errors/index.js';
 import { FatPercentage, SnfPercentage, MilkWeight } from '../../../domain/value-objects/index.js';
 import { financialPolicyResolutionService } from '../../../domain/services/FinancialPolicyResolutionService.js';
 export class ProcessMilkIntakeUseCase {
@@ -17,12 +17,16 @@ export class ProcessMilkIntakeUseCase {
         this.ledgerRepo = ledgerRepo;
     }
     async execute(dto) {
-        // 1. Idempotency Check
+        if (!dto.organizationId || !dto.organizationId.trim()) {
+            throw new DomainValidationError('Authenticated organization ID is required for collection processing');
+        }
+        const orgId = dto.organizationId.trim();
+        // 1. Idempotency Check with Tenant Scoping
         const idempotencyKey = dto.idempotencyKey ||
             `IDEM-${dto.customerId}-${dto.sessionId || dto.sessionCode}-${dto.weightLiters}-${dto.fatPercentage}`;
-        const existingTxn = await this.transactionRepo.findByIdempotencyKey(idempotencyKey);
+        const existingTxn = await this.transactionRepo.findByIdempotencyKey(idempotencyKey, orgId);
         if (existingTxn) {
-            const ledger = await this.ledgerRepo.findByCustomer(existingTxn.customerId);
+            const ledger = await this.ledgerRepo.findByCustomer(existingTxn.customerId, orgId);
             return {
                 transaction: existingTxn,
                 receiptNumber: `RCP-${existingTxn.id.substring(0, 8).toUpperCase()}`,
@@ -41,16 +45,16 @@ export class ProcessMilkIntakeUseCase {
         }
         customer.validateCanDeliver(dto.milkCategory);
         // 4. Verify Active Session
-        const orgId = dto.organizationId || customer.organizationId;
+        const resolvedOrgId = orgId || customer.organizationId;
         let session = dto.sessionId
-            ? await this.sessionRepo.findById(dto.sessionId, orgId)
+            ? await this.sessionRepo.findById(dto.sessionId, resolvedOrgId)
             : null;
         if (!session && dto.sessionCode) {
-            session = await this.sessionRepo.findByCode(dto.sessionCode, orgId);
+            session = await this.sessionRepo.findByCode(dto.sessionCode, resolvedOrgId);
         }
-        // If the referenced session is closed or missing, check if an active OPEN session exists for this center/device
-        if ((!session || !session.isOpen) && (dto.sessionId || customer.centerId)) {
-            const activeOpen = await this.sessionRepo.findActiveSession(customer.centerId, dto.deviceId || 'KIOSK_MAIN', orgId);
+        // If no explicit session ID or code was provided, check if an active OPEN session exists for this center/device
+        if (!session && !dto.sessionId && !dto.sessionCode && customer.centerId) {
+            const activeOpen = await this.sessionRepo.findActiveSession(customer.centerId, dto.deviceId || 'KIOSK_MAIN', resolvedOrgId);
             if (activeOpen && activeOpen.isOpen) {
                 session = activeOpen;
             }
@@ -99,24 +103,22 @@ export class ProcessMilkIntakeUseCase {
             operatorName: dto.operatorName,
             idempotencyKey,
         });
-        // 7. Atomic DB Persistence
-        await this.transactionRepo.save(transaction);
-        // 8. Update Session Cumulative Totals
-        session.recordTransaction(dto.milkCategory, dto.weightLiters, dto.fatPercentage, dto.snfPercentage, totalAmount);
-        await this.sessionRepo.save(session);
-        // 9. Post Double-Entry Ledger Credit
-        let ledger = await this.ledgerRepo.findByCustomer(customer.id, customer.organizationId);
-        if (!ledger) {
-            throw new DomainValidationError(`Customer financial ledger could not be initialized.`);
-        }
-        const ledgerEntry = ledger.postCredit(totalAmount, `Milk Intake Credit (${dto.milkCategory} ${dto.weightLiters}L @ ₹${appliedRate}/L)`, transaction.id);
-        await this.ledgerRepo.save(ledger, ledgerEntry);
-        return {
+        // 7. Atomic DB Persistence (Collection Insert + Session Tally + Farmer Ledger Credit in ONE Transaction)
+        return await this.transactionRepo.saveAtomicIntake({
             transaction,
-            receiptNumber: `RCP-${transactionId.substring(0, 8).toUpperCase()}`,
-            customerBalanceAfter: ledger.currentBalance,
-            isIdempotentReplay: false,
-        };
+            session,
+            totalAmount,
+            weightLiters: dto.weightLiters,
+            fatPercentage: dto.fatPercentage,
+            snfPercentage: dto.snfPercentage,
+            milkCategory: dto.milkCategory,
+            customerId: customer.id,
+            organizationId: resolvedOrgId,
+            centerId: customer.centerId,
+            operatorId: dto.operatorId,
+            operatorName: dto.operatorName,
+            appliedRate,
+        });
     }
 }
 export class GetCustomerCollectionHistoryUseCase {

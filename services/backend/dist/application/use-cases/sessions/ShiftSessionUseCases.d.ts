@@ -10,6 +10,7 @@ export declare class GetActiveShiftSessionUseCase {
         operatorName: string;
         deviceIdentifier?: string;
         deviceName?: string;
+        timezone?: string;
     }): Promise<KioskShiftSession>;
 }
 export declare class OpenShiftSessionUseCase {
@@ -24,6 +25,7 @@ export declare class OpenShiftSessionUseCase {
         businessDate?: string;
         deviceIdentifier?: string;
         deviceName?: string;
+        timezone?: string;
     }): Promise<KioskShiftSession>;
 }
 export declare class CloseShiftSessionUseCase {

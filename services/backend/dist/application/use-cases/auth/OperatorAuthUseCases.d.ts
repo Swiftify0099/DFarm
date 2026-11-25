@@ -12,7 +12,11 @@ export declare class VerifyOperatorOtpUseCase {
     private readonly otpService;
     private readonly tokenService;
     constructor(otpService: IOtpService, tokenService: ITokenService);
-    execute(rawPhone: string, otp: string): Promise<{
+    execute(rawPhone: string, otp: string, deviceIdentifier?: string, deviceProofParams?: {
+        deviceToken?: string;
+        challenge?: string;
+        deviceProof?: string;
+    }): Promise<{
         token: string;
         operator: {
             id: string;
@@ -25,6 +29,7 @@ export declare class VerifyOperatorOtpUseCase {
             centerId: string;
             centerName?: string;
             centerCode?: string;
+            deviceId?: string;
         };
     }>;
 }

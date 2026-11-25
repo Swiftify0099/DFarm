@@ -1,14 +1,6 @@
 import { superAdminRepo } from '../../infrastructure/repositories/PostgresSuperAdminRepository.js';
-/**
- * Standard commercial half-up rounding (ROUND_HALF_UP) to eliminate floating-point drift.
- * Guarantees exact 2 decimal places (paise precision) in financial calculations.
- * Example: 12.345 * 45.67 = 563.79615 -> 563.80
- */
-export function roundHalfUp(value, decimals = 2) {
-    if (isNaN(value))
-        return 0;
-    return Number(Math.round(Number(value + 'e' + decimals)) + 'e-' + decimals);
-}
+import { roundHalfUp } from '@dfarm/shared-types';
+export { roundHalfUp };
 export class FinancialPolicyResolutionService {
     /**
      * Resolves the active PUBLISHED global rate policy version effective on the given business date.

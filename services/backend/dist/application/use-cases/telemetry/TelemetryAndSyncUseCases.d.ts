@@ -53,10 +53,12 @@ export declare class ProcessOfflineSyncBatchUseCase {
         deviceId: string;
         operatorId: string;
         operatorName: string;
+        organizationId?: string;
         transactions: Array<{
             clientIntakeUuid: string;
             sessionCode?: string;
             customerId: string;
+            organizationId?: string;
             milkCategory: 'COW' | 'BUFFALO';
             weightLiters: number;
             fatPercentage: number;

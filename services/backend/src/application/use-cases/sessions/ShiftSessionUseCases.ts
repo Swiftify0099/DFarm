@@ -13,6 +13,7 @@ export class GetActiveShiftSessionUseCase {
     operatorName: string;
     deviceIdentifier?: string;
     deviceName?: string;
+    timezone?: string;
   }): Promise<KioskShiftSession> {
     const deviceId = params.deviceIdentifier || 'KIOSK_MAIN';
     const existing = await this.sessionRepo.findActiveSession(params.centerId, deviceId, params.organizationId);
@@ -20,11 +21,21 @@ export class GetActiveShiftSessionUseCase {
       return existing;
     }
 
-    // Auto-open a session for current date & shift
+    // Auto-open a session for current date & shift using authoritative timezone
     const now = new Date();
-    const currentHour = now.getHours();
+    const tz = params.timezone || 'Asia/Kolkata';
+    let businessDate: string;
+    let currentHour: number;
+    try {
+      businessDate = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
+      const hourStr = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false }).format(now);
+      currentHour = parseInt(hourStr, 10) || now.getHours();
+    } catch {
+      businessDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(now);
+      currentHour = now.getHours();
+    }
+
     const shift: ShiftType = currentHour >= 4 && currentHour < 15 ? 'MORNING' : 'EVENING';
-    const businessDate = now.toISOString().split('T')[0] || '';
     const datePart = businessDate.replace(/-/g, '');
     const baseCode = `SH-${datePart}-${shift[0]}-${deviceId.substring(0, 4).toUpperCase()}`;
 
@@ -56,6 +67,7 @@ export class GetActiveShiftSessionUseCase {
       totalAmount: 0.0,
       averageFat: 0.0,
       averageSnf: 0.0,
+      timezone: tz,
     });
 
     await this.sessionRepo.save(newSession);
@@ -75,6 +87,7 @@ export class OpenShiftSessionUseCase {
     businessDate?: string;
     deviceIdentifier?: string;
     deviceName?: string;
+    timezone?: string;
   }): Promise<KioskShiftSession> {
     const deviceId = params.deviceIdentifier || 'KIOSK_MAIN';
     const existing = await this.sessionRepo.findActiveSession(params.centerId, deviceId, params.organizationId);
@@ -83,9 +96,20 @@ export class OpenShiftSessionUseCase {
     }
 
     const now = new Date();
-    const currentHour = now.getHours();
+    const tz = params.timezone || 'Asia/Kolkata';
+    let currentHour: number;
+    let computedDate: string;
+    try {
+      computedDate = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
+      const hourStr = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false }).format(now);
+      currentHour = parseInt(hourStr, 10) || now.getHours();
+    } catch {
+      computedDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(now);
+      currentHour = now.getHours();
+    }
+
     const shift: ShiftType = params.shift || (currentHour >= 4 && currentHour < 15 ? 'MORNING' : 'EVENING');
-    const businessDate = params.businessDate || now.toISOString().split('T')[0] || '';
+    const businessDate = params.businessDate || computedDate;
     const datePart = businessDate.replace(/-/g, '');
     const baseCode = `SH-${datePart}-${shift[0]}-${deviceId.substring(0, 4).toUpperCase()}`;
 
@@ -124,6 +148,7 @@ export class OpenShiftSessionUseCase {
       totalAmount: 0.0,
       averageFat: 0.0,
       averageSnf: 0.0,
+      timezone: tz,
     });
 
     await this.sessionRepo.save(newSession);

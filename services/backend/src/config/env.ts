@@ -66,6 +66,11 @@ const envSchema = z.object({
   TENANT_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
   DATABASE_TLS_MODE: z.enum(['disable', 'require', 'prefer']).default('prefer'),
   JWT_SECRET: z.string().default('super-secret-jwt-token-with-at-least-32-characters-long'),
+  // Dedicated Offline Session Authorization Lease Key (Cryptographically Isolated from JWT_SECRET)
+  OFFLINE_LEASE_SIGNING_KEY: z.string().optional(),
+  OFFLINE_LEASE_ACTIVE_KEY_ID: z.string().default('k1'),
+  OFFLINE_LEASE_PREVIOUS_KEYS: z.string().optional(),
+  OFFLINE_LEASE_RETIRED_KEYS: z.string().optional(),
   // WhatsApp Business Cloud API Configuration
   WHATSAPP_ENABLED: z.coerce.boolean().default(false),
   WHATSAPP_API_URL: z.string().url().default('https://graph.facebook.com/v21.0'),
@@ -106,6 +111,50 @@ const envSchema = z.object({
 
 export type EnvConfig = z.infer<typeof envSchema>;
 
+export function validateKeyEntropyAndByteLength(key: string, keyName = 'OFFLINE_LEASE_SIGNING_KEY'): void {
+  if (!key || typeof key !== 'string') {
+    throw new Error(`CRITICAL: ${keyName} is required and must be a string.`);
+  }
+
+  // 1. Verify Minimum 256-Bit (32 Byte) Cryptographic Length
+  const isHex = /^[0-9a-fA-F]+$/.test(key);
+  if (isHex) {
+    if (key.length < 64) {
+      throw new Error(
+        `CRITICAL: ${keyName} hex format requires at least 64 hex characters (32 bytes / 256 bits). Received ${key.length} hex characters (${Math.floor(key.length / 2)} bytes).`
+      );
+    }
+  } else {
+    const rawByteLength = Buffer.byteLength(key, 'utf8');
+    if (rawByteLength < 32) {
+      throw new Error(
+        `CRITICAL: ${keyName} requires at least 32 cryptographically random bytes (256 bits). Received ${rawByteLength} bytes.`
+      );
+    }
+  }
+
+  // 2. Cryptographic Entropy & Repetitive Pattern Check
+  const uniqueChars = new Set(key).size;
+  if (uniqueChars < 8) {
+    throw new Error(
+      `CRITICAL: ${keyName} fails entropy verification: key exhibits insufficient randomness (only ${uniqueChars} unique characters). Use a cryptographically secure 256-bit generator (e.g. crypto.randomBytes(32)).`
+    );
+  }
+
+  // Check for trivial repeated substring patterns (e.g. repeated 2, 3, 4, 8 character chunks)
+  if (key.length >= 32) {
+    for (const chunkLen of [2, 3, 4, 8]) {
+      const chunk = key.slice(0, chunkLen);
+      const repeated = chunk.repeat(Math.floor(key.length / chunkLen));
+      if (key.startsWith(repeated)) {
+        throw new Error(
+          `CRITICAL: ${keyName} fails entropy verification: repetitive pattern detected. Key must be cryptographically random.`
+        );
+      }
+    }
+  }
+}
+
 export function loadEnv(customEnv?: Record<string, string | undefined>): EnvConfig {
   const source = customEnv ?? process.env;
   const result = envSchema.safeParse(source);
@@ -113,6 +162,16 @@ export function loadEnv(customEnv?: Record<string, string | undefined>): EnvConf
   if (!result.success) {
     const errorDetails = (result.error as any).issues.map((e: any) => `[${Array.isArray(e.path) ? e.path.join('.') : e.path}]: ${e.message}`).join(', ');
     throw new Error(`CRITICAL: Environment validation failed: ${errorDetails}`);
+  }
+
+  // Strict Production Enforcement: Dedicated OFFLINE_LEASE_SIGNING_KEY is strictly mandatory in production
+  if (result.data.NODE_ENV === 'production') {
+    if (!result.data.OFFLINE_LEASE_SIGNING_KEY) {
+      throw new Error(
+        'CRITICAL: Production startup failed: Dedicated OFFLINE_LEASE_SIGNING_KEY must be configured with at least 32 cryptographically random bytes (256 bits). Fallback to JWT_SECRET in production is strictly prohibited.'
+      );
+    }
+    validateKeyEntropyAndByteLength(result.data.OFFLINE_LEASE_SIGNING_KEY, 'OFFLINE_LEASE_SIGNING_KEY');
   }
 
   return result.data;

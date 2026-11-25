@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { ProcessOfflineSyncBatchUseCase, ProcessMilkIntakeUseCase, } from '../../application/use-cases/index.js';
+import { ProcessOfflineSyncBatchUseCase, ProcessMilkIntakeUseCase, BulkCollectionSyncUseCase, } from '../../application/use-cases/index.js';
 import { PostgresCustomerRepository, PostgresShiftSessionRepository, PostgresCollectionTransactionRepository, PostgresRateChartRepository, PostgresLedgerRepository, } from '../../infrastructure/index.js';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
 import { syncRouter } from '../../modules/sync/sync.routes.js';
 const router = Router();
 const customerRepo = new PostgresCustomerRepository();
@@ -11,10 +11,73 @@ const rateChartRepo = new PostgresRateChartRepository();
 const ledgerRepo = new PostgresLedgerRepository();
 const intakeUseCase = new ProcessMilkIntakeUseCase(customerRepo, sessionRepo, transactionRepo, rateChartRepo, ledgerRepo);
 const syncUseCase = new ProcessOfflineSyncBatchUseCase(intakeUseCase);
+const bulkCollectionSyncUseCase = new BulkCollectionSyncUseCase(customerRepo, sessionRepo, transactionRepo);
+const handleBulkSync = async (req, res, next) => {
+    try {
+        const orgId = req.user?.organizationId;
+        const operatorId = req.user?.userId;
+        if (!orgId || !operatorId) {
+            res.status(401).json({ success: false, error: 'Authenticated organization and operator context is required for bulk sync' });
+            return;
+        }
+        const requestedOrgId = req.headers['x-organization-id'] ||
+            req.headers['x-dairy-tenant-id'] ||
+            req.body?.organizationId;
+        if (requestedOrgId && requestedOrgId !== orgId) {
+            res.status(403).json({ success: false, error: 'Cross-tenant bulk sync blocked: Organization ID mismatch' });
+            return;
+        }
+        const operatorName = req.user?.fullName || 'Counter Operator';
+        const authenticatedDeviceId = req.user?.deviceId;
+        const requestId = req.headers['x-request-id'] || `req-${Date.now().toString(36)}`;
+        const { batchId, schemaVersion, deviceId, transactions } = req.body;
+        if (!Array.isArray(transactions)) {
+            res.status(400).json({ success: false, error: 'Invalid batch: transactions must be an array' });
+            return;
+        }
+        const result = await bulkCollectionSyncUseCase.execute({
+            organizationId: orgId,
+            operatorId,
+            operatorName,
+            authenticatedDeviceId,
+            requestId,
+            batch: {
+                batchId: batchId || `batch-${Date.now().toString(36)}`,
+                schemaVersion: schemaVersion || 1,
+                deviceId: deviceId || 'KIOSK_MAIN',
+                transactions,
+            },
+        });
+        res.status(200).json({
+            success: true,
+            ...result,
+        });
+    }
+    catch (err) {
+        if (err.statusCode === 413 || err.code === 'BATCH_SIZE_EXCEEDED') {
+            res.status(413).json({ success: false, error: err.message });
+            return;
+        }
+        next(err);
+    }
+};
+router.post('/bulk', authenticate, handleBulkSync);
 const handleSyncBatch = async (req, res, next) => {
     try {
+        const orgId = req.user?.organizationId;
+        const operatorId = req.user?.userId;
+        if (!orgId || !operatorId) {
+            res.status(401).json({ success: false, error: 'Authenticated organization and operator context is required for sync batch' });
+            return;
+        }
+        const requestedOrgId = req.headers['x-organization-id'] ||
+            req.headers['x-dairy-tenant-id'] ||
+            req.body?.organizationId;
+        if (requestedOrgId && requestedOrgId !== orgId) {
+            res.status(403).json({ success: false, error: 'Cross-tenant sync blocked: Organization ID mismatch' });
+            return;
+        }
         const { deviceId, transactions } = req.body;
-        const operatorId = req.user?.userId || '00000000-0000-0000-0000-000000000003';
         const operatorName = req.user?.fullName || 'Counter Operator';
         const result = await syncUseCase.execute({
             deviceId: deviceId || 'KIOSK_MAIN',
@@ -28,8 +91,8 @@ const handleSyncBatch = async (req, res, next) => {
         next(err);
     }
 };
-router.post('/transactions', optionalAuthenticate, handleSyncBatch);
-router.post('/push', optionalAuthenticate, handleSyncBatch);
+router.post('/transactions', authenticate, handleSyncBatch);
+router.post('/push', authenticate, handleSyncBatch);
 // Mount the comprehensive syncRouter for /push, /pull, /acknowledge, /status
 router.use('/', syncRouter);
 export const syncRoutes = router;

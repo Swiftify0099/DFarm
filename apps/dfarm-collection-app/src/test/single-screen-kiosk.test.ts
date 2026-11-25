@@ -37,23 +37,70 @@ describe('Single-Screen Milk Collection Kiosk Workflow (Phase 12)', () => {
     expect(customer?.customerCode).toBe('C-101')
   })
 
-  it('correctly calculates dynamic rate matrix for Cow Milk vs Buffalo Milk', () => {
-    // Cow milk: (Fat * 6.5) + (SNF * 2.8)
-    const cowCalc = ratesApi.calculateRate('COW', 4.0, 8.5)
-    // 4.0 * 6.5 = 26.0; 8.5 * 2.8 = 23.8; total = 49.80
+  it('correctly calculates dynamic rate matrix for Cow Milk vs Buffalo Milk from cached charts', () => {
+    const cowChart: any = {
+      id: 'd1_cow_v1',
+      dairyId: 'd1',
+      milkCategory: 'COW',
+      version: 1,
+      effectiveFrom: '2026-01-01',
+      baseFat: 3.5,
+      baseSnf: 8.5,
+      baseRate: 46.55,
+      ratePerFatUnit: 6.5,
+      ratePerSnfUnit: 2.8,
+      updatedAt: new Date().toISOString(),
+    }
+    const buffaloChart: any = {
+      id: 'd1_buf_v1',
+      dairyId: 'd1',
+      milkCategory: 'BUFFALO',
+      version: 1,
+      effectiveFrom: '2026-01-01',
+      baseFat: 6.0,
+      baseSnf: 9.0,
+      baseRate: 69.3,
+      ratePerFatUnit: 7.2,
+      ratePerSnfUnit: 2.9,
+      updatedAt: new Date().toISOString(),
+    }
+
+    // Cow milk: baseRate 46.55 + (4.0 - 3.5) * 6.5 + (8.5 - 8.5) * 2.8 = 46.55 + 3.25 = 49.80
+    const cowCalc = ratesApi.calculateRate('COW', 4.0, 8.5, cowChart)
+    expect(cowCalc.isValid).toBe(true)
     expect(cowCalc.ratePerLiter).toBe(49.8)
     expect(cowCalc.version).toBe(1)
 
-    // Buffalo milk: (Fat * 7.2) + (SNF * 2.9)
-    const buffaloCalc = ratesApi.calculateRate('BUFFALO', 6.5, 9.0)
-    // 6.5 * 7.2 = 46.8; 9.0 * 2.9 = 26.1; total = 72.90
+    // Buffalo milk: baseRate 69.30 + (6.5 - 6.0) * 7.2 + (9.0 - 9.0) * 2.9 = 69.30 + 3.60 = 72.90
+    const buffaloCalc = ratesApi.calculateRate('BUFFALO', 6.5, 9.0, buffaloChart)
+    expect(buffaloCalc.isValid).toBe(true)
     expect(buffaloCalc.ratePerLiter).toBe(72.9)
     expect(buffaloCalc.version).toBe(1)
   })
 
-  it('enforces minimum rate floor of Rs. 10.00 / L', () => {
-    const lowCalc = ratesApi.calculateRate('COW', 0.5, 1.0)
-    expect(lowCalc.ratePerLiter).toBe(10.0)
+  it('fails safely and blocks calculation when rate chart is missing or expired', () => {
+    // Missing chart
+    const missingCalc = ratesApi.calculateRate('COW', 4.0, 8.5, null)
+    expect(missingCalc.isValid).toBe(false)
+    expect(missingCalc.ratePerLiter).toBe(0)
+    expect(missingCalc.error).toContain('No active rate chart cached for COW')
+
+    // Expired chart
+    const expiredChart: any = {
+      id: 'd1_cow_exp',
+      dairyId: 'd1',
+      milkCategory: 'COW',
+      version: 1,
+      effectiveFrom: '2020-01-01',
+      effectiveTo: '2021-01-01',
+      baseFat: 3.5,
+      baseSnf: 8.5,
+      baseRate: 40.0,
+      updatedAt: new Date().toISOString(),
+    }
+    const expiredCalc = ratesApi.calculateRate('COW', 4.0, 8.5, expiredChart)
+    expect(expiredCalc.isValid).toBe(false)
+    expect(expiredCalc.error).toContain('expired')
   })
 
   it('submits intake on single screen and updates session throughput', async () => {

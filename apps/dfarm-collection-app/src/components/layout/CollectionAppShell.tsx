@@ -2,6 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react'
 import { Outlet, Navigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { useHardware } from '@/context/HardwareContext'
+import { pwaService } from '@/services/pwa-service'
 import { CollectionHeader } from './CollectionHeader'
 import { MachineHealthBar } from './MachineHealthBar'
 import { CustomerLookup } from '@/pages/customers/CustomerLookup'
@@ -30,8 +31,25 @@ export const useKioskOverlay = () => useContext(KioskOverlayContext)
 
 export const CollectionAppShell: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth()
-  const { setManualCustomer } = useHardware()
+  const { setManualCustomer, activeAttempt } = useHardware()
   const [activeOverlay, setActiveOverlay] = useState<KioskOverlayType>(null)
+  const [isUpdateAvailable, setIsUpdateAvailable] = useState(false)
+
+  useEffect(() => {
+    return pwaService.subscribe((info) => {
+      setIsUpdateAvailable(info.isUpdateAvailable)
+    })
+  }, [])
+
+  const handleApplyUpdate = () => {
+    pwaService.applyUpdate(() => {
+      if (activeAttempt) {
+        alert('An active milk collection is in progress. Please complete or cancel the transaction before updating.')
+        return false
+      }
+      return true
+    })
+  }
 
   const openOverlay = (overlay: KioskOverlayType) => {
     setActiveOverlay(overlay)
@@ -108,6 +126,22 @@ export const CollectionAppShell: React.FC = () => {
       <div className="min-h-screen bg-cream flex flex-col text-text-primary antialiased font-sans select-none overflow-hidden h-screen">
         {/* 1. Kiosk Top Bar */}
         <CollectionHeader />
+
+        {/* PWA Background Update Available Notification */}
+        {isUpdateAvailable && (
+          <div className="bg-primary-orange text-white text-xs font-semibold px-4 py-2 flex items-center justify-between shadow-md z-30 shrink-0">
+            <div className="flex items-center space-x-2">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              <span>A new version of DFarm is available.</span>
+            </div>
+            <button
+              onClick={handleApplyUpdate}
+              className="bg-white text-primary-orange hover:bg-cream px-3 py-1 rounded-lg font-bold text-xs transition-colors shadow-sm cursor-pointer"
+            >
+              Update App
+            </button>
+          </div>
+        )}
 
         {/* 2. Full-Width Main Workstation Area (Permanent Left Sidebar Removed) */}
         <div className="flex-1 flex overflow-hidden w-full">

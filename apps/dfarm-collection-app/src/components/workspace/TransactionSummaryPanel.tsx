@@ -4,6 +4,8 @@ import { useHardware } from '@/context/HardwareContext'
 import { useAuth } from '@/context/AuthContext'
 import { transactionsApi, ratesApi } from '@/api/client'
 import { localDB } from '@/services/local-storage'
+import { storagePersistence } from '@/services/storage-persistence'
+import { roundHalfUp } from '@/utils/rounding'
 import { ClayCard, ClayBadge } from '@/components/ui'
 import { MilkCategoryToggle } from './MilkCategoryToggle'
 import { SaveTransactionButton } from './SaveTransactionButton'
@@ -32,6 +34,9 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
     printReceipt,
     activeAttempt,
     commitCollectionAttempt,
+    rateCharts,
+    storageQuota,
+    triggerSync,
   } = useHardware()
 
   const { operator } = useAuth()
@@ -52,25 +57,50 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
     }
   }
 
-  // Rate Matrix Real-Time Calculation
-  const { ratePerLiter, version } = ratesApi.calculateRate(
+  // Active Cached Rate Chart for Selected Category
+  const activeRateChart = rateCharts?.[measurements.milkCategory] || null
+
+  // Rate Matrix Real-Time Dynamic Calculation
+  const rateCalc = ratesApi.calculateRate(
     measurements.milkCategory,
     measurements.fat,
-    measurements.snf
+    measurements.snf,
+    activeRateChart
   )
 
-  const totalAmount = Number((ratePerLiter * measurements.weightLiters).toFixed(2))
+  const ratePerLiter = rateCalc.ratePerLiter
+  const version = rateCalc.version
+
+  const isFinancialInputsFinite =
+    Number.isFinite(measurements.weightLiters) &&
+    Number.isFinite(measurements.fat) &&
+    Number.isFinite(measurements.snf) &&
+    Number.isFinite(ratePerLiter);
+
+  let totalAmount = 0;
+  if (isFinancialInputsFinite && measurements.weightLiters > 0 && ratePerLiter > 0) {
+    totalAmount = roundHalfUp(ratePerLiter * measurements.weightLiters, 2);
+  }
 
   // Validation Gate Lock Conditions
   let canSubmit = true
   let lockReason: string | null = null
 
-  if (!activeSession) {
+  if (!isFinancialInputsFinite) {
+    canSubmit = false
+    lockReason = 'Measurement readings contain invalid or non-finite financial values.'
+  } else if (!activeSession) {
     canSubmit = false
     lockReason = 'No active shift session. Please wait for session initialization or open a session.'
   } else if (activeSession.status === 'CLOSED') {
     canSubmit = false
     lockReason = 'Current shift session is CLOSED. Open an active session to accept milk intake.'
+  } else if (!activeRateChart) {
+    canSubmit = false
+    lockReason = `No active rate chart cached for ${measurements.milkCategory}. Connect to internet to download rate charts.`
+  } else if (!rateCalc.isValid) {
+    canSubmit = false
+    lockReason = rateCalc.error || `Invalid rate for ${measurements.milkCategory} at ${measurements.fat}% Fat / ${measurements.snf}% SNF.`
   } else if (!customer) {
     canSubmit = false
     lockReason = 'Identify patron via Face Camera, RFID, or Manual Search first.'
@@ -86,6 +116,9 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
   } else if (measurements.snf < 6.0 || measurements.snf > 12.0) {
     canSubmit = false
     lockReason = 'Milk SNF % is out of valid biological bounds (6.0% - 12.0%).'
+  } else if (storageQuota?.isCritical) {
+    canSubmit = false
+    lockReason = 'Storage quota critical (>85%). Connect to internet to sync and free disk space.'
   }
 
   const handleCategorySelect = (category: MilkCategory) => {
@@ -109,9 +142,19 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
   const handleSubmit = async () => {
     if (!canSubmit || !customer || isSubmitting) return
 
+    if (
+      !Number.isFinite(measurements.weightLiters) || measurements.weightLiters <= 0 ||
+      !Number.isFinite(measurements.fat) || measurements.fat <= 0 ||
+      !Number.isFinite(measurements.snf) || measurements.snf <= 0 ||
+      !Number.isFinite(ratePerLiter) || ratePerLiter <= 0 ||
+      !Number.isFinite(totalAmount) || totalAmount <= 0
+    ) {
+      alert('Cannot save transaction: Financial or measurement readings are non-finite or invalid.')
+      return
+    }
+
     setIsSubmitting(true)
     try {
-      let res: CollectionTransaction
       const normalizedMethod: 'FACE_YUNET_SFACE' | 'RFID_TAG' | 'MANUAL_SEARCH' =
         identificationMethod === 'RFID_CARD' || identificationMethod === 'RFID_TAG'
           ? 'RFID_TAG'
@@ -119,76 +162,100 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
           ? 'FACE_YUNET_SFACE'
           : 'MANUAL_SEARCH'
 
-      // Acquire stable idempotency attempt key from active collection attempt
-      const attemptId = activeAttempt?.attemptId || `ATT-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`
+      // STEP 1 & 2: Generate Permanent RFC 4122 v4 UUID (Never re-generated on retry)
+      const clientIntakeUuid = crypto.randomUUID()
+      const transactionCode = `TXN-${clientIntakeUuid.substring(0, 8).toUpperCase()}`
+      const idempotencyKey = `INTAKE-${clientIntakeUuid}`
+      const nowIso = new Date().toISOString()
 
-      if (isNetworkOnline) {
+      // STEP 2.5: Attach signed offline session authorization token if available
+      let offlineAuthToken: string | undefined
+      if (activeSession) {
         try {
-          res = await transactionsApi.submit({
-            sessionId: activeSession!.id,
-            sessionCode: activeSession?.sessionCode,
-            customerId: customer.id,
-            milkCategory: measurements.milkCategory,
-            weightLiters: measurements.weightLiters,
-            fat: measurements.fat,
-            snf: measurements.snf,
-            clrDensity: measurements.clrDensity,
-            identificationMethod: normalizedMethod,
-            operatorName: operator?.fullName || 'Operator',
-            isOffline: false,
-            idempotencyKey: attemptId,
-          })
-        } catch (apiErr: any) {
-          throw new Error(apiErr.message || 'Server submission failed')
+          const authRecord = await localDB.getActiveSessionOfflineAuth(activeSession.id)
+          if (authRecord?.token) {
+            offlineAuthToken = authRecord.token
+          }
+        } catch {
+          // ignore offline auth retrieval issue
         }
-      } else {
-        // Honest offline persistence: store directly in IndexedDB offline queue without fake mock fallback
-        const offlineTxn: CollectionTransaction = {
-          id: `OFFLINE-${attemptId}`,
-          transactionCode: `OFF-${attemptId.slice(-6).toUpperCase()}`,
-          sessionId: activeSession ? activeSession.id : 'offline-session',
-          dairyId: customer.dairyId || operator?.dairyId || '',
-          customerId: customer.id,
-          customerCode: customer.customerCode,
-          customerName: customer.fullName,
-          timestamp: new Date().toISOString(),
-          date: new Date().toISOString().split('T')[0],
-          shift: (activeSession?.shift || 'MORNING') as any,
-          milkCategory: measurements.milkCategory,
-          weightLiters: measurements.weightLiters,
-          fatPercentage: measurements.fat,
-          snfPercentage: measurements.snf,
-          clrDensity: measurements.clrDensity || 28.0,
-          appliedRatePerLiter: ratePerLiter,
-          rateChartVersion: version,
-          totalAmount: totalAmount,
-          identificationMethod: normalizedMethod,
-          syncStatus: 'PENDING_OFFLINE',
-          deviceId: 'KIOSK_MAIN',
-          operatorName: operator?.fullName || 'Operator',
-        }
-        await localDB.queueOfflineTransaction(offlineTxn)
-        await localDB.saveTransaction(offlineTxn)
-        res = offlineTxn
       }
 
-      // Mark transaction committed in state machine
-      commitCollectionAttempt(res)
+      // STEP 3: Complete Transaction Snapshot
+      const localTxn: CollectionTransaction = {
+        id: clientIntakeUuid,
+        clientIntakeUuid,
+        transactionCode,
+        sessionId: activeSession ? activeSession.id : 'offline-session',
+        dairyId: customer.dairyId || operator?.dairyId || activeSession?.dairyId || '',
+        centerId: (activeSession as any)?.centerId || (operator as any)?.centerId,
+        customerId: customer.id,
+        customerCode: customer.customerCode,
+        customerName: customer.fullName,
+        timestamp: nowIso,
+        date: activeSession?.date || nowIso.split('T')[0],
+        shift: (activeSession?.shift || 'MORNING') as any,
+        milkCategory: measurements.milkCategory,
+        weightLiters: measurements.weightLiters,
+        fatPercentage: measurements.fat,
+        snfPercentage: measurements.snf,
+        clrDensity: measurements.clrDensity || 28.0,
+        appliedRatePerLiter: ratePerLiter,
+        rateChartVersion: version,
+        totalAmount: totalAmount,
+        identificationMethod: normalizedMethod,
+        syncStatus: 'PENDING_OFFLINE',
+        deviceId: activeSession?.deviceId || 'KIOSK_MAIN',
+        operatorName: operator?.fullName || 'Operator',
+        idempotencyKey,
+        offlineCreated: !isNetworkOnline,
+        offlineAuthorizationToken: offlineAuthToken,
+      }
+
+      const queueItem = {
+        eventId: `EVT-${clientIntakeUuid}`,
+        transactionId: clientIntakeUuid,
+        clientIntakeUuid,
+        customerCode: customer.customerCode,
+        customerName: customer.fullName,
+        timestamp: nowIso,
+        retryCount: 0,
+        status: 'QUEUED' as const,
+        errorReason: null,
+        lastAttemptedAt: null,
+        offlineAuthorizationToken: offlineAuthToken,
+        transaction: localTxn,
+      }
+
+      // STEP 4: ATOMIC LOCAL SAVE TO INDEXEDDB
+      // Writes to BOTH completed_transactions AND offline_queue in ONE transaction
+      // Strictly awaits tx.oncomplete before reporting success or printing receipt
+      await localDB.saveIntakeAtomically(localTxn, queueItem)
+
+      // STEP 5: CONFIRM LOCAL COMMIT & ADVANCE KIOSK STATE
+      commitCollectionAttempt(localTxn)
 
       setSuccessMessage(
-        `Intake recorded! Txn #${res.transactionCode} — ${res.weightLiters}L of ${res.milkCategory} milk for ₹${res.totalAmount}`
+        `Intake recorded locally! Txn #${localTxn.transactionCode} — ${localTxn.weightLiters}L of ${localTxn.milkCategory} milk for ₹${localTxn.totalAmount}`
       )
 
-      // Automatically trigger thermal voucher / serial print
+      // Automatically trigger thermal voucher / serial print immediately upon local commit
       try {
-        await printReceipt(res)
+        await printReceipt(localTxn)
       } catch (printErr) {
         console.warn('Auto-print receipt warning:', printErr)
       }
 
-      await refreshSession()
+      // Make entry immediately available to Recent Intake Table and update pending count
       await refreshOfflineCount()
       onTransactionSaved()
+
+      // STEP 6: ONLINE API INTEGRATION (Opportunistic background sync)
+      // When network is online, trigger single-flight bulk sync engine in background.
+      // If offline or network deferred, the record is safely retained in offline_queue!
+      triggerSync().catch((syncErr) => {
+        console.warn('[LocalFirst] Opportunistic sync execution:', syncErr)
+      })
 
       // Reset cycle for next customer after brief display
       setTimeout(() => {
@@ -196,7 +263,12 @@ export const TransactionSummaryPanel: React.FC<TransactionSummaryPanelProps> = (
         setSuccessMessage(null)
       }, 2500)
     } catch (err: any) {
-      alert(`Submission failed: ${err.message || 'Unknown error'}`)
+      console.error('[LocalFirst] IndexedDB save failure:', err)
+      const isQuota = storagePersistence.isQuotaExceededError(err)
+      const msg = isQuota
+        ? 'Local storage quota exceeded! Please connect to internet to sync and free disk space.'
+        : `Could not commit milk intake to IndexedDB. ${err.message || 'Transaction aborted.'}`
+      alert(`Local Persistence Failure: ${msg}`)
     } finally {
       setIsSubmitting(false)
     }

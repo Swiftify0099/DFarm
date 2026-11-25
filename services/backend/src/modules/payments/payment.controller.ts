@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { pool } from '../../config/db.js';
 import { payoutService } from './payout.service.js';
 import { receiptService } from './receipt.service.js';
 import { batchService } from './batch.service.js';
@@ -156,11 +157,213 @@ export class PaymentController {
   }
 
   // Batch Endpoints
+  public static async calculateSettlementPreview(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      if (!req.auth) throw new UnauthorizedError();
+      const periodStart = (req.query['periodStart'] as string) || (req.body?.periodStart as string);
+      const periodEnd = (req.query['periodEnd'] as string) || (req.body?.periodEnd as string);
+      const centerId = (req.query['centerId'] as string) || (req.body?.centerId as string);
+      let customerIds: string[] | undefined = undefined;
+      if (req.query['customerIds']) {
+        const qCust = req.query['customerIds'] as string;
+        customerIds = qCust.split(',').map(s => s.trim()).filter(Boolean);
+      } else if (Array.isArray(req.body?.customerIds)) {
+        customerIds = req.body.customerIds;
+      }
+      const excludeUnverifiedBankDetails = req.query['excludeUnverifiedBankDetails'] === 'true' || Boolean(req.body?.excludeUnverifiedBankDetails);
+
+      const result = await batchService.calculateSettlementPreview(
+        {
+          organizationId: req.auth.organizationId,
+          centerId: centerId || null,
+          periodStart,
+          periodEnd,
+          customerIds,
+          excludeUnverifiedBankDetails,
+        },
+        req.auth
+      );
+      return ApiResponse.success(res, result, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
   public static async createBatch(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
     try {
       if (!req.auth) throw new UnauthorizedError();
       const result = await batchService.createBatch(req.body, req.auth);
       return ApiResponse.success(res, result, 201);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async submitForReview(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      if (!req.auth) throw new UnauthorizedError();
+      const { batchId } = req.params as { batchId: string };
+      const result = await batchService.submitForReview(batchId, req.auth);
+      return ApiResponse.success(res, result, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async rejectBatch(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      if (!req.auth) throw new UnauthorizedError();
+      const { batchId } = req.params as { batchId: string };
+      const { reason } = req.body || {};
+      const result = await batchService.rejectBatch(batchId, reason, req.auth);
+      return ApiResponse.success(res, result, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async submitBatchToUnionBank(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      if (!req.auth) throw new UnauthorizedError();
+      const { batchId } = req.params as { batchId: string };
+      const result = await batchService.submitBatchToUnionBank(batchId, req.body, req.auth);
+      return ApiResponse.success(res, result, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async reconcileBatchWithUnionBank(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      if (!req.auth) throw new UnauthorizedError();
+      const { batchId } = req.params as { batchId: string };
+      const result = await batchService.reconcileBatchWithUnionBank(batchId, req.body?.data || req.body?.items || req.body?.fileContent || req.body, req.auth);
+      return ApiResponse.success(res, result, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async queryBatchItemStatus(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      if (!req.auth) throw new UnauthorizedError();
+      const { itemId } = req.params as { itemId: string };
+      const result = await batchService.queryBatchItemStatus(itemId, req.auth);
+      return ApiResponse.success(res, result, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async markBatchTimeout(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      if (!req.auth) throw new UnauthorizedError();
+      const { batchId } = req.params as { batchId: string };
+      const { reason } = req.body || {};
+      const result = await batchService.markBatchTimeout(batchId, reason, req.auth);
+      return ApiResponse.success(res, result, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async getBeneficiaryAuditHistory(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      if (!req.auth) throw new UnauthorizedError();
+      const { customerId } = req.params as { customerId: string };
+      const result = await batchService.getBeneficiaryAuditHistory(customerId, req.auth);
+      return ApiResponse.success(res, result, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async updateBeneficiaryBankDetails(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      if (!req.auth) throw new UnauthorizedError();
+      const { customerId } = req.params as { customerId: string };
+      const result = await batchService.updateBeneficiaryBankDetails(customerId, req.body, req.auth);
+      return ApiResponse.success(res, result, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  public static async getFarmerPaymentOverview(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
+    try {
+      if (!req.auth) throw new UnauthorizedError();
+      const orgId = req.auth.organizationId;
+      const centerId = req.query['centerId'] as string | undefined;
+
+      const client = await pool.connect();
+      try {
+        let payableQuery = `
+          SELECT COALESCE(SUM(current_balance), 0.00)::numeric(12,2) as total_payable
+          FROM customer_ledger_accounts cla
+          JOIN customers c ON c.id = cla.customer_id
+          WHERE cla.organization_id = $1 AND c.is_deleted = FALSE AND cla.current_balance > 0
+        `;
+        let paidQuery = `
+          SELECT COALESCE(SUM(amount), 0.00)::numeric(12,2) as total_paid, COUNT(id)::int as paid_count
+          FROM customer_payouts
+          WHERE organization_id = $1 AND status IN ('SETTLED', 'PAID')
+        `;
+        let pendingQuery = `
+          SELECT COALESCE(SUM(amount), 0.00)::numeric(12,2) as pending_amount, COUNT(id)::int as pending_count
+          FROM customer_payouts
+          WHERE organization_id = $1 AND status IN ('DRAFT', 'CALCULATED', 'UNDER_REVIEW', 'APPROVED', 'SUBMITTED', 'PROCESSING')
+        `;
+        let failedQuery = `
+          SELECT COALESCE(SUM(amount), 0.00)::numeric(12,2) as failed_amount, COUNT(id)::int as failed_count
+          FROM customer_payouts
+          WHERE organization_id = $1 AND status = 'FAILED'
+        `;
+        let unreconciledQuery = `
+          SELECT COALESCE(SUM(amount), 0.00)::numeric(12,2) as unreconciled_amount, COUNT(id)::int as unreconciled_count
+          FROM customer_payouts
+          WHERE organization_id = $1 AND status IN ('SUBMITTED', 'PROCESSING', 'RECONCILIATION_REQUIRED', 'UNKNOWN')
+        `;
+
+        const queryParams: any[] = [orgId];
+        if (centerId) {
+          queryParams.push(centerId);
+          payableQuery += ` AND c.primary_center_id = $2;`;
+          paidQuery += ` AND center_id = $2;`;
+          pendingQuery += ` AND center_id = $2;`;
+          failedQuery += ` AND center_id = $2;`;
+          unreconciledQuery += ` AND center_id = $2;`;
+        } else {
+          payableQuery += `;`;
+          paidQuery += `;`;
+          pendingQuery += `;`;
+          failedQuery += `;`;
+          unreconciledQuery += `;`;
+        }
+
+        const [payableRes, paidRes, pendingRes, failedRes, unreconciledRes] = await Promise.all([
+          client.query(payableQuery, queryParams),
+          client.query(paidQuery, queryParams),
+          client.query(pendingQuery, queryParams),
+          client.query(failedQuery, queryParams),
+          client.query(unreconciledQuery, queryParams),
+        ]);
+
+        const data = {
+          totalPayableAmount: Number(payableRes.rows[0].total_payable),
+          totalPaidAmount: Number(paidRes.rows[0].total_paid),
+          paidCount: Number(paidRes.rows[0].paid_count),
+          pendingAmount: Number(pendingRes.rows[0].pending_amount),
+          pendingCount: Number(pendingRes.rows[0].pending_count),
+          failedAmount: Number(failedRes.rows[0].failed_amount),
+          failedCount: Number(failedRes.rows[0].failed_count),
+          unreconciledAmount: Number(unreconciledRes.rows[0].unreconciled_amount),
+          unreconciledCount: Number(unreconciledRes.rows[0].unreconciled_count),
+        };
+
+        return ApiResponse.success(res, data, 200);
+      } finally {
+        client.release();
+      }
     } catch (err) {
       next(err);
     }

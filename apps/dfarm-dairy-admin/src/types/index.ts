@@ -434,6 +434,141 @@ export interface PaymentRecord {
   notes?: string
 }
 
+export interface PaymentOverviewMetrics {
+  totalPayableAmount: number
+  totalPaidAmount: number
+  paidCount: number
+  pendingAmount: number
+  pendingCount: number
+  failedAmount: number
+  failedCount: number
+  unreconciledAmount: number
+  unreconciledCount: number
+}
+
+export interface FarmerSettlementPreviewItem {
+  customerId: string
+  farmerCode: string
+  fullName: string
+  centerId: string
+  centerName?: string
+  bankName: string | null
+  bankAccountNumberMask: string | null
+  bankIfsc: string | null
+  bankVerificationStatus: string
+  beneficiaryStatus: string
+  isBankValid: boolean
+  bankValidationErrors: string[]
+  openingBalance: number
+  grossMilkAmount: number
+  milkQuantityLiters: number
+  collectionCount: number
+  deductionsAmount: number
+  adjustmentsCredit: number
+  adjustmentsDebit: number
+  alreadyPaidAmount: number
+  pendingReservedAmount: number
+  netPayableAmount: number
+  remainingBalance: number
+}
+
+export interface SettlementCalculationPreview {
+  organizationId: string
+  centerId: string | null
+  periodStart: string
+  periodEnd: string
+  calculatedAt: string
+  calculationSnapshotHash: string
+  totalFarmers: number
+  totalEligibleFarmers: number
+  totalMilkQuantityLiters: number
+  totalGrossPayable: number
+  totalDeductions: number
+  totalNetPayable: number
+  totalAlreadyPaid: number
+  totalRemainingBalance: number
+  warningsCount: number
+  farmersWithInvalidBankCount: number
+  centerBreakdowns: Array<{
+    centerId: string
+    centerName: string
+    centerCode: string
+    farmerCount: number
+    eligibleCount: number
+    totalMilkQuantity: number
+    totalGrossPayable: number
+    totalDeductions: number
+    totalNetPayable: number
+    totalAlreadyPaid: number
+    totalRemainingBalance: number
+  }>
+  farmers: FarmerSettlementPreviewItem[]
+}
+
+export interface PaymentBatchRecord {
+  id: string
+  organizationId: string
+  centerId: string | null
+  batchNumber: string
+  billingCycleId: string | null
+  billingPeriodStart: string | null
+  billingPeriodEnd: string | null
+  paymentMethod: string
+  status:
+    | 'DRAFT'
+    | 'CALCULATED'
+    | 'UNDER_REVIEW'
+    | 'APPROVED'
+    | 'SUBMITTED'
+    | 'SUBMITTED_TO_BANK'
+    | 'PROCESSING'
+    | 'SETTLED'
+    | 'PAID'
+    | 'PARTIALLY_SETTLED'
+    | 'PARTIALLY_PAID'
+    | 'FAILED'
+    | 'UNKNOWN'
+    | 'CANCELLED'
+    | 'RECONCILED'
+  totalBeneficiaries: number
+  totalAmount: number
+  successfulCount: number
+  successfulAmount: number
+  failedCount: number
+  failedAmount: number
+  pendingCount: number
+  pendingAmount: number
+  reconciliationStatus: string
+  calculationSnapshotHash?: string
+  bankName?: string
+  bankChannel?: string
+  bankBatchReference?: string
+  bankSubmissionId?: string
+  createdAt: string
+  items?: PaymentBatchItemRecord[]
+}
+
+export interface PaymentBatchItemRecord {
+  id: string
+  payoutId: string
+  customerId: string
+  customerName: string
+  farmerCode: string
+  amount: number
+  currency: string
+  bankAccountMask: string | null
+  bankIfsc: string | null
+  status: string
+  beneficiaryReference?: string
+  bankUtr?: string
+  failureReason?: string
+  settledAt?: string
+  grossPayable?: number
+  totalDeductions?: number
+  netPayable?: number
+  remainingBalance?: number
+}
+
 // 14. Device Telemetry & Sync Monitoring
 export interface CollectionDevice {
   id: string
@@ -575,3 +710,122 @@ export interface DashboardSummary {
     pendingSyncEventsCount: number
   }
 }
+
+// 15. Dairy Admin Realtime Dashboard & Station Monitoring Types
+export interface DairyAdminMetrics {
+  businessDate: string
+  organizationId: string
+  centerId: string | null
+  totalMilkLiters: number
+  totalAmount: number
+  transactionCount: number
+  cowLiters: number
+  buffaloLiters: number
+  activeSessionsCount: number
+  totalStationsCount: number
+  onlineStationsCount: number
+  degradedStationsCount: number
+  offlineStationsCount: number
+  blockedStationsCount: number
+  pendingSyncCount: number
+  manualReviewCount: number
+  rejectedCount: number
+  lastCollectionTime: string | null
+  lastUpdated: string
+}
+
+export interface CenterLiveMetric {
+  centerId: string
+  centerCode: string
+  centerName: string
+  status: 'OPEN' | 'CLOSED' | 'INACTIVE'
+  activeSession: {
+    sessionId: string
+    shift: ShiftType
+    openedAt: string
+    operatorName: string
+  } | null
+  totalCollections: number
+  totalLiters: number
+  cowLiters: number
+  buffaloLiters: number
+  totalAmount: number
+  latestCollectionTime: string | null
+  activeStationsCount: number
+  degradedStationsCount: number
+  offlineStationsCount: number
+  blockedStationsCount: number
+  pendingSyncCount: number
+  manualReviewCount: number
+  rejectedCount: number
+}
+
+export interface LiveCollectionFeedItem {
+  id: string
+  collectionReference: string
+  centerId: string
+  centerCode: string
+  centerName: string
+  sessionId: string
+  milkCategory: MilkCategory
+  quantityLiters: number
+  fatPercentage: number
+  snfPercentage: number
+  ratePerLiter: number
+  totalAmount: number
+  financialStatus: 'COMPLETED' | 'MANUAL_REVIEW' | 'REJECTED'
+  syncStatus: 'SYNCED_CLOUD' | 'LOCAL_ONLY' | 'PENDING'
+  isReplayed: boolean
+  collectedAt: string
+  farmerCode: string
+  maskedFarmerName: string
+}
+
+export interface SessionMonitoringItem {
+  sessionId: string
+  centerId: string
+  centerCode: string
+  centerName: string
+  deviceId: string
+  deviceName: string
+  businessDate: string
+  shift: ShiftType
+  status: 'OPEN' | 'CLOSED'
+  openedAt: string
+  closedAt: string | null
+  operatorId: string
+  operatorName: string
+  totalTransactions: number
+  totalLiters: number
+  cowLiters: number
+  buffaloLiters: number
+  totalAmount: number
+  syncStatus: string
+}
+
+export type StationStatusClassification = 'ONLINE' | 'DEGRADED' | 'OFFLINE' | 'BLOCKED' | 'UNKNOWN'
+
+export interface StationMonitoringItem {
+  deviceId: string
+  deviceName: string
+  deviceType: string
+  centerId: string | null
+  centerCode: string | null
+  centerName: string | null
+  registrationStatus: string
+  isBlocked: boolean
+  revokedAt: string | null
+  revocationReason: string | null
+  statusClassification: StationStatusClassification
+  lastSeenAt: string | null
+  lastHeartbeatAt: string | null
+  lastSuccessfulSyncAt: string | null
+  pendingQueueCount: number
+  syncFailureCategory: string | null
+  lastSyncError: string | null
+  appVersion: string | null
+  batteryLevel: number | null
+  networkMode: string | null
+  hardwareSerial: string | null
+}
+

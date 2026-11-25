@@ -9,14 +9,23 @@ import type {
   ShiftType,
   CollectionWorkflowState,
   CollectionAttemptSession,
+  MilkCategory,
+  RateChartCacheItem,
+  StorageQuotaStatus,
+  SyncEngineStatus,
+  NetworkStatus,
 } from '@/types'
+import { syncEngine } from '@/services/sync-engine'
+import { networkManager } from '@/services/network-manager'
 import {
   sessionsApi,
   customersApi,
   identityApi,
+  ratesApi,
   getStoredOperatorAuth,
 } from '@/api/client'
 import { localDB } from '@/services/local-storage'
+import { storagePersistence } from '@/services/storage-persistence'
 import {
   voiceAnnouncer,
   buzzerDriver,
@@ -64,7 +73,7 @@ interface HardwareContextType {
   closeSession: (sessionCode: string) => Promise<ActiveCollectionSession>
   reopenSession: (sessionCode: string) => Promise<ActiveCollectionSession>
   refreshOfflineCount: () => Promise<void>
-  refreshCustomersAndTemplates: (dairyIdOverride?: string) => Promise<void>
+  refreshCustomersAndTemplates: (dairyIdOverride?: string, centerIdOverride?: string) => Promise<void>
   updateFaceState: (updates: Partial<FaceRecognitionState>) => void
   selectManualCustomer: (customer: CustomerIdentity) => void
   resetFaceState: () => void
@@ -79,7 +88,14 @@ interface HardwareContextType {
   disconnectAnalyzer: () => Promise<void>
   connectRfidSerial: (baudRate?: number) => Promise<boolean>
   disconnectRfidSerial: () => Promise<void>
+  rateCharts: Record<MilkCategory, RateChartCacheItem | null>
+  storageQuota: StorageQuotaStatus | null
+  refreshRateCharts: (dairyIdOverride?: string, centerIdOverride?: string) => Promise<void>
+  checkStorageQuota: () => Promise<StorageQuotaStatus>
   printReceipt: (txn: CollectionTransaction, options?: any) => Promise<boolean>
+  syncStatus: SyncEngineStatus
+  networkStatus: NetworkStatus
+  triggerSync: () => Promise<void>
 }
 
 const defaultMeasurements: MilkMeasurements = {
@@ -124,8 +140,15 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [measurements, setMeasurements] = useState<MilkMeasurements>(defaultMeasurements)
   const [offlineQueueCount, setOfflineQueueCount] = useState<number>(0)
   const [isNetworkOnline, setIsNetworkOnline] = useState<boolean>(navigator.onLine)
+  const [syncStatus, setSyncStatus] = useState<SyncEngineStatus>(syncEngine.getStatus())
+  const [networkStatus, setNetworkStatus] = useState<NetworkStatus>(networkManager.getStatus())
   const [customersList, setCustomersList] = useState<CustomerIdentity[]>([])
   const [enrolledTemplates, setEnrolledTemplates] = useState<EnrolledFaceTemplate[]>([])
+  const [rateCharts, setRateCharts] = useState<Record<MilkCategory, RateChartCacheItem | null>>({
+    COW: null,
+    BUFFALO: null,
+  })
+  const [storageQuota, setStorageQuota] = useState<StorageQuotaStatus | null>(null)
 
   // Single Active Collection State Machine integration
   const [collectionWorkflowState, setCollectionWorkflowState] =
@@ -201,31 +224,100 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     ])
   }, [])
 
-  const refreshSession = useCallback(async () => {
+  const checkStorageQuota = useCallback(async (): Promise<StorageQuotaStatus> => {
+    const estimate = await storagePersistence.getStorageEstimate()
+    setStorageQuota(estimate)
+    if (estimate.isCritical) {
+      console.error(
+        `[StorageQuota] CRITICAL: Storage usage at ${estimate.percentageUsed}% of quota! Eviction risk imminent.`
+      )
+    } else if (estimate.isWarning) {
+      console.warn(`[StorageQuota] WARNING: Storage usage at ${estimate.percentageUsed}% of quota.`)
+    }
+    return estimate
+  }, [])
+
+  const refreshRateCharts = useCallback(async (dairyIdOverride?: string, centerIdOverride?: string) => {
+    const { dairyId: storedDairyId, centerId: storedCenterId } = getStoredOperatorAuth()
+    const activeDairyId = dairyIdOverride || storedDairyId
+    const activeCenterId = centerIdOverride || storedCenterId
+    if (!activeDairyId) return
+
+    // 1. Hydrate from IndexedDB cache immediately (zero latency, offline safe)
     try {
-      const session = await sessionsApi.getActiveSession()
-      setActiveSession(session)
+      const cowChart = await localDB.getRateChart(activeDairyId, 'COW', activeCenterId || undefined)
+      const bufChart = await localDB.getRateChart(activeDairyId, 'BUFFALO', activeCenterId || undefined)
+      setRateCharts({ COW: cowChart, BUFFALO: bufChart })
     } catch (err) {
-      console.error('Failed to get active session:', err)
-      setActiveSession(null)
+      console.warn('[HardwareContext] Failed to load cached rate charts:', err)
+    }
+
+    // 2. Fetch and update from network if online
+    if (navigator.onLine) {
+      try {
+        const downloaded = await ratesApi.downloadRateCharts(activeDairyId, activeCenterId || undefined)
+        if (downloaded !== null) {
+          const freshCow = await localDB.getRateChart(activeDairyId, 'COW', activeCenterId || undefined)
+          const freshBuf = await localDB.getRateChart(activeDairyId, 'BUFFALO', activeCenterId || undefined)
+          setRateCharts({
+            COW: freshCow,
+            BUFFALO: freshBuf,
+          })
+        }
+      } catch (err) {
+        console.warn('[HardwareContext] Online rate chart sync deferred:', err)
+      }
+    }
+  }, [])
+
+  const refreshSession = useCallback(async () => {
+    const { dairyId, centerId } = getStoredOperatorAuth()
+    try {
+      const session = await sessionsApi.getActiveSession('KIOSK_MAIN', centerId || undefined)
+      if (session) {
+        // Case A: Server returned open active session
+        setActiveSession(session)
+        await localDB.saveActiveSession(session)
+      } else {
+        // Case B: Server confirmed NO active session (200 OK with data: null)
+        // Strictly clear local active session so we do NOT resurrect a closed session!
+        setActiveSession(null)
+        if (dairyId) {
+          await localDB.clearActiveSession(undefined, dairyId, centerId || undefined)
+        } else {
+          await localDB.clearActiveSession()
+        }
+      }
+    } catch (networkErr) {
+      // Case C: Network error / server unreachable / offline
+      console.warn('[HardwareContext] Network error fetching active session, hydrating from IndexedDB:', networkErr)
+      const cached = await localDB.getActiveSession(dairyId || undefined, centerId || undefined, 'KIOSK_MAIN')
+      if (cached && cached.status === 'OPEN') {
+        setActiveSession(cached)
+      } else {
+        setActiveSession(null)
+      }
     }
   }, [])
 
   const openSession = useCallback(async (params?: { shift?: ShiftType; businessDate?: string }): Promise<ActiveCollectionSession> => {
     const newSession = await sessionsApi.openSession(params)
     setActiveSession(newSession)
+    await localDB.saveActiveSession(newSession)
     return newSession
   }, [])
 
   const closeSession = useCallback(async (sessionCode: string): Promise<ActiveCollectionSession> => {
     const closed = await sessionsApi.closeSession(sessionCode)
     setActiveSession(closed)
+    await localDB.saveActiveSession(closed)
     return closed
   }, [])
 
   const reopenSession = useCallback(async (sessionCode: string): Promise<ActiveCollectionSession> => {
     const reopened = await sessionsApi.reopenSession(sessionCode)
     setActiveSession(reopened)
+    await localDB.saveActiveSession(reopened)
     return reopened
   }, [])
 
@@ -238,20 +330,52 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [])
 
+  const triggerSync = useCallback(async () => {
+    try {
+      await syncEngine.triggerSync()
+    } finally {
+      await refreshOfflineCount()
+    }
+  }, [refreshOfflineCount])
+
   const updateFaceState = useCallback((updates: Partial<FaceRecognitionState>) => {
     setFaceState((prev) => ({ ...prev, ...updates }))
   }, [])
 
-  const refreshCustomersAndTemplates = useCallback(async (dairyIdOverride?: string) => {
-    const { dairyId: storedDairyId } = getStoredOperatorAuth()
+  const refreshCustomersAndTemplates = useCallback(async (dairyIdOverride?: string, centerIdOverride?: string) => {
+    const { dairyId: storedDairyId, centerId: storedCenterId } = getStoredOperatorAuth()
     const activeDairyId = dairyIdOverride || storedDairyId
-    try {
-      const custList = await customersApi.list({ organizationId: activeDairyId || undefined })
-      setCustomersList(custList || [])
-    } catch {
-      setCustomersList([])
+    const activeCenterId = centerIdOverride || storedCenterId
+
+    // 1. First, hydrate from local IndexedDB cache immediately (zero latency, offline safe)
+    if (activeDairyId) {
+      try {
+        const cachedCust = await localDB.getCustomersCache(activeDairyId, activeCenterId || undefined)
+        if (cachedCust && cachedCust.length > 0) {
+          setCustomersList(cachedCust)
+        }
+      } catch (err) {
+        console.warn('[HardwareContext] Error loading cached customers:', err)
+      }
     }
 
+    // 2. Refresh from server when online and update local cache
+    try {
+      const custList = await customersApi.list({
+        organizationId: activeDairyId || undefined,
+        centerId: activeCenterId || undefined,
+      })
+      if (custList && custList.length > 0) {
+        setCustomersList(custList)
+        if (activeDairyId) {
+          await localDB.saveCustomersCache(custList, activeDairyId, activeCenterId || undefined)
+        }
+      }
+    } catch (err) {
+      console.warn('[HardwareContext] Network customers fetch failed, retaining local cache:', err)
+    }
+
+    // 3. Face templates (remain in-memory for active session; never stored in plaintext)
     try {
       const rawTemplates = await identityApi.getFaceTemplates(activeDairyId || undefined)
       if (rawTemplates && rawTemplates.length > 0) {
@@ -267,21 +391,76 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             status: t.status || 'ACTIVE',
           }))
         setEnrolledTemplates(validTemplates)
-      } else {
-        setEnrolledTemplates([])
       }
     } catch {
-      setEnrolledTemplates([])
+      // Retain existing in-memory templates
     }
   }, [])
 
   useEffect(() => {
+    const { dairyId, centerId } = getStoredOperatorAuth()
+    // Fail closed: Kiosks are strictly centre-restricted; unverified localStorage roles NEVER grant dairy-wide access
+    const isDairyWideAuthorized = false
+    const activeCenter = centerId || undefined
+
+    // A. Request Chromium persistent storage permission at startup & monitor quota
+    storagePersistence.requestPersistentStorage().catch(() => {})
+    checkStorageQuota().catch(() => {})
+
+    // B. Immediate local hydration on startup with center-scoped fail-closed rules
+    ;(async () => {
+      try {
+        const cachedSession = await localDB.getActiveSession(dairyId || undefined, activeCenter, 'KIOSK_MAIN', { isDairyWideAuthorized })
+        if (cachedSession && cachedSession.status === 'OPEN') {
+          setActiveSession(cachedSession)
+        }
+        if (dairyId) {
+          const cachedCust = await localDB.getCustomersCache(dairyId, activeCenter, { isDairyWideAuthorized })
+          if (cachedCust && cachedCust.length > 0) {
+            setCustomersList(cachedCust)
+          }
+        }
+        const queue = await localDB.getOfflineQueue()
+        setOfflineQueueCount(queue.length)
+      } catch (err) {
+        console.warn('[HardwareContext] Startup local hydration warning:', err)
+      }
+    })()
+
     refreshDevices()
     refreshSession()
     refreshOfflineCount()
     refreshCustomersAndTemplates()
+    refreshRateCharts()
 
-    const handleOnline = () => setIsNetworkOnline(true)
+    // C. Initialize Sync Engine and Network State Manager
+    syncEngine.init().catch((err) => console.warn('[HardwareContext] Sync engine initialization error:', err))
+    networkManager.init()
+
+    const unsubSync = syncEngine.subscribe((newSyncStatus) => {
+      setSyncStatus(newSyncStatus)
+      refreshOfflineCount()
+    })
+
+    const unsubNetwork = networkManager.subscribeStatus((newNetStatus) => {
+      setNetworkStatus(newNetStatus)
+      setIsNetworkOnline(newNetStatus === 'ONLINE')
+    })
+
+    const unsubRestored = networkManager.subscribeRestored(() => {
+      console.log('[HardwareContext] Network connectivity restored. Triggering automatic background sync...')
+      syncEngine.triggerSync().catch((err) => console.warn('[HardwareContext] Auto sync on restore failed:', err))
+      refreshRateCharts()
+      refreshSession()
+      checkStorageQuota()
+    })
+
+    const handleOnline = () => {
+      setIsNetworkOnline(true)
+      refreshRateCharts()
+      refreshSession()
+      checkStorageQuota()
+    }
     const handleOffline = () => setIsNetworkOnline(false)
 
     window.addEventListener('online', handleOnline)
@@ -295,9 +474,48 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         cardUid: evt.cardUid,
         matchedCustomer: null,
       })
-      const target = await customersApi.getByRfid(evt.cardUid)
-      const { dairyId } = getStoredOperatorAuth()
-      if (target && (!target.dairyId || !dairyId || target.dairyId === dairyId)) {
+
+      // Offline-first RFID lookup: check local cache with strict tenant & center isolation!
+      const { dairyId: currentDairyId, centerId: currentCenterId } = getStoredOperatorAuth()
+      // Fail closed: Kiosks are strictly centre-restricted; unverified localStorage roles NEVER grant dairy-wide access
+      const isCurrentDairyWide = false
+      const activeDairy = currentDairyId || activeSession?.dairyId || ''
+      const activeCenter = currentCenterId || activeSession?.centerId || undefined
+      let target: CustomerIdentity | null = null
+      if (activeDairy) {
+        try {
+          target = await localDB.getCustomerByRfid(evt.cardUid, activeDairy, activeCenter, { isDairyWideAuthorized: isCurrentDairyWide })
+        } catch {
+          // ignore cache error
+        }
+      }
+      if (!target && isCurrentDairyWide) {
+        target = customersMap.get(evt.cardUid.toUpperCase()) || null
+      } else if (!target && activeCenter) {
+        const memMatch = customersMap.get(evt.cardUid.toUpperCase()) || null
+        if (memMatch && memMatch.centerId && memMatch.centerId.trim().toLowerCase() === activeCenter.trim().toLowerCase()) {
+          target = memMatch
+        }
+      }
+      if (!target && navigator.onLine) {
+        // Fallback to network lookup only if not found in local cache
+        target = await customersApi.getByRfid(evt.cardUid)
+      }
+
+      // Strict tenant & center isolation: missing tenant context must NEVER act as a wildcard
+      const isTenantMatch = Boolean(
+        target &&
+        activeDairy &&
+        target.dairyId &&
+        target.dairyId.trim().toLowerCase() === activeDairy.trim().toLowerCase()
+      )
+      // Fail closed: On a centre-restricted station, customer MUST have matching centerId.
+      // Unassigned customer or mismatched customer is rejected.
+      const isCenterMatch = activeCenter
+        ? Boolean(target?.centerId && target.centerId.trim().toLowerCase() === activeCenter.trim().toLowerCase())
+        : isCurrentDairyWide
+
+      if (target && isTenantMatch && isCenterMatch) {
         setRfidState({
           status: 'MATCHED',
           cardUid: evt.cardUid,
@@ -364,10 +582,15 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       unsubRfid()
       unsubScale()
       unsubAnalyzer()
+      unsubSync()
+      unsubNetwork()
+      unsubRestored()
+      syncEngine.destroy()
+      networkManager.destroy()
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
-  }, [refreshDevices, refreshSession, refreshOfflineCount, refreshCustomersAndTemplates])
+  }, [refreshDevices, refreshSession, refreshOfflineCount, refreshCustomersAndTemplates, refreshRateCharts, checkStorageQuota])
 
   // Manual customer selection fallback (Directory / Supervisor Lookup)
   const selectManualCustomer = (customer: CustomerIdentity) => {
@@ -386,8 +609,42 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       matchedCustomer: null,
     })
 
-    const target = await customersApi.getByRfid(cardUid)
-    if (target) {
+    const { dairyId, centerId } = getStoredOperatorAuth()
+    // Fail closed: Kiosks are strictly centre-restricted; unverified localStorage roles NEVER grant dairy-wide access
+    const isDairyWideAuthorized = false
+    const activeDairy = dairyId || activeSession?.dairyId || ''
+    const activeCenter = centerId || activeSession?.centerId || undefined
+    let target: CustomerIdentity | null = null
+    if (activeDairy) {
+      try {
+        target = await localDB.getCustomerByRfid(cardUid, activeDairy, activeCenter, { isDairyWideAuthorized })
+      } catch {
+        // ignore
+      }
+    }
+    if (!target && isDairyWideAuthorized) {
+      target = customersMap.get(cardUid.toUpperCase()) || null
+    } else if (!target && activeCenter) {
+      const memMatch = customersMap.get(cardUid.toUpperCase()) || null
+      if (memMatch && memMatch.centerId && memMatch.centerId.trim().toLowerCase() === activeCenter.trim().toLowerCase()) {
+        target = memMatch
+      }
+    }
+    if (!target && navigator.onLine) {
+      target = await customersApi.getByRfid(cardUid)
+    }
+
+    const isTenantMatch = Boolean(
+      target &&
+      activeDairy &&
+      target.dairyId &&
+      target.dairyId.trim().toLowerCase() === activeDairy.trim().toLowerCase()
+    )
+    const isCenterMatch = activeCenter
+      ? Boolean(target?.centerId && target.centerId.trim().toLowerCase() === activeCenter.trim().toLowerCase())
+      : isDairyWideAuthorized
+
+    if (target && isTenantMatch && isCenterMatch) {
       setRfidState({
         status: 'MATCHED',
         cardUid,
@@ -617,7 +874,14 @@ export const HardwareProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         disconnectAnalyzer,
         connectRfidSerial,
         disconnectRfidSerial,
+        rateCharts,
+        storageQuota,
+        refreshRateCharts,
+        checkStorageQuota,
         printReceipt,
+        syncStatus,
+        networkStatus,
+        triggerSync,
       }}
     >
       {children}

@@ -45,14 +45,40 @@ function onnxWasmMiddlewarePlugin(): Plugin {
   }
 }
 
-function cloudflareSpaFallbackPlugin(): Plugin {
+function dfarmPwaPlugin(): Plugin {
   return {
-    name: 'cloudflare-spa-fallback',
+    name: 'dfarm-pwa-builder',
     closeBundle() {
-      const distIndex = path.resolve(__dirname, './dist/index.html')
-      const dist200 = path.resolve(__dirname, './dist/200.html')
+      const distDir = path.resolve(__dirname, './dist')
+      const distIndex = path.resolve(distDir, 'index.html')
+      const dist200 = path.resolve(distDir, '200.html')
+      const distSw = path.resolve(distDir, 'sw.js')
+      const assetsDir = path.resolve(distDir, 'assets')
+
+      // 1. Cloudflare Pages SPA 200.html fallback
       if (fs.existsSync(distIndex)) {
         fs.copyFileSync(distIndex, dist200)
+      }
+
+      // 2. Precache Asset Discovery & Service Worker Injection
+      if (fs.existsSync(distSw) && fs.existsSync(assetsDir)) {
+        const files = fs.readdirSync(assetsDir)
+        // Only precache core JS and CSS chunks (EXCLUDE large wasm, onnx, map)
+        const precacheAssets = files
+          .filter((f) => (f.endsWith('.js') || f.endsWith('.css')) && !f.endsWith('.map'))
+          .map((f) => `/assets/${f}`)
+
+        const buildVersion = `v1.0.${Date.now().toString(36)}`
+        let swContent = fs.readFileSync(distSw, 'utf-8')
+        swContent = swContent.replace(
+          "const BUILD_VERSION = '__DFARM_BUILD_VERSION__';",
+          `const BUILD_VERSION = '${buildVersion}';`
+        )
+        swContent = swContent.replace(
+          'const INJECTED_ASSETS = __DFARM_PRECACHE_ASSETS__;',
+          `const INJECTED_ASSETS = ${JSON.stringify(precacheAssets)};`
+        )
+        fs.writeFileSync(distSw, swContent, 'utf-8')
       }
     },
   }
@@ -60,7 +86,7 @@ function cloudflareSpaFallbackPlugin(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [onnxWasmMiddlewarePlugin(), cloudflareSpaFallbackPlugin(), react(), tailwindcss()],
+  plugins: [onnxWasmMiddlewarePlugin(), dfarmPwaPlugin(), react(), tailwindcss()],
   assetsInclude: ['**/*.onnx'],
   server: {
     port: 5175,

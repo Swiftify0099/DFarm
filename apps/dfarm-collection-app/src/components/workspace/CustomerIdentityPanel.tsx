@@ -18,6 +18,7 @@ import {
 import type { CustomerIdentity } from '@/types'
 import { useCamera } from '@/hooks/useCamera'
 import { getStoredOperatorAuth, customersApi } from '@/api/client'
+import { localDB } from '@/services/local-storage'
 import { voiceAnnouncer } from '@/drivers'
 
 interface CustomerIdentityPanelProps {
@@ -54,15 +55,16 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   const { dairyId: authDairyId } = useAuth()
-  const { dairyId: storedDairyId } = getStoredOperatorAuth()
+  const { dairyId: storedDairyId, centerId: storedCenterId } = getStoredOperatorAuth()
   const activeDairyId = authDairyId || storedDairyId || '00000000-0000-0000-0000-000000000001'
+  const activeCenterId = storedCenterId || undefined
 
   // Dynamic refresh of customers & face templates when dairy context is established
   useEffect(() => {
     if (activeDairyId) {
-      refreshCustomersAndTemplates(activeDairyId)
+      refreshCustomersAndTemplates(activeDairyId, activeCenterId)
     }
-  }, [activeDairyId, refreshCustomersAndTemplates])
+  }, [activeDairyId, activeCenterId, refreshCustomersAndTemplates])
 
   // FIX: Stable callbacks to prevent useCamera frame-loop restarts on each render.
   const handleCustomerMatchedCamera = useCallback(
@@ -183,8 +185,20 @@ export const CustomerIdentityPanel: React.FC<CustomerIdentityPanelProps> = ({
         return
       }
 
-      // 2. Query customer directory with search string
-      const list = await customersApi.list({ search: query, organizationId: activeDairyId || undefined })
+      // 2. Query customer directory with search string (online or local fallback)
+      let list: CustomerIdentity[] = []
+      try {
+        list = await customersApi.list({ search: query, organizationId: activeDairyId || undefined, centerId: activeCenterId })
+      } catch {
+        // Fallback to local IndexedDB customer cache if offline
+        if (activeDairyId) {
+          const localMatch = await localDB.getCustomerByCode(query, activeDairyId, activeCenterId)
+          if (localMatch) {
+            list = [localMatch]
+          }
+        }
+      }
+
       if (!list || list.length === 0) {
         setSearchError(`No patron found matching "${query}". Press F2 for directory.`)
         return

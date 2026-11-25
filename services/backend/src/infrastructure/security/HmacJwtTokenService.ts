@@ -11,6 +11,7 @@ export interface TokenClaims {
   actorType: 'STAFF' | 'CUSTOMER';
   fullName?: string;
   phoneNumber?: string;
+  deviceId?: string;
   iat?: number;
   exp?: number;
 }
@@ -33,6 +34,9 @@ export class HmacJwtTokenService implements ITokenService {
       globalCustomerId?: string;
       role: string;
       actorType: 'STAFF' | 'CUSTOMER';
+      fullName?: string;
+      phoneNumber?: string;
+      deviceId?: string;
     },
     expiresInSeconds = 86400
   ): string {
@@ -64,6 +68,7 @@ export class HmacJwtTokenService implements ITokenService {
     actorType: 'STAFF' | 'CUSTOMER';
     fullName?: string;
     phoneNumber?: string;
+    deviceId?: string;
   } {
     if (!token) {
       throw new UnauthorizedError('Authentication token missing');
@@ -120,6 +125,9 @@ export class HmacJwtTokenService implements ITokenService {
       globalCustomerId: payload.globalCustomerId,
       role: payload.role,
       actorType: payload.actorType,
+      fullName: payload.fullName,
+      phoneNumber: payload.phoneNumber,
+      deviceId: payload.deviceId,
     };
   }
 }

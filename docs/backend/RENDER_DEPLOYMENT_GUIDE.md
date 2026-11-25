@@ -84,8 +84,23 @@ In the Render dashboard under **Environment**:
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | `your-supabase-service-role-key` |
 | `DATABASE_URL` | Yes | `postgresql://postgres.[ref]:[pass]@aws-0-[region].pooler.supabase.com:6543/postgres` |
 | `JWT_SECRET` | Yes | Strong random 32+ char string |
+| `OFFLINE_LEASE_SIGNING_KEY` | Yes | 64-character hex string (32 bytes / 256 bits of CSPRNG entropy from `openssl rand -hex 32`). Must NEVER be committed to Git. |
+| `OFFLINE_LEASE_ACTIVE_KEY_ID` | No | `k1` (Default active key ID) |
 | `DEFAULT_PHONE_REGION` | No | `IN` |
 | `ADMIN_OTP_SECRET` | No | Strong random 32+ char string |
+
+### Generating Cryptographically Secure Production Keys
+Before deploying to production, generate a cryptographically strong 256-bit signing key using a true CSPRNG (Cryptographically Secure Pseudo-Random Number Generator):
+```bash
+openssl rand -hex 32
+```
+This generates a 64-character hexadecimal string representing exactly 32 bytes (256 bits) of cryptographic entropy.
+
+> [!CAUTION]
+> - **DO NOT** commit this generated key to Git or any repository file.
+> - **DO NOT** use repeated character strings, dictionary words, or low-entropy passwords.
+> - Configure `OFFLINE_LEASE_SIGNING_KEY` directly in the Render Dashboard environment settings or use Render's `generateValue: true` in `render.yaml`.
+
 
 ---
 

@@ -16,6 +16,9 @@ export class KioskShiftSession {
     get centerId() {
         return this.props.centerId;
     }
+    get timezone() {
+        return this.props.timezone;
+    }
     get businessDate() {
         return this.props.businessDate;
     }
@@ -50,6 +53,9 @@ export class KioskShiftSession {
     }
     get deviceName() {
         return this.props.deviceName;
+    }
+    get openingOperatorId() {
+        return this.props.openingOperatorId;
     }
     get openingOperatorName() {
         return this.props.openingOperatorName;
@@ -104,6 +110,7 @@ export class KioskShiftSession {
             centerId: this.props.centerId,
             date: this.props.businessDate,
             businessDate: this.props.businessDate,
+            timezone: this.props.timezone || 'Asia/Kolkata',
             shift: this.props.shift,
             status: this.props.status,
             openedAt: this.props.openedAt,

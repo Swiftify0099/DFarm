@@ -1,15 +1,8 @@
 import { superAdminRepo } from '../../infrastructure/repositories/PostgresSuperAdminRepository.js';
 import { RateChart } from '../entities/RateChart.js';
+import { roundHalfUp } from '@dfarm/shared-types';
 
-/**
- * Standard commercial half-up rounding (ROUND_HALF_UP) to eliminate floating-point drift.
- * Guarantees exact 2 decimal places (paise precision) in financial calculations.
- * Example: 12.345 * 45.67 = 563.79615 -> 563.80
- */
-export function roundHalfUp(value: number, decimals: number = 2): number {
-  if (isNaN(value)) return 0;
-  return Number(Math.round(Number(value + 'e' + decimals)) + 'e-' + decimals);
-}
+export { roundHalfUp };
 
 export interface PricingCalculationSnapshot {
   rateChartId: string;

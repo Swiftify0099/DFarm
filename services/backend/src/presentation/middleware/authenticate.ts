@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { HmacJwtTokenService } from '../../infrastructure/security/HmacJwtTokenService.js';
-import { UnauthorizedError } from '../../domain/errors/index.js';
+import { UnauthorizedError, ForbiddenError } from '../../domain/errors/index.js';
+import { sseTicketService } from '../../infrastructure/security/SseTicketService.js';
 
 const tokenService = new HmacJwtTokenService();
 
@@ -13,6 +14,7 @@ export interface AuthenticatedUser {
   actorType: 'STAFF' | 'CUSTOMER';
   fullName?: string;
   phoneNumber?: string;
+  deviceId?: string;
 }
 
 declare global {
@@ -24,6 +26,7 @@ declare global {
 }
 
 export function authenticate(req: Request, _res: Response, next: NextFunction): void {
+  // Never accept query token on standard API endpoints
   const authHeader = req.headers.authorization || (req.headers['x-access-token'] as string);
 
   if (!authHeader) {
@@ -37,6 +40,7 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
 }
 
 export function optionalAuthenticate(req: Request, _res: Response, next: NextFunction): void {
+  // Never accept query token on standard API endpoints
   const authHeader = req.headers.authorization || (req.headers['x-access-token'] as string);
   if (!authHeader) {
     return next();
@@ -51,3 +55,70 @@ export function optionalAuthenticate(req: Request, _res: Response, next: NextFun
   }
   next();
 }
+
+/**
+ * Dedicated authentication middleware for SSE streaming endpoints (/dairy-admin/events).
+ * Rejects raw access tokens in URL query strings (400/401).
+ * Accepts:
+ *   Option A: Authorization: Bearer <JWT> header (streaming fetch)
+ *   Option B: ?ticket=<short_lived_sse_ticket> query parameter (short-lived, single-use, purpose-scoped)
+ */
+export function authenticateSseStream(req: Request, res: Response, next: NextFunction): void {
+  // 1. Explicitly reject normal long-lived tokens in query parameters
+  if (req.query.token) {
+    res.status(400).json({
+      success: false,
+      errorCode: 'EXPOSED_QUERY_TOKEN_FORBIDDEN',
+      error: 'Long-lived access tokens are strictly forbidden in URL query parameters. Use an SSE ticket or Authorization header.',
+    });
+    return;
+  }
+
+  const authHeader = req.headers.authorization || (req.headers['x-access-token'] as string);
+  const ticketQuery = (req.query.ticket as string) || (req.headers['x-sse-ticket'] as string);
+
+  let user: AuthenticatedUser | null = null;
+
+  try {
+    if (authHeader) {
+      // Option A: Authorization header streaming
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+      user = tokenService.verifyToken(token);
+    } else if (ticketQuery) {
+      // Option B: Purpose-specific, short-lived SSE ticket
+      user = sseTicketService.verifyAndConsumeTicket(ticketQuery);
+    } else {
+      throw new UnauthorizedError('Authentication token or SSE ticket required');
+    }
+  } catch (err: any) {
+    if (err instanceof ForbiddenError) {
+      res.status(403).json({ success: false, errorCode: 'FORBIDDEN', error: err.message });
+      return;
+    }
+    res.status(401).json({ success: false, errorCode: 'UNAUTHORIZED', error: err?.message || 'Unauthorized' });
+    return;
+  }
+
+  // 2. Validate authorized dairy admin role
+  const allowedAdminRoles = [
+    'PRIMARY_DAIRY_ADMIN',
+    'DAIRY_ADMIN',
+    'SUPER_ADMIN',
+    'DAIRY_OWNER',
+    'BRANCH_MANAGER',
+    'CENTER_MANAGER',
+  ];
+
+  if (!allowedAdminRoles.includes(user.role)) {
+    res.status(403).json({
+      success: false,
+      errorCode: 'ROLE_UNAUTHORIZED',
+      error: `Role '${user.role}' is not authorized for dairy admin SSE streaming.`,
+    });
+    return;
+  }
+
+  req.user = user;
+  next();
+}
+

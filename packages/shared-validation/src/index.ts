@@ -528,10 +528,15 @@ export const CreatePaymentBatchSchema = z.object({
   billingCycleId: z.string().uuid().optional().nullable(),
   billingPeriodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date format YYYY-MM-DD required').optional().nullable(),
   billingPeriodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date format YYYY-MM-DD required').optional().nullable(),
-  paymentMethod: PaymentMethodSchema.default(PaymentMethod.BANK_TRANSFER),
+  periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date format YYYY-MM-DD required').optional().nullable(),
+  periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date format YYYY-MM-DD required').optional().nullable(),
+  paymentMethod: z.union([PaymentMethodSchema, z.string()]).default(PaymentMethod.BANK_TRANSFER),
   customerIds: z.array(z.string().uuid()).optional(),
   payoutIds: z.array(z.string().uuid()).optional(),
   idempotencyKey: z.string().min(8).max(128),
+  excludeUnverifiedBankDetails: z.boolean().optional(),
+  debitAccountNumber: z.string().max(30).optional(),
+  initialStatus: z.enum(['DRAFT', 'CALCULATED']).optional(),
 });
 
 export const ReconcileBatchItemInputSchema = z.object({
@@ -627,6 +632,7 @@ export const BillingSchedulerRunSchema = z.object({
 export const CreateRateChartSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100),
   milkCategory: z.nativeEnum(MilkCategory),
+  centerScope: z.enum(['ORGANIZATION_WIDE', 'CENTER_SPECIFIC']).optional(),
   centerId: z.string().uuid('Center ID must be a valid UUID').optional().nullable(),
   pricingType: z.enum(['GRID', 'TOTAL_SOLIDS_FORMULA', 'TWO_AXIS_FORMULA']).default('GRID'),
   description: z.string().max(500).optional().nullable(),

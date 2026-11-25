@@ -11,8 +11,8 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
       organizationId: row.organization_id,
       centerId: row.center_id,
       businessDate: row.business_date instanceof Date
-        ? row.business_date.toISOString().split('T')[0]
-        : String(row.business_date),
+        ? `${row.business_date.getFullYear()}-${String(row.business_date.getMonth() + 1).padStart(2, '0')}-${String(row.business_date.getDate()).padStart(2, '0')}`
+        : (String(row.business_date).split('T')[0] || ''),
       shift: row.shift,
       status: row.status,
       openedAt: row.opened_at?.toISOString?.() || String(row.opened_at),
@@ -30,6 +30,7 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
       totalAmount: Number(row.total_amount || 0),
       averageFat: Number(row.average_fat || 0),
       averageSnf: Number(row.average_snf || 0),
+      timezone: row.timezone || row.center_timezone || 'Asia/Kolkata',
     };
 
     return new KioskShiftSession(props);
@@ -50,9 +51,11 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
     const sql = `
       SELECT 
         s.*,
+        dc.timezone AS center_timezone,
         u_open.full_name AS opening_operator_name,
         u_close.full_name AS closing_operator_name
       FROM kiosk_shift_sessions s
+      LEFT JOIN dairy_centers dc ON dc.id = s.center_id
       LEFT JOIN users u_open ON u_open.id = s.opening_operator_id
       LEFT JOIN users u_close ON u_close.id = s.closing_operator_id
       WHERE s.center_id = $1 AND s.device_identifier = $2 AND s.status = 'OPEN'
@@ -89,9 +92,11 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
     const sql = `
       SELECT 
         s.*,
+        dc.timezone AS center_timezone,
         u_open.full_name AS opening_operator_name,
         u_close.full_name AS closing_operator_name
       FROM kiosk_shift_sessions s
+      LEFT JOIN dairy_centers dc ON dc.id = s.center_id
       LEFT JOIN users u_open ON u_open.id = s.opening_operator_id
       LEFT JOIN users u_close ON u_close.id = s.closing_operator_id
       WHERE s.session_code = $1
@@ -127,9 +132,11 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
     const sql = `
       SELECT 
         s.*,
+        dc.timezone AS center_timezone,
         u_open.full_name AS opening_operator_name,
         u_close.full_name AS closing_operator_name
       FROM kiosk_shift_sessions s
+      LEFT JOIN dairy_centers dc ON dc.id = s.center_id
       LEFT JOIN users u_open ON u_open.id = s.opening_operator_id
       LEFT JOIN users u_close ON u_close.id = s.closing_operator_id
       WHERE s.id = $1

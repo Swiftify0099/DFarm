@@ -70,6 +70,9 @@ export class HmacJwtTokenService {
             globalCustomerId: payload.globalCustomerId,
             role: payload.role,
             actorType: payload.actorType,
+            fullName: payload.fullName,
+            phoneNumber: payload.phoneNumber,
+            deviceId: payload.deviceId,
         };
     }
 }

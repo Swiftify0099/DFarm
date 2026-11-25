@@ -1,9 +1,11 @@
 import { Router } from 'express';
-import { GetActiveShiftSessionUseCase, OpenShiftSessionUseCase, CloseShiftSessionUseCase, ReopenShiftSessionUseCase, ProcessMilkIntakeUseCase, GetCustomerCollectionHistoryUseCase, GetMonthlyMilkSummaryUseCase, } from '../../application/use-cases/index.js';
+import { GetActiveShiftSessionUseCase, OpenShiftSessionUseCase, CloseShiftSessionUseCase, ReopenShiftSessionUseCase, ProcessMilkIntakeUseCase, BulkCollectionSyncUseCase, GetCustomerCollectionHistoryUseCase, GetMonthlyMilkSummaryUseCase, } from '../../application/use-cases/index.js';
 import { PostgresCustomerRepository, PostgresShiftSessionRepository, PostgresCollectionTransactionRepository, PostgresRateChartRepository, PostgresLedgerRepository, } from '../../infrastructure/index.js';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
+import { offlineSessionAuthService } from '../../infrastructure/security/OfflineSessionAuthorizationService.js';
+import { realtimePublisher } from '../../infrastructure/realtime/RealtimeEventPublisher.js';
 const router = Router();
 const customerRepo = new PostgresCustomerRepository();
 const sessionRepo = new PostgresShiftSessionRepository();
@@ -15,6 +17,7 @@ const openSessionUseCase = new OpenShiftSessionUseCase(sessionRepo);
 const closeSessionUseCase = new CloseShiftSessionUseCase(sessionRepo);
 const reopenSessionUseCase = new ReopenShiftSessionUseCase(sessionRepo);
 const processMilkIntakeUseCase = new ProcessMilkIntakeUseCase(customerRepo, sessionRepo, transactionRepo, rateChartRepo, ledgerRepo);
+const bulkCollectionSyncUseCase = new BulkCollectionSyncUseCase(customerRepo, sessionRepo, transactionRepo);
 const getHistoryUseCase = new GetCustomerCollectionHistoryUseCase(transactionRepo);
 const getSummaryUseCase = new GetMonthlyMilkSummaryUseCase(transactionRepo);
 // 1. Get all shift sessions for dairy
@@ -114,12 +117,14 @@ router.get('/sessions/active', optionalAuthenticate, async (req, res, next) => {
             req.user?.userId ||
             '00000000-0000-0000-0000-000000000003';
         const deviceId = req.query['deviceId'] || req.headers['x-device-id'] || 'KIOSK_MAIN';
+        const timezone = req.headers['x-timezone'] || req.query['timezone'] || undefined;
         const session = await getActiveSessionUseCase.execute({
             centerId,
             organizationId,
             operatorId,
             operatorName: req.user?.fullName || 'Counter Operator',
             deviceIdentifier: deviceId,
+            timezone,
         });
         if (req.user?.organizationId && session.organizationId !== req.user.organizationId) {
             res.status(404).json({
@@ -128,9 +133,48 @@ router.get('/sessions/active', optionalAuthenticate, async (req, res, next) => {
             });
             return;
         }
+        const sessionData = session.toJSON();
+        if (session.isOpen) {
+            const offlineAuth = offlineSessionAuthService.generateAuthorization({
+                organizationId: session.organizationId,
+                centerId: session.centerId,
+                sessionId: session.id,
+                sessionCode: session.sessionCode,
+                businessDate: session.businessDate,
+                shift: session.shift,
+                deviceIdentifier: session.deviceIdentifier,
+                operatorId: session.openingOperatorId || operatorId,
+                operatorName: session.openingOperatorName,
+                timezone: session.timezone,
+                validFrom: session.openedAt,
+            });
+            sessionData.offlineAuthorization = offlineAuth;
+        }
+        try {
+            realtimePublisher.broadcast({
+                eventId: `EVT-SESS-OPEN-${session.id}`,
+                eventType: 'SESSION_OPENED',
+                schemaVersion: 1,
+                organizationId: session.organizationId,
+                centerId: session.centerId,
+                entityId: session.id,
+                aggregateVersion: 1,
+                occurredAt: session.openedAt,
+                publishedAt: new Date().toISOString(),
+                payload: {
+                    sessionId: session.id,
+                    sessionCode: session.sessionCode,
+                    shift: session.shift,
+                    businessDate: session.businessDate,
+                    operatorName: session.openingOperatorName,
+                    deviceIdentifier: session.deviceIdentifier,
+                },
+            });
+        }
+        catch { }
         res.json({
             success: true,
-            data: session.toJSON(),
+            data: sessionData,
         });
     }
     catch (err) {
@@ -145,20 +189,60 @@ const handleOpenSession = async (req, res, next) => {
         const operatorId = req.user?.userId || '00000000-0000-0000-0000-000000000003';
         const deviceId = req.body?.deviceId || 'KIOSK_MAIN';
         const shift = req.body?.shift || 'MORNING';
-        const businessDate = req.body?.businessDate || new Date().toISOString().split('T')[0];
+        const timezone = req.headers['x-timezone'] || req.body?.timezone || undefined;
         const session = await openSessionUseCase.execute({
             centerId,
             organizationId,
             operatorId,
             operatorName: req.body?.operatorName || req.user?.fullName || 'Counter Operator',
             shift,
-            businessDate,
+            businessDate: req.body?.businessDate,
             deviceIdentifier: deviceId,
+            timezone,
         });
+        const sessionData = session.toJSON();
+        if (session.isOpen) {
+            const offlineAuth = offlineSessionAuthService.generateAuthorization({
+                organizationId: session.organizationId,
+                centerId: session.centerId,
+                sessionId: session.id,
+                sessionCode: session.sessionCode,
+                businessDate: session.businessDate,
+                shift: session.shift,
+                deviceIdentifier: session.deviceIdentifier,
+                operatorId: session.openingOperatorId || operatorId,
+                operatorName: session.openingOperatorName,
+                timezone: session.timezone,
+                validFrom: session.openedAt,
+            });
+            sessionData.offlineAuthorization = offlineAuth;
+        }
+        try {
+            realtimePublisher.broadcast({
+                eventId: `EVT-SESS-OPEN-${session.id}`,
+                eventType: 'SESSION_OPENED',
+                schemaVersion: 1,
+                organizationId: session.organizationId,
+                centerId: session.centerId,
+                entityId: session.id,
+                aggregateVersion: 1,
+                occurredAt: session.openedAt,
+                publishedAt: new Date().toISOString(),
+                payload: {
+                    sessionId: session.id,
+                    sessionCode: session.sessionCode,
+                    shift: session.shift,
+                    businessDate: session.businessDate,
+                    operatorName: session.openingOperatorName,
+                    deviceIdentifier: session.deviceIdentifier,
+                },
+            });
+        }
+        catch { }
         res.status(201).json({
             success: true,
             message: `Shift session ${session.sessionCode} opened successfully.`,
-            data: session.toJSON(),
+            data: sessionData,
         });
     }
     catch (err) {
@@ -178,6 +262,29 @@ const handleCloseSession = async (req, res, next) => {
             operatorId,
             operatorName: req.body?.operatorName || req.user?.fullName || 'Counter Operator',
         });
+        try {
+            realtimePublisher.broadcast({
+                eventId: `EVT-SESS-CLOSE-${session.id}`,
+                eventType: 'SESSION_CLOSED',
+                schemaVersion: 1,
+                organizationId: session.organizationId,
+                centerId: session.centerId,
+                entityId: session.id,
+                aggregateVersion: 1,
+                occurredAt: session.closedAt || new Date().toISOString(),
+                publishedAt: new Date().toISOString(),
+                payload: {
+                    sessionId: session.id,
+                    sessionCode: session.sessionCode,
+                    shift: session.shift,
+                    businessDate: session.businessDate,
+                    totalLiters: session.totals.totalLiters,
+                    transactionCount: session.totals.transactionCount,
+                    totalAmount: session.totals.totalAmount,
+                },
+            });
+        }
+        catch { }
         res.json({
             success: true,
             message: `Shift session ${sessionCode} closed successfully.`,
@@ -237,6 +344,21 @@ const handleIntakeTransaction = async (req, res, next) => {
             res.status(404).json({ success: false, error: `Customer ${body.customerId} not found` });
             return;
         }
+        const operatorId = req.user?.userId;
+        if (!operatorId) {
+            res.status(401).json({ success: false, error: 'Authenticated operator ID is required' });
+            return;
+        }
+        const bodyOrgId = req.body?.organizationId || req.headers['x-organization-id'] || req.headers['x-dairy-tenant-id'];
+        if (bodyOrgId && req.user?.organizationId && bodyOrgId !== req.user.organizationId) {
+            res.status(403).json({ success: false, error: 'Cross-dairy collection blocked: Organization mismatch' });
+            return;
+        }
+        const resolvedOrgId = orgId || customer.organizationId;
+        if (!resolvedOrgId) {
+            res.status(400).json({ success: false, error: 'Authenticated organization context is required for milk collection' });
+            return;
+        }
         // Strict multi-dairy isolation: verify customer belongs to operator's dairy
         if (req.user?.organizationId && customer.organizationId !== req.user.organizationId) {
             res.status(403).json({
@@ -246,7 +368,7 @@ const handleIntakeTransaction = async (req, res, next) => {
             return;
         }
         const result = await processMilkIntakeUseCase.execute({
-            organizationId: orgId,
+            organizationId: resolvedOrgId,
             sessionId: body.sessionId,
             sessionCode: body.sessionCode,
             customerId: customer.id,
@@ -257,8 +379,8 @@ const handleIntakeTransaction = async (req, res, next) => {
             clrDensity: body.clrDensity ? Number(body.clrDensity) : undefined,
             identificationMethod: body.identificationMethod || 'MANUAL_SEARCH',
             deviceId: body.deviceId || 'KIOSK_MAIN',
-            operatorId: req.user?.userId || '00000000-0000-0000-0000-000000000003',
-            operatorName: 'Counter Operator',
+            operatorId,
+            operatorName: req.user?.fullName || 'Counter Operator',
             idempotencyKey: body.idempotencyKey || req.headers['idempotency-key'],
         });
         res.status(201).json({
@@ -279,6 +401,58 @@ const handleIntakeTransaction = async (req, res, next) => {
 };
 router.post('/transactions', authenticate, handleIntakeTransaction);
 router.post('/intake', authenticate, handleIntakeTransaction);
+// 4c. Bulk Offline Collection Synchronization Gateway (Prompt 4)
+const handleBulkSync = async (req, res, next) => {
+    try {
+        const orgId = req.user?.organizationId;
+        const operatorId = req.user?.userId;
+        if (!orgId || !operatorId) {
+            res.status(401).json({ success: false, error: 'Authenticated organization and operator context is required for bulk sync' });
+            return;
+        }
+        const requestedOrgId = req.headers['x-organization-id'] ||
+            req.headers['x-dairy-tenant-id'] ||
+            req.body?.organizationId;
+        if (requestedOrgId && requestedOrgId !== orgId) {
+            res.status(403).json({ success: false, error: 'Cross-tenant bulk sync blocked: Organization ID mismatch' });
+            return;
+        }
+        const operatorName = req.user?.fullName || 'Counter Operator';
+        const authenticatedDeviceId = req.user?.deviceId;
+        const requestId = req.headers['x-request-id'] || `req-${Date.now().toString(36)}`;
+        const { batchId, schemaVersion, deviceId, transactions } = req.body;
+        if (!Array.isArray(transactions)) {
+            res.status(400).json({ success: false, error: 'Invalid batch: transactions must be an array' });
+            return;
+        }
+        const result = await bulkCollectionSyncUseCase.execute({
+            organizationId: orgId,
+            operatorId,
+            operatorName,
+            authenticatedDeviceId,
+            requestId,
+            batch: {
+                batchId: batchId || `batch-${Date.now().toString(36)}`,
+                schemaVersion: schemaVersion || 1,
+                deviceId: deviceId || 'KIOSK_MAIN',
+                transactions,
+            },
+        });
+        res.status(200).json({
+            success: true,
+            ...result,
+        });
+    }
+    catch (err) {
+        if (err.statusCode === 413 || err.code === 'BATCH_SIZE_EXCEEDED') {
+            res.status(413).json({ success: false, error: err.message });
+            return;
+        }
+        next(err);
+    }
+};
+router.post('/sync/bulk', authenticate, handleBulkSync);
+router.post('/bulk', authenticate, handleBulkSync);
 // 4b. All Dairy-Scoped Transactions (Dairy Admin & Kiosk Register)
 const handleGetTransactions = async (req, res, next) => {
     try {

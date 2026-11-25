@@ -18,10 +18,18 @@ import type {
   FeedStockMovement,
   CustomerFeedSale,
   PaymentRecord,
+  PaymentOverviewMetrics,
+  SettlementCalculationPreview,
+  PaymentBatchRecord,
   CollectionDevice,
   StaffMember,
   AuditLogEntry,
   DairyNotification,
+  DairyAdminMetrics,
+  CenterLiveMetric,
+  LiveCollectionFeedItem,
+  SessionMonitoringItem,
+  StationMonitoringItem,
 } from '@/types'
 
 export const api = {
@@ -657,7 +665,7 @@ export const api = {
     },
   },
 
-  // Payments
+  // Payments & Settlements (Prompt 7)
   payments: {
     getAll: async (): Promise<PaymentRecord[]> => {
       try {
@@ -666,6 +674,115 @@ export const api = {
       } catch {
         return []
       }
+    },
+    getOverview: async (centerId?: string): Promise<PaymentOverviewMetrics> => {
+      const q = centerId ? `?centerId=${encodeURIComponent(centerId)}` : ''
+      const res = await apiRequest<{ success: boolean; data: PaymentOverviewMetrics }>(`/payments/overview${q}`)
+      return res.data || {
+        totalPayableAmount: 0,
+        totalPaidAmount: 0,
+        paidCount: 0,
+        pendingAmount: 0,
+        pendingCount: 0,
+        failedAmount: 0,
+        failedCount: 0,
+        unreconciledAmount: 0,
+        unreconciledCount: 0,
+      }
+    },
+    getSettlementPreview: async (
+      periodStart: string,
+      periodEnd: string,
+      centerId?: string,
+      excludeUnverified?: boolean
+    ): Promise<SettlementCalculationPreview> => {
+      const params = new URLSearchParams({ periodStart, periodEnd })
+      if (centerId) params.append('centerId', centerId)
+      if (excludeUnverified) params.append('excludeUnverifiedBankDetails', 'true')
+      const res = await apiRequest<{ success: boolean; data: SettlementCalculationPreview }>(
+        `/payments/settlement/preview?${params.toString()}`
+      )
+      return res.data
+    },
+    createBatch: async (params: {
+      billingPeriodStart?: string
+      billingPeriodEnd?: string
+      centerId?: string
+      customerIds?: string[]
+      paymentMethod?: string
+      idempotencyKey: string
+      excludeUnverifiedBankDetails?: boolean
+      debitAccountNumber?: string
+    }): Promise<{ batchId: string; batchNumber: string; status: string; totalAmount: number; totalBeneficiaries: number }> => {
+      const res = await apiRequest<{ success: boolean; data: any }>('/payments/batches', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      })
+      return res.data
+    },
+    getBatchById: async (batchId: string): Promise<PaymentBatchRecord> => {
+      const res = await apiRequest<{ success: boolean; data: PaymentBatchRecord }>(`/payments/batches/${batchId}`)
+      return res.data
+    },
+    submitForReview: async (batchId: string) => {
+      return apiRequest(`/payments/batches/${batchId}/review`, { method: 'POST' })
+    },
+    approveBatch: async (batchId: string) => {
+      return apiRequest(`/payments/batches/${batchId}/approve`, { method: 'POST' })
+    },
+    rejectBatch: async (batchId: string, reason: string) => {
+      return apiRequest(`/payments/batches/${batchId}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      })
+    },
+    exportBatch: async (batchId: string, format: string = 'UNION_BANK_BULK_NEFT_CSV') => {
+      const res = await apiRequest<{ success: boolean; data: any }>(`/payments/batches/${batchId}/export?format=${encodeURIComponent(format)}`)
+      return res.data
+    },
+    submitToUnionBank: async (
+      batchId: string,
+      submissionType: 'BULK_FILE_EXPORT' | 'HOST_TO_HOST_API' | 'CAPS_PORTAL_EXPORT',
+      fileFormat: string = 'UNION_BANK_BULK_NEFT_CSV',
+      debitAccountNumber?: string
+    ) => {
+      const res = await apiRequest<{ success: boolean; data: any }>(`/payments/batches/${batchId}/submit-union-bank`, {
+        method: 'POST',
+        body: JSON.stringify({ submissionType, fileFormat, debitAccountNumber }),
+      })
+      return res.data
+    },
+    reconcileWithUnionBank: async (batchId: string, responseData: any) => {
+      const res = await apiRequest<{ success: boolean; data: any }>(`/payments/batches/${batchId}/reconcile-union-bank`, {
+        method: 'POST',
+        body: JSON.stringify(responseData),
+      })
+      return res.data
+    },
+    queryItemStatus: async (itemId: string) => {
+      const res = await apiRequest<{ success: boolean; data: any }>(`/payments/items/${itemId}/status-inquiry`)
+      return res.data
+    },
+    updateBeneficiaryBank: async (
+      customerId: string,
+      bankData: {
+        bankName: string
+        bankAccountNumber: string
+        bankIfscCode: string
+        bankAccountHolderName: string
+        verificationStatus?: string
+        reason?: string
+      }
+    ) => {
+      const res = await apiRequest<{ success: boolean; data: any }>(`/payments/beneficiaries/${customerId}`, {
+        method: 'PUT',
+        body: JSON.stringify(bankData),
+      })
+      return res.data
+    },
+    getBeneficiaryHistory: async (customerId: string) => {
+      const res = await apiRequest<{ success: boolean; data: any[] }>(`/payments/beneficiaries/${customerId}/history`)
+      return res.data || []
     },
     recordPayment: async (
       params: {
@@ -712,6 +829,18 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ operatorName }),
       })
+    },
+  },
+
+  // Centers
+  centers: {
+    getAll: async (): Promise<{ id: string; code: string; name: string }[]> => {
+      try {
+        const res = await apiRequest<{ success: boolean; data: { id: string; code: string; name: string }[] }>('/staff/centers')
+        return Array.isArray(res.data) ? res.data : []
+      } catch {
+        return []
+      }
     },
   },
 
@@ -840,6 +969,74 @@ export const api = {
         return data?.data || data
       }
       throw new Error(data?.error || data?.message || 'Failed to activate Primary Dairy Admin account.')
+    },
+  },
+
+  // Dairy Admin Realtime Dashboard & Station Monitoring (Prompt 6)
+  dairyAdmin: {
+    getMetrics: async (params?: { centerId?: string; businessDate?: string }): Promise<DairyAdminMetrics> => {
+      const q = new URLSearchParams()
+      if (params?.centerId && params.centerId !== 'ALL') q.set('centerId', params.centerId)
+      if (params?.businessDate) q.set('businessDate', params.businessDate)
+      const qStr = q.toString() ? `?${q.toString()}` : ''
+      const res = await apiRequest<{ success: boolean; data: DairyAdminMetrics }>(`/dairy-admin/metrics${qStr}`)
+      return res.data
+    },
+
+    getCentersMetrics: async (params?: { centerId?: string; businessDate?: string }): Promise<CenterLiveMetric[]> => {
+      const q = new URLSearchParams()
+      if (params?.centerId && params.centerId !== 'ALL') q.set('centerId', params.centerId)
+      if (params?.businessDate) q.set('businessDate', params.businessDate)
+      const qStr = q.toString() ? `?${q.toString()}` : ''
+      const res = await apiRequest<{ success: boolean; data: CenterLiveMetric[] }>(`/dairy-admin/centers/metrics${qStr}`)
+      return Array.isArray(res.data) ? res.data : []
+    },
+
+    getCollectionsFeed: async (params?: { centerId?: string; limit?: number }): Promise<LiveCollectionFeedItem[]> => {
+      const q = new URLSearchParams()
+      if (params?.centerId && params.centerId !== 'ALL') q.set('centerId', params.centerId)
+      if (params?.limit) q.set('limit', String(params.limit))
+      const qStr = q.toString() ? `?${q.toString()}` : ''
+      const res = await apiRequest<{ success: boolean; data: LiveCollectionFeedItem[] }>(`/dairy-admin/collections/feed${qStr}`)
+      return Array.isArray(res.data) ? res.data : []
+    },
+
+    getSessions: async (params?: { centerId?: string; businessDate?: string }): Promise<SessionMonitoringItem[]> => {
+      const q = new URLSearchParams()
+      if (params?.centerId && params.centerId !== 'ALL') q.set('centerId', params.centerId)
+      if (params?.businessDate) q.set('businessDate', params.businessDate)
+      const qStr = q.toString() ? `?${q.toString()}` : ''
+      const res = await apiRequest<{ success: boolean; data: SessionMonitoringItem[] }>(`/dairy-admin/sessions${qStr}`)
+      return Array.isArray(res.data) ? res.data : []
+    },
+
+    getStations: async (centerId?: string): Promise<StationMonitoringItem[]> => {
+      const q = new URLSearchParams()
+      if (centerId && centerId !== 'ALL') q.set('centerId', centerId)
+      const qStr = q.toString() ? `?${q.toString()}` : ''
+      const res = await apiRequest<{ success: boolean; data: StationMonitoringItem[] }>(`/dairy-admin/stations${qStr}`)
+      return Array.isArray(res.data) ? res.data : []
+    },
+
+    blockStation: async (deviceId: string, reason?: string): Promise<{ success: boolean; message: string }> => {
+      return apiRequest(`/dairy-admin/stations/${encodeURIComponent(deviceId)}/block`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reason || 'Blocked by Dairy Admin' }),
+      })
+    },
+
+    unblockStation: async (deviceId: string): Promise<{ success: boolean; message: string }> => {
+      return apiRequest(`/dairy-admin/stations/${encodeURIComponent(deviceId)}/unblock`, {
+        method: 'POST',
+      })
+    },
+
+    getSseTicket: async (): Promise<{ ticket: string; expiresInSeconds: number }> => {
+      const res = await apiRequest<{ success: boolean; data: { ticket: string; expiresInSeconds: number } }>(
+        '/dairy-admin/events/ticket',
+        { method: 'POST' }
+      )
+      return res.data
     },
   },
 }

@@ -26,7 +26,17 @@ export function createApp() {
     }));
     app.use(requestContextMiddleware);
     if (process.env['NODE_ENV'] !== 'test') {
-        app.use(pinoHttp({ logger }));
+        app.use(pinoHttp({
+            logger,
+            serializers: {
+                req(req) {
+                    if (req.url && typeof req.url === 'string') {
+                        req.url = req.url.replace(/([?&](token|ticket|sseToken|accessToken|secret|key)=)[^&]+/gi, '$1[REDACTED]');
+                    }
+                    return req;
+                },
+            },
+        }));
     }
     // Root welcome route for browser & platform checks
     app.get('/', (_req, res) => {

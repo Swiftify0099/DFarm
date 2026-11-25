@@ -4,19 +4,27 @@ import { BadRequestError, NotFoundError, ForbiddenError } from '../../../shared/
 import { CredentialEncryption } from '../../../infrastructure/security/CredentialEncryption.js';
 import { StandardNeftSerializer } from './StandardNeftSerializer.js';
 import { SbiCmpBankAdapter } from './SbiCmpBankAdapter.js';
+import { UnionBankBulkNeftSerializer, UnionBankCapsSerializer } from './UnionBankFileSerializer.js';
 export class BankFileService {
     static serializers = new Map([
         ['NEFT_STANDARD', new StandardNeftSerializer()],
         ['NEFT', new StandardNeftSerializer()],
         ['SBI_CMP', new SbiCmpBankAdapter()],
+        ['UNION_BANK_BULK_NEFT_CSV', new UnionBankBulkNeftSerializer()],
+        ['UNION_BANK', new UnionBankBulkNeftSerializer()],
+        ['UBI_NEFT', new UnionBankBulkNeftSerializer()],
+        ['UBI', new UnionBankBulkNeftSerializer()],
+        ['UNION_BANK_CAPS_TXT', new UnionBankCapsSerializer()],
+        ['UBI_CAPS', new UnionBankCapsSerializer()],
+        ['CAPS', new UnionBankCapsSerializer()],
     ]);
     // In-memory cache for generated export files mapped by download token (15-minute TTL)
     static exportCache = new Map();
     static async exportBatch(batchId, format, auth) {
-        const normFormat = (format || 'NEFT_STANDARD').toUpperCase().trim();
+        const normFormat = (format || 'UNION_BANK_BULK_NEFT_CSV').toUpperCase().trim();
         const serializer = this.serializers.get(normFormat);
         if (!serializer) {
-            throw new BadRequestError(`Unsupported bank file format '${format}'. Supported formats: NEFT_STANDARD, SBI_CMP`, 'UNSUPPORTED_BANK_FORMAT');
+            throw new BadRequestError(`Unsupported bank file format '${format}'. Supported formats: UNION_BANK_BULK_NEFT_CSV, UNION_BANK_CAPS_TXT, NEFT_STANDARD, SBI_CMP`, 'UNSUPPORTED_BANK_FORMAT');
         }
         // 1. Fetch Payment Batch
         const batchRes = await query('SELECT * FROM payment_batches WHERE id = $1;', [batchId]);

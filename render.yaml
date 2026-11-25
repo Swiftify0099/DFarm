@@ -37,6 +37,10 @@ services:
         generateValue: true
       - key: TENANT_DB_ENCRYPTION_KEY
         generateValue: true
+      - key: OFFLINE_LEASE_SIGNING_KEY
+        generateValue: true
+      - key: OFFLINE_LEASE_ACTIVE_KEY_ID
+        value: "k1"
       # Admin Configuration
       - key: ADMIN_PHONE_NUMBER
         value: "+917755995615,7755995615"

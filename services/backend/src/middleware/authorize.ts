@@ -19,7 +19,8 @@ export function requireRole(allowedRoles: UserRole[]) {
       return next();
     }
 
-    if (!allowedRoles.includes(req.auth.role)) {
+    const effectiveRole = ((req.auth.role as any) === 'PRIMARY_DAIRY_ADMIN' ? UserRole.DAIRY_ADMIN : req.auth.role) as UserRole;
+    if (!allowedRoles.includes(req.auth.role) && !allowedRoles.includes(effectiveRole)) {
       return next(
         new ForbiddenError(
           `Actor with role '${req.auth.role}' is not authorized to perform this operation. Required: [${allowedRoles.join(', ')}]`,

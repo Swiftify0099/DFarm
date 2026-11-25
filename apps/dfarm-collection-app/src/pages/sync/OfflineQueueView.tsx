@@ -1,32 +1,62 @@
-import React, { useState, useEffect } from 'react'
-import type { OfflineQueueItem } from '@/types'
+import React, { useState, useEffect, useCallback } from 'react'
+import type { OfflineQueueItem, QueueSummary } from '@/types'
 import { localDB } from '@/services/local-storage'
 import { useHardware } from '@/context/HardwareContext'
-import { syncApi } from '@/api/client'
 import { ClayCard, ClayButton, ClayBadge, ClayTable } from '@/components/ui'
 import { SyncCloudVisual } from '@/assets/illustrations'
-import { RefreshCw, Wifi, WifiOff, CheckCircle2, Clock, Trash2, ArrowUpRight } from 'lucide-react'
+import {
+  RefreshCw,
+  Wifi,
+  WifiOff,
+  CheckCircle2,
+  Clock,
+  AlertTriangle,
+  XCircle,
+  ShieldAlert,
+  ServerCrash,
+} from 'lucide-react'
 
 export const OfflineQueueView: React.FC = () => {
-  const { isNetworkOnline, setNetworkOnline, refreshOfflineCount } = useHardware()
+  const {
+    isNetworkOnline,
+    setNetworkOnline,
+    refreshOfflineCount,
+    syncStatus,
+    networkStatus,
+    triggerSync,
+  } = useHardware()
+
   const [queueItems, setQueueItems] = useState<OfflineQueueItem[]>([])
+  const [queueSummary, setQueueSummary] = useState<QueueSummary>({
+    total: 0,
+    pending: 0,
+    syncing: 0,
+    synced: 0,
+    retryable: 0,
+    rejected: 0,
+    manualReview: 0,
+  })
   const [isLoading, setIsLoading] = useState(true)
   const [isSyncing, setIsSyncing] = useState(false)
   const [syncStatusNote, setSyncStatusNote] = useState<string | null>(null)
 
-  useEffect(() => {
-    loadQueue()
-  }, [])
-
-  const loadQueue = async () => {
+  const loadQueue = useCallback(async () => {
     setIsLoading(true)
     try {
-      const items = await localDB.getOfflineQueue()
+      const [items, summary] = await Promise.all([
+        localDB.getOfflineQueue(),
+        localDB.getQueueSummary(),
+      ])
       setQueueItems(items)
+      setQueueSummary(summary)
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    loadQueue()
+  }, [loadQueue, syncStatus.lastSyncedAt])
 
   const handleToggleNetwork = () => {
     setNetworkOnline(!isNetworkOnline)
@@ -42,64 +72,89 @@ export const OfflineQueueView: React.FC = () => {
     setSyncStatusNote(null)
 
     try {
-      const items = await localDB.getOfflineQueue()
-      if (items.length === 0) {
-        setSyncStatusNote('Offline queue is empty. Zero records pending sync.')
-        return
-      }
-
-      // Submit batch to authoritative server sync endpoint
-      const batchPayload = {
-        deviceId: 'KIOSK_MAIN',
-        transactions: items.map((item) => ({
-          clientIntakeUuid: item.transactionId || item.transaction.id,
-          sessionCode: item.transaction.sessionId,
-          customerId: item.transaction.customerId,
-          milkCategory: item.transaction.milkCategory as 'COW' | 'BUFFALO',
-          weightLiters: item.transaction.weightLiters,
-          fatPercentage: item.transaction.fatPercentage,
-          snfPercentage: item.transaction.snfPercentage,
-          clrDensity: item.transaction.clrDensity,
-          identificationMethod: (item.transaction.identificationMethod as any) || 'FACE_YUNET_SFACE',
-          idempotencyKey: `SYNC-${item.transactionId || item.transaction.id}`,
-        })),
-      }
-
-      const syncResult = await syncApi.pushBatch(batchPayload)
-
-      let flushedCount = 0
-      for (const resItem of syncResult.items) {
-        if (resItem.success) {
-          const matching = items.find(
-            (i) => (i.transactionId || i.transaction.id) === resItem.clientIntakeUuid
-          )
-          if (matching) {
-            await localDB.removeQueueItem(matching.eventId)
-            flushedCount++
-          }
-        }
-      }
-
+      await triggerSync()
       await loadQueue()
       await refreshOfflineCount()
       setSyncStatusNote(
-        `Sync completed: ${flushedCount} flushed successfully, ${syncResult.failed} failed/requires review.`
+        `Sync completed. Engine state: ${syncStatus.state}. Records synced in last batch: ${syncStatus.recordsSyncedLastRun}.`
       )
     } catch (err: any) {
-      alert(`Sync error: ${err.message || 'Unknown error'}`)
+      alert(`Sync error: ${err.message || 'Unknown sync error'}`)
     } finally {
       setIsSyncing(false)
     }
   }
 
+  const getStatusBadge = (item: OfflineQueueItem) => {
+    const st = (item.syncQueueStatus || item.status) as string
+    let variant: 'success' | 'warning' | 'danger' | 'info' | 'secondary' = 'warning'
+    let label: string = st
+
+    switch (st) {
+      case 'SYNCED':
+      case 'SYNCED_CLOUD':
+        variant = 'success'
+        label = 'SYNCED'
+        break
+      case 'SYNCING':
+        variant = 'info'
+        label = 'SYNCING'
+        break
+      case 'PENDING':
+      case 'QUEUED':
+        variant = 'warning'
+        label = 'PENDING'
+        break
+      case 'RETRYABLE':
+        variant = 'warning'
+        label = 'RETRYABLE'
+        break
+      case 'REJECTED':
+      case 'FAILED':
+        variant = 'danger'
+        label = 'REJECTED'
+        break
+      case 'MANUAL_REVIEW':
+        variant = 'danger'
+        label = 'REVIEW'
+        break
+      case 'AUTH_REQUIRED':
+        variant = 'danger'
+        label = 'AUTH REQUIRED'
+        break
+      case 'DEVICE_BLOCKED':
+        variant = 'danger'
+        label = 'BLOCKED'
+        break
+      default:
+        variant = 'secondary'
+    }
+
+    return (
+      <div className="flex flex-col items-start gap-0.5">
+        <ClayBadge variant={variant as any} size="sm">
+          {label}
+        </ClayBadge>
+        {item.errorCode && (
+          <span className="font-mono text-[9px] text-rose-700 font-semibold">
+            {item.errorCode}
+          </span>
+        )}
+      </div>
+    )
+  }
+
   const columns = [
     {
       key: 'eventId',
-      header: 'Event ID',
+      header: 'Event ID / UUID',
       render: (item: OfflineQueueItem) => (
-        <span className="font-mono text-xs font-semibold text-text-primary">
-          {item.eventId}
-        </span>
+        <div className="font-mono text-xs">
+          <span className="font-semibold text-text-primary block">{item.eventId}</span>
+          <span className="text-[10px] text-text-muted">
+            {(item.clientIntakeUuid || item.transactionId || '').substring(0, 16)}...
+          </span>
+        </div>
       ),
     },
     {
@@ -143,19 +198,28 @@ export const OfflineQueueView: React.FC = () => {
       key: 'retries',
       header: 'Retries',
       render: (item: OfflineQueueItem) => (
-        <span className="font-mono text-xs text-text-muted">{item.retryCount}</span>
+        <div className="font-mono text-xs">
+          <span className="text-text-primary font-semibold">{item.retryCount || 0}</span>
+          {(item.nextAttemptAt || item.nextRetryAt) && (
+            <span className="text-[9px] text-text-muted block">
+              Next: {new Date((item.nextAttemptAt || item.nextRetryAt)!).toLocaleTimeString([], { minute: '2-digit', second: '2-digit' })}
+            </span>
+          )}
+        </div>
       ),
     },
     {
       key: 'status',
       header: 'Queue Status',
+      render: (item: OfflineQueueItem) => getStatusBadge(item),
+    },
+    {
+      key: 'notes',
+      header: 'Diagnostic Reason',
       render: (item: OfflineQueueItem) => (
-        <ClayBadge
-          variant={item.status === 'QUEUED' ? 'warning' : 'success'}
-          size="sm"
-        >
-          {item.status}
-        </ClayBadge>
+        <span className="text-xs text-text-muted line-clamp-1 max-w-[200px]" title={item.errorReason || ''}>
+          {item.errorReason || (item.syncQueueStatus === 'SYNCED' ? 'Synchronized' : '—')}
+        </span>
       ),
     },
   ]
@@ -170,7 +234,7 @@ export const OfflineQueueView: React.FC = () => {
             <h2 className="text-xl font-bold text-text-primary">Offline Queue & Cloud Relay (F5)</h2>
           </div>
           <p className="text-xs text-text-muted mt-1">
-            Zero data loss buffer powered by local IndexedDB. All transactions are queued automatically when offline.
+            Zero data loss buffer powered by local IndexedDB. All transactions are queued automatically before network dispatch.
           </p>
         </div>
 
@@ -201,16 +265,18 @@ export const OfflineQueueView: React.FC = () => {
             variant="primary"
             size="sm"
             onClick={handleSyncNow}
-            disabled={isSyncing || queueItems.length === 0 || !isNetworkOnline}
+            disabled={isSyncing || syncStatus.state === 'SYNCING' || !isNetworkOnline}
             className="flex items-center space-x-1.5 text-xs"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Flushing Queue...' : 'Flush Queue Now'}</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing || syncStatus.state === 'SYNCING' ? 'animate-spin' : ''}`} />
+            <span>
+              {isSyncing || syncStatus.state === 'SYNCING' ? 'Flushing Queue...' : 'Flush Queue Now'}
+            </span>
           </ClayButton>
         </div>
       </div>
 
-      {/* Sync Success Banner */}
+      {/* Sync Success / Status Banner */}
       {syncStatusNote && (
         <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center space-x-2 text-emerald-800 text-xs">
           <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
@@ -218,49 +284,98 @@ export const OfflineQueueView: React.FC = () => {
         </div>
       )}
 
+      {/* Engine Error Alert if any */}
+      {syncStatus.lastErrorMessage && (
+        <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex items-center space-x-2 text-amber-900 text-xs">
+          <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+          <span className="font-semibold">
+            Sync Engine Notice: {syncStatus.lastErrorMessage}
+            {(syncStatus.currentBackoffSeconds ?? 0) > 0 && ` (Retry backoff: ${syncStatus.currentBackoffSeconds}s)`}
+          </span>
+        </div>
+      )}
+
       {/* Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+        {/* Pending & Retryable */}
         <ClayCard className="p-4 bg-cream flex items-center space-x-3">
           <div className="w-10 h-10 rounded-xl bg-peach flex items-center justify-center text-primary-orange">
             <Clock className="w-5 h-5" />
           </div>
           <div>
-            <span className="text-xs font-bold text-text-secondary uppercase">Pending Records</span>
+            <span className="text-xs font-bold text-text-secondary uppercase">Pending Queue</span>
             <p className="text-2xl font-mono font-bold text-text-primary mt-0.5">
-              {queueItems.length}
+              {queueSummary.pending + queueSummary.retryable}
             </p>
+            <span className="text-[10px] text-text-muted">
+              {queueSummary.pending} fresh • {queueSummary.retryable} retryable
+            </span>
           </div>
         </ClayCard>
 
+        {/* Sync Engine State */}
         <ClayCard className="p-4 bg-cream flex items-center space-x-3">
           <div className="w-10 h-10 rounded-xl bg-peach flex items-center justify-center text-primary-orange">
-            {isNetworkOnline ? (
+            <RefreshCw className={`w-5 h-5 ${syncStatus.state === 'SYNCING' ? 'animate-spin' : ''}`} />
+          </div>
+          <div>
+            <span className="text-xs font-bold text-text-secondary uppercase">Sync Engine</span>
+            <p className="text-sm font-bold text-text-primary mt-0.5">
+              {syncStatus.state}
+            </p>
+            <span className="text-[10px] text-text-muted">
+              {syncStatus.lastSyncedAt
+                ? `Last sync: ${new Date(syncStatus.lastSyncedAt).toLocaleTimeString()}`
+                : 'No sync completed yet'}
+            </span>
+          </div>
+        </ClayCard>
+
+        {/* Network Reachability State */}
+        <ClayCard className="p-4 bg-cream flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-xl bg-peach flex items-center justify-center text-primary-orange">
+            {networkStatus === 'ONLINE' ? (
               <Wifi className="w-5 h-5 text-emerald-600" />
             ) : (
               <WifiOff className="w-5 h-5 text-rose-600" />
             )}
           </div>
           <div>
-            <span className="text-xs font-bold text-text-secondary uppercase">Network Relay State</span>
+            <span className="text-xs font-bold text-text-secondary uppercase">Network State</span>
             <p
               className={`text-sm font-bold mt-0.5 ${
-                isNetworkOnline ? 'text-emerald-700' : 'text-rose-700'
+                networkStatus === 'ONLINE'
+                  ? 'text-emerald-700'
+                  : networkStatus === 'DEVICE_BLOCKED'
+                  ? 'text-rose-900'
+                  : 'text-rose-700'
               }`}
             >
-              {isNetworkOnline ? 'ONLINE (HTTPS Relay Active)' : 'OFFLINE (Local Queue Mode)'}
+              {networkStatus}
             </p>
+            <span className="text-[10px] text-text-muted">
+              {networkStatus === 'ONLINE' ? 'Backend authenticated' : 'Offline local queueing'}
+            </span>
           </div>
         </ClayCard>
 
+        {/* Rejection / Problem count */}
         <ClayCard className="p-4 bg-cream flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-peach flex items-center justify-center text-primary-orange">
-            <CheckCircle2 className="w-5 h-5 text-primary-orange" />
+          <div className="w-10 h-10 rounded-xl bg-peach flex items-center justify-center text-rose-600">
+            {queueSummary.rejected > 0 ? (
+              <XCircle className="w-5 h-5 text-rose-600" />
+            ) : (
+              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+            )}
           </div>
           <div>
-            <span className="text-xs font-bold text-text-secondary uppercase">Local Datastore</span>
-            <p className="text-xs font-mono font-semibold text-text-primary mt-0.5">
-              IndexedDB: dfarm_collection_local_db
+            <span className="text-xs font-bold text-text-secondary uppercase">Failed / Review</span>
+            <p className="text-2xl font-mono font-bold text-text-primary mt-0.5">
+              {queueSummary.rejected + queueSummary.manualReview}
             </p>
+            <span className="text-[10px] text-text-muted">
+              {queueSummary.rejected} rejected • {queueSummary.manualReview} review
+            </span>
           </div>
         </ClayCard>
       </div>
@@ -269,10 +384,10 @@ export const OfflineQueueView: React.FC = () => {
       <ClayCard className="p-4 bg-cream">
         <div className="flex items-center justify-between pb-3 mb-2 border-b border-border-subtle">
           <h3 className="text-sm font-bold text-text-primary uppercase tracking-wide">
-            IndexedDB Offline Buffer
+            IndexedDB Offline Operational Journal
           </h3>
           <span className="text-xs text-text-muted">
-            Monotonic monotonic queue • Idempotent sync
+            Monotonic queue • Idempotent sync gateway • Multi-tab protected
           </span>
         </div>
 

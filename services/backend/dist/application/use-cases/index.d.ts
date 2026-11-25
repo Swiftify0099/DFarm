@@ -3,6 +3,7 @@ export * from './auth/CustomerAuthUseCases.js';
 export * from './auth/AdminAuthUseCases.js';
 export * from './sessions/ShiftSessionUseCases.js';
 export * from './collections/MilkIntakeUseCases.js';
+export * from './collections/BulkCollectionSyncUseCase.js';
 export * from './customers/CustomerDirectoryUseCases.js';
 export * from './customers/GetCustomerMembershipsUseCase.js';
 export * from './customers/SelectDairyMembershipUseCase.js';

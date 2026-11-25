@@ -119,4 +119,49 @@ export interface OfflineAuthorizationPolicyDTO {
     approvedAt?: string | null;
     status: 'APPROVED' | 'MISSING_OWNER_APPROVAL' | 'REJECTED';
 }
+export interface RateSyncChartDTO {
+    chartId: string;
+    versionId: string;
+    versionNumber: number;
+    name: string;
+    milkCategory: 'COW' | 'BUFFALO';
+    pricingType: 'GRID' | 'TWO_AXIS_FORMULA' | 'TOTAL_SOLIDS_FORMULA' | 'FORMULA';
+    centerScope: CenterScope;
+    centerId: string | null;
+    effectiveFrom: string;
+    effectiveTo: string | null;
+    baseRate: number;
+    baseFat: number;
+    baseSnf: number;
+    fatFactor?: number;
+    snfFactor?: number;
+    fatMin?: number;
+    fatMax?: number;
+    snfMin?: number;
+    snfMax?: number;
+    formulaDefinition?: FormulaDefinition | null;
+    cells: Array<{
+        fat: number;
+        snf: number;
+        ratePerLiter: number;
+    }>;
+    gridMatrix: Record<string, Record<string, number>>;
+    cellCount: number;
+}
+export interface FormulaDefinition {
+    fatFactor: number;
+    snfFactor: number;
+    baseFat?: number;
+    baseSnf?: number;
+    baseRate?: number;
+    minRate?: number;
+    maxRate?: number;
+}
+export interface RateSyncResponseDTO {
+    organizationId: string;
+    centerId?: string | null;
+    scope?: CenterScope;
+    syncedAt: string;
+    charts: RateSyncChartDTO[];
+}
 //# sourceMappingURL=rates.d.ts.map

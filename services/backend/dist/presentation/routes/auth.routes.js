@@ -7,6 +7,7 @@ import { PostgresCustomerRepository } from '../../infrastructure/repositories/Po
 import { PostgresCustomerMembershipRepository } from '../../infrastructure/repositories/PostgresCustomerMembershipRepository.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { db } from '../../infrastructure/database/PostgresPool.js';
+import { deviceChallengeService } from '../../infrastructure/security/DeviceChallengeService.js';
 const router = Router();
 const otpService = doveOtpService;
 const tokenService = new HmacJwtTokenService();
@@ -36,8 +37,39 @@ const otpVerifyLimiter = rateLimit({
     legacyHeaders: false,
 });
 // ============================================================================
-// 1. Operator OTP (Collection App Kiosk)
+// 0. Lightweight Auth Health Check
 // ============================================================================
+router.get('/health', (_req, res) => {
+    res.status(200).json({ success: true, status: 'healthy', timestamp: new Date().toISOString() });
+});
+// ============================================================================
+// 1. Operator OTP & Device Challenge (Collection App Kiosk)
+// ============================================================================
+router.post('/device/challenge', otpRequestLimiter, async (req, res, next) => {
+    try {
+        const { deviceIdentifier } = req.body;
+        if (!deviceIdentifier || !deviceIdentifier.trim()) {
+            res.status(400).json({ success: false, error: 'deviceIdentifier is required to generate challenge' });
+            return;
+        }
+        const cleanDeviceId = deviceIdentifier.trim();
+        const devRes = await db.query(`SELECT id, organization_id, status FROM devices WHERE device_identifier = $1;`, [cleanDeviceId]);
+        if (devRes.rows.length === 0) {
+            res.status(404).json({ success: false, error: `Station '${cleanDeviceId}' is not registered` });
+            return;
+        }
+        const dev = devRes.rows[0];
+        if (dev.status !== 'ACTIVE') {
+            res.status(403).json({ success: false, error: `Station '${cleanDeviceId}' status is ${dev.status}. Challenge generation denied.` });
+            return;
+        }
+        const challenge = await deviceChallengeService.createChallenge(cleanDeviceId, dev.organization_id);
+        res.json({ success: true, ...challenge });
+    }
+    catch (err) {
+        next(err);
+    }
+});
 router.post('/operator/otp/request', otpRequestLimiter, async (req, res, next) => {
     try {
         const { mobileNumber, phone } = req.body;
@@ -50,8 +82,15 @@ router.post('/operator/otp/request', otpRequestLimiter, async (req, res, next) =
 });
 router.post('/operator/otp/verify', otpVerifyLimiter, async (req, res, next) => {
     try {
-        const { mobileNumber, phone, otp } = req.body;
-        const result = await verifyOperatorOtp.execute(mobileNumber || phone, otp);
+        const { mobileNumber, phone, otp, deviceIdentifier, deviceId, deviceToken, deviceProof, challenge, } = req.body;
+        const headerToken = req.headers['x-device-token'] ||
+            req.headers['x-device-credential'];
+        const activeToken = deviceToken || headerToken;
+        const result = await verifyOperatorOtp.execute(mobileNumber || phone, otp, deviceIdentifier || deviceId, {
+            deviceToken: activeToken,
+            challenge,
+            deviceProof,
+        });
         res.json({ success: true, ...result });
     }
     catch (err) {

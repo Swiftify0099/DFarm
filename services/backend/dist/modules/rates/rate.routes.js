@@ -3,6 +3,7 @@
 // MILK RATE MANAGEMENT & PRICING ROUTES (PHASE 11)
 // ==============================================================================
 import { Router } from 'express';
+import crypto from 'crypto';
 import { RateService } from './rate.service.js';
 import { authenticate } from '../../middleware/authenticate.js';
 import { requireRole } from '../../middleware/authorize.js';
@@ -34,6 +35,174 @@ rateRouter.get('/active', async (req, res, next) => {
         next(err);
     }
 });
+// 1b. GET & POST /api/v1/rates/sync - Complete Authoritative Rate Matrix Delivery (Prompt 4 & 5.2.1)
+export const handleRateSync = async (req, res, next) => {
+    try {
+        const userOrgId = req.auth?.organizationId || req.user?.organizationId;
+        if (!userOrgId) {
+            res.status(401).json({ success: false, error: 'Authenticated organization context is required' });
+            return;
+        }
+        const requestedOrgId = req.headers['x-dairy-tenant-id'] ||
+            req.headers['x-organization-id'] ||
+            req.body?.organizationId ||
+            req.body?.dairyId ||
+            req.query['organizationId'] ||
+            req.query['dairyId'];
+        if (requestedOrgId && requestedOrgId.trim().toLowerCase() !== userOrgId.trim().toLowerCase()) {
+            res.status(403).json({ success: false, error: 'Cross-tenant rate access forbidden: Organization ID mismatch' });
+            return;
+        }
+        const rawScope = (req.body?.scope ||
+            req.query['scope'] ||
+            req.headers['x-rate-scope']);
+        if (!rawScope || typeof rawScope !== 'string' || !rawScope.trim()) {
+            res.status(400).json({
+                success: false,
+                error: 'Explicit rate scope ("ORGANIZATION_WIDE" | "CENTER_SPECIFIC") is required. Missing centerId never implies organization-wide.',
+            });
+            return;
+        }
+        const scope = rawScope.trim();
+        if (scope !== 'ORGANIZATION_WIDE' && scope !== 'CENTER_SPECIFIC') {
+            res.status(400).json({
+                success: false,
+                error: 'Invalid rate scope: must be "ORGANIZATION_WIDE" or "CENTER_SPECIFIC"',
+            });
+            return;
+        }
+        const explicitCenterId = (req.body?.centerId ||
+            req.query['centerId'] ||
+            req.headers['x-center-id'] ||
+            '').trim();
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (scope === 'ORGANIZATION_WIDE') {
+            if (explicitCenterId.length > 0) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Contradictory scope: centerId cannot be provided for ORGANIZATION_WIDE rate scope',
+                });
+                return;
+            }
+        }
+        else if (scope === 'CENTER_SPECIFIC') {
+            if (!explicitCenterId) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Missing centerId: centerId is required for CENTER_SPECIFIC rate scope',
+                });
+                return;
+            }
+            if (!uuidRegex.test(explicitCenterId)) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Invalid centerId UUID format',
+                });
+                return;
+            }
+        }
+        const callerRole = req.auth?.role || req.user?.role;
+        const isOrgWideCaller = callerRole === UserRole.SUPER_ADMIN ||
+            callerRole === UserRole.DAIRY_OWNER ||
+            callerRole === UserRole.DAIRY_ADMIN ||
+            callerRole === 'PRIMARY_DAIRY_ADMIN';
+        const callerCenterIds = [
+            ...(Array.isArray(req.auth?.centerIds) ? req.auth.centerIds : []),
+            ...(req.auth?.primaryCenterId ? [req.auth.primaryCenterId] : []),
+            ...(req.auth?.centerId ? [req.auth.centerId] : []),
+            ...(req.user?.centerId ? [req.user.centerId] : []),
+            ...(Array.isArray(req.auth?.assignedCenters) ? req.auth.assignedCenters : []),
+        ]
+            .filter(Boolean)
+            .map((c) => c.trim().toLowerCase());
+        if (scope === 'CENTER_SPECIFIC' && !isOrgWideCaller) {
+            if (!callerCenterIds.includes(explicitCenterId.toLowerCase())) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Cross-centre rate access forbidden: caller is not assigned to requested centerId',
+                });
+                return;
+            }
+        }
+        const organizationId = userOrgId;
+        const targetCenterId = scope === 'CENTER_SPECIFIC' ? explicitCenterId : null;
+        const businessDate = req.body?.businessDate || req.query['businessDate'] || undefined;
+        const payload = await RateService.getSyncRateCharts(organizationId, targetCenterId, businessDate, scope);
+        // Strict ambiguous metadata verification
+        for (const chart of payload.charts) {
+            if (scope === 'ORGANIZATION_WIDE') {
+                if (chart.centerScope !== 'ORGANIZATION_WIDE' || chart.centerId !== null) {
+                    res.status(500).json({
+                        success: false,
+                        error: 'Ambiguous chart metadata: server returned center-specific chart for ORGANIZATION_WIDE scope',
+                    });
+                    return;
+                }
+            }
+            else if (scope === 'CENTER_SPECIFIC') {
+                if (chart.centerScope !== 'CENTER_SPECIFIC' ||
+                    !chart.centerId ||
+                    chart.centerId.toLowerCase() !== explicitCenterId.toLowerCase()) {
+                    res.status(500).json({
+                        success: false,
+                        error: 'Ambiguous chart metadata: server returned mismatched center chart for CENTER_SPECIFIC scope',
+                    });
+                    return;
+                }
+            }
+        }
+        // Cryptographic SHA-256 ETag over tenant, center, scope, metadata, formula factors, and grid cells
+        const hashInput = JSON.stringify({
+            organizationId,
+            centerId: payload.centerId,
+            scope,
+            charts: payload.charts.map((c) => ({
+                chartId: c.chartId,
+                versionId: c.versionId,
+                versionNumber: c.versionNumber,
+                centerScope: c.centerScope,
+                centerId: c.centerId,
+                pricingType: c.pricingType,
+                effectiveFrom: c.effectiveFrom,
+                effectiveTo: c.effectiveTo,
+                baseRate: c.baseRate,
+                baseFat: c.baseFat,
+                baseSnf: c.baseSnf,
+                fatFactor: c.fatFactor,
+                snfFactor: c.snfFactor,
+                fatMin: c.fatMin,
+                fatMax: c.fatMax,
+                snfMin: c.snfMin,
+                snfMax: c.snfMax,
+                cells: c.cells,
+            })),
+        });
+        const digest = crypto.createHash('sha256').update(hashInput).digest('hex').slice(0, 32);
+        const etag = `"${digest}"`;
+        res.setHeader('ETag', etag);
+        res.setHeader('Cache-Control', 'private, no-cache, must-revalidate');
+        const ifNoneMatchRaw = req.headers['if-none-match'];
+        if (ifNoneMatchRaw) {
+            const tags = String(ifNoneMatchRaw)
+                .split(',')
+                .map((t) => t.trim())
+                .filter(Boolean);
+            if (tags.includes('*') || tags.includes(etag) || tags.includes(`W/${etag}`)) {
+                res.status(304).end();
+                return;
+            }
+        }
+        res.json({
+            success: true,
+            data: payload,
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+rateRouter.get('/sync', handleRateSync);
+rateRouter.post('/sync', handleRateSync);
 // 2. POST /api/v1/rates/calculate - Authoritative backend calculation
 rateRouter.post('/calculate', validateRequest({ body: RateCalculationRequestSchema }), async (req, res, next) => {
     try {

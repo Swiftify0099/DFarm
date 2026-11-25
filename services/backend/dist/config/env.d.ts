@@ -36,6 +36,10 @@ declare const envSchema: z.ZodObject<{
         prefer: "prefer";
     }>>;
     JWT_SECRET: z.ZodDefault<z.ZodString>;
+    OFFLINE_LEASE_SIGNING_KEY: z.ZodOptional<z.ZodString>;
+    OFFLINE_LEASE_ACTIVE_KEY_ID: z.ZodDefault<z.ZodString>;
+    OFFLINE_LEASE_PREVIOUS_KEYS: z.ZodOptional<z.ZodString>;
+    OFFLINE_LEASE_RETIRED_KEYS: z.ZodOptional<z.ZodString>;
     WHATSAPP_ENABLED: z.ZodDefault<z.ZodCoercedBoolean<unknown>>;
     WHATSAPP_API_URL: z.ZodDefault<z.ZodString>;
     WHATSAPP_ACCESS_TOKEN: z.ZodOptional<z.ZodString>;
@@ -68,6 +72,7 @@ declare const envSchema: z.ZodObject<{
     PUBLIC_ACTIVATION_URL: z.ZodDefault<z.ZodString>;
 }, z.core.$strip>;
 export type EnvConfig = z.infer<typeof envSchema>;
+export declare function validateKeyEntropyAndByteLength(key: string, keyName?: string): void;
 export declare function loadEnv(customEnv?: Record<string, string | undefined>): EnvConfig;
 export declare const config: EnvConfig;
 export {};

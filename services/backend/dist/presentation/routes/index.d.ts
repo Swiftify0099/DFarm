@@ -18,4 +18,5 @@ export * from './audit.routes.js';
 export * from './notifications.routes.js';
 export * from './super-admin.routes.js';
 export * from './reports.routes.js';
+export * from './dairy-admin.routes.js';
 //# sourceMappingURL=index.d.ts.map

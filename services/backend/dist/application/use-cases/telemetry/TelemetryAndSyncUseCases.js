@@ -60,6 +60,7 @@ export class ProcessOfflineSyncBatchUseCase {
         for (const item of batch.transactions) {
             try {
                 const dto = {
+                    organizationId: item.organizationId || batch.organizationId || '',
                     sessionCode: item.sessionCode,
                     customerId: item.customerId,
                     milkCategory: item.milkCategory || item.milkType || 'COW',

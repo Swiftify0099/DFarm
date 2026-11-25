@@ -12,4 +12,5 @@ export * from './billing.js';
 export * from './rates.js';
 export * from './notification.js';
 export * from './employee.js';
+export * from './rounding.js';
 

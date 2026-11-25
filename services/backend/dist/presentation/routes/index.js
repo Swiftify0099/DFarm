@@ -26,9 +26,11 @@ import { inventoryRouter } from '../../modules/feed/inventory.routes.js';
 import { employeeRouter } from '../../modules/employees/employee.routes.js';
 import { attendanceRouter } from '../../modules/employees/attendance.routes.js';
 import { payrollRouter } from '../../modules/employees/payroll.routes.js';
+import { dairyAdminRoutes } from './dairy-admin.routes.js';
 import { whatsappWebhookRouter } from '../../modules/notifications/routes/whatsapp-webhook.routes.js';
 export const cleanApiRouter = Router();
 cleanApiRouter.use('/auth', authRoutes);
+cleanApiRouter.use('/dairy-admin', dairyAdminRoutes);
 cleanApiRouter.use('/collections', collectionRoutes);
 cleanApiRouter.use('/collection', collectionRoutes); // Aliased for Customer App contract (/api/v1/collection/history)
 cleanApiRouter.use('/customers', customerRoutes);
@@ -76,4 +78,5 @@ export * from './audit.routes.js';
 export * from './notifications.routes.js';
 export * from './super-admin.routes.js';
 export * from './reports.routes.js';
+export * from './dairy-admin.routes.js';
 //# sourceMappingURL=index.js.map

@@ -1,14 +1,18 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api'
 import { useAuth } from '@/context/AuthContext'
 import { useNavigate } from 'react-router-dom'
+import { useDairyAdminRealtimeEvents } from '@/hooks/useDairyAdminRealtimeEvents'
 import {
   ClayCard,
   ClayStatCard,
   ClayButton,
   ClayBadge,
   ClayAlert,
+  ClaySelect,
+  ClayTable,
+  Column,
 } from '@/components/ui'
 import {
   MilkCanVisual,
@@ -23,349 +27,695 @@ import {
   Clock,
   ArrowRight,
   TrendingUp,
-  AlertCircle,
+  AlertTriangle,
   FileText,
   DollarSign,
   Package,
+  Activity,
+  Radio,
+  RefreshCw,
+  Building,
+  CheckCircle2,
+  XCircle,
+  HelpCircle,
+  ShieldAlert,
 } from 'lucide-react'
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
-  LineChart,
-  Line,
-} from 'recharts'
+import type {
+  DairyAdminMetrics,
+  CenterLiveMetric,
+  LiveCollectionFeedItem,
+  SessionMonitoringItem,
+} from '@/types'
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate()
   const { user } = useAuth()
 
-  const { data: summary, isLoading } = useQuery({
+  const [selectedCenterId, setSelectedCenterId] = useState<string>('ALL')
+  const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().split('T')[0])
+
+  // Realtime SSE event subscription with automatic cache invalidation
+  const {
+    connectionState,
+    isLive,
+    lastEvent,
+    lastEventTime,
+  } = useDairyAdminRealtimeEvents({
+    centerId: selectedCenterId,
+    enabled: Boolean(user?.dairyId),
+  })
+
+  // Centers list for filtering
+  const { data: centers = [] } = useQuery({
+    queryKey: ['dairyCenters', user?.dairyId],
+    queryFn: () => api.staff.getCenters(),
+    staleTime: 60000,
+  })
+
+  // 1. Authoritative Overview Metrics
+  const {
+    data: metrics,
+    isLoading: isMetricsLoading,
+    isError: isMetricsError,
+    refetch: refetchMetrics,
+    dataUpdatedAt,
+  } = useQuery({
+    queryKey: ['dairyAdminMetrics', user?.dairyId, selectedCenterId, selectedDate],
+    queryFn: () =>
+      api.dairyAdmin.getMetrics({
+        centerId: selectedCenterId,
+        businessDate: selectedDate,
+      }),
+    refetchInterval: isLive ? false : 15000,
+  })
+
+  // 2. Centre-Wise Live Metrics
+  const {
+    data: centerMetrics = [],
+    isLoading: isCentersLoading,
+  } = useQuery({
+    queryKey: ['dairyAdminCentersMetrics', user?.dairyId, selectedCenterId, selectedDate],
+    queryFn: () =>
+      api.dairyAdmin.getCentersMetrics({
+        centerId: selectedCenterId,
+        businessDate: selectedDate,
+      }),
+    refetchInterval: isLive ? false : 15000,
+  })
+
+  // 3. Live Collection Activity Feed
+  const {
+    data: collectionsFeed = [],
+    isLoading: isFeedLoading,
+  } = useQuery({
+    queryKey: ['dairyAdminCollectionsFeed', user?.dairyId, selectedCenterId],
+    queryFn: () =>
+      api.dairyAdmin.getCollectionsFeed({
+        centerId: selectedCenterId,
+        limit: 15,
+      }),
+    refetchInterval: isLive ? false : 15000,
+  })
+
+  // 4. Session Monitoring
+  const {
+    data: sessions = [],
+    isLoading: isSessionsLoading,
+  } = useQuery({
+    queryKey: ['dairyAdminSessions', user?.dairyId, selectedCenterId, selectedDate],
+    queryFn: () =>
+      api.dairyAdmin.getSessions({
+        centerId: selectedCenterId,
+        businessDate: selectedDate,
+      }),
+    refetchInterval: isLive ? false : 15000,
+  })
+
+  // General dashboard summary (for pending approvals, customer counts)
+  const { data: generalSummary } = useQuery({
     queryKey: ['dashboardSummary', user?.dairyId],
     queryFn: () => api.dashboard.getSummary(),
     refetchInterval: 30000,
   })
 
-  // Real weekly collection volume data derived from backend summary
-  const hasCollection = (summary?.todayCollection?.totalLiters || 0) > 0
-  const collectionTrendsData = [
-    { day: 'Mon', cow: 0, buffalo: 0, total: 0 },
-    { day: 'Tue', cow: 0, buffalo: 0, total: 0 },
-    { day: 'Wed', cow: 0, buffalo: 0, total: 0 },
-    { day: 'Thu', cow: 0, buffalo: 0, total: 0 },
-    { day: 'Fri', cow: 0, buffalo: 0, total: 0 },
-    { day: 'Sat', cow: 0, buffalo: 0, total: 0 },
+  const centerOptions = [
+    { label: 'All Centers (Organization Wide)', value: 'ALL' },
+    ...centers.map((c) => ({ label: `${c.name} (${c.code})`, value: c.id })),
+  ]
+
+  // Columns for Live Collection Activity Feed
+  const feedColumns: Column<LiveCollectionFeedItem>[] = [
     {
-      day: 'Today',
-      cow: summary?.todayCollection?.cowLiters || 0,
-      buffalo: summary?.todayCollection?.buffaloLiters || 0,
-      total: summary?.todayCollection?.totalLiters || 0,
+      key: 'collectionReference',
+      header: 'Reference',
+      render: (r) => (
+        <div>
+          <span className="font-mono font-bold text-xs text-[#211B18]">{r.collectionReference}</span>
+          <p className="text-[10px] text-[#817A75] font-medium">{r.centerName}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'collectedAt',
+      header: 'Time',
+      render: (r) => (
+        <span className="text-xs font-semibold text-[#817A75]">
+          {new Date(r.collectedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        </span>
+      ),
+    },
+    {
+      key: 'farmer',
+      header: 'Farmer',
+      render: (r) => (
+        <div>
+          <span className="text-xs font-bold text-[#211B18]">{r.maskedFarmerName}</span>
+          <p className="text-[10px] text-[#817A75] font-mono">{r.farmerCode}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'milkCategory',
+      header: 'Milk',
+      render: (r) => (
+        <ClayBadge variant={r.milkCategory === 'COW' ? 'cow' : 'buffalo'} className="text-[10px]">
+          {r.milkCategory}
+        </ClayBadge>
+      ),
+    },
+    {
+      key: 'quantityLiters',
+      header: 'Volume',
+      render: (r) => (
+        <span className="text-xs font-bold text-[#211B18]">
+          {Number(r.quantityLiters).toFixed(1)} <span className="text-[10px] font-normal text-[#817A75]">L</span>
+        </span>
+      ),
+    },
+    {
+      key: 'quality',
+      header: 'Fat / SNF',
+      render: (r) => (
+        <span className="text-xs font-mono font-medium text-[#211B18]">
+          {r.fatPercentage.toFixed(1)}% / {r.snfPercentage.toFixed(1)}%
+        </span>
+      ),
+    },
+    {
+      key: 'ratePerLiter',
+      header: 'Rate',
+      render: (r) => (
+        <span className="text-xs font-mono font-medium text-[#211B18]">
+          ₹{r.ratePerLiter.toFixed(2)}
+        </span>
+      ),
+    },
+    {
+      key: 'totalAmount',
+      header: 'Total Value',
+      render: (r) => (
+        <span className="text-xs font-bold text-emerald-800">
+          ₹{r.totalAmount.toFixed(2)}
+        </span>
+      ),
+    },
+    {
+      key: 'financialStatus',
+      header: 'Financial Status',
+      render: (r) => {
+        if (r.financialStatus === 'COMPLETED') {
+          return <ClayBadge variant="approved" className="text-[10px]">VERIFIED</ClayBadge>
+        }
+        if (r.financialStatus === 'MANUAL_REVIEW') {
+          return <ClayBadge variant="warning" className="text-[10px]">MANUAL REVIEW</ClayBadge>
+        }
+        return <ClayBadge variant="rejected" className="text-[10px]">REJECTED</ClayBadge>
+      },
+    },
+    {
+      key: 'syncStatus',
+      header: 'Sync',
+      render: (r) => (
+        <span
+          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+            r.syncStatus === 'SYNCED_CLOUD'
+              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+              : 'bg-amber-50 text-amber-700 border border-amber-200'
+          }`}
+        >
+          {r.syncStatus === 'SYNCED_CLOUD' ? 'CLOUD SYNCED' : 'LOCAL ONLY'}
+        </span>
+      ),
     },
   ]
 
-  // Fat & SNF distribution trends from actual analyzer readings
-  const qualityTrendData: Array<{ time: string; fat: number; snf: number }> = []
-
-  if (isLoading || !summary) {
-    return (
-      <div className="p-12 flex flex-col items-center justify-center text-[#817A75]">
-        <div className="w-10 h-10 border-4 border-[#FF6A00] border-t-transparent rounded-full animate-spin mb-3" />
-        <p className="text-sm font-semibold">Loading real-time dairy operational metrics...</p>
-      </div>
-    )
-  }
+  // Columns for Session Monitoring
+  const sessionColumns: Column<SessionMonitoringItem>[] = [
+    {
+      key: 'session',
+      header: 'Session',
+      render: (r) => (
+        <div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-bold text-[#211B18]">{r.shift} SHIFT</span>
+            <ClayBadge variant={r.status === 'OPEN' ? 'active' : 'inactive'} className="text-[10px]">
+              {r.status}
+            </ClayBadge>
+          </div>
+          <p className="text-[10px] text-[#817A75] font-mono mt-0.5">{r.sessionId.slice(0, 18)}...</p>
+        </div>
+      ),
+    },
+    {
+      key: 'center',
+      header: 'Center & Device',
+      render: (r) => (
+        <div>
+          <span className="text-xs font-semibold text-[#211B18]">{r.centerName}</span>
+          <p className="text-[10px] text-[#817A75] font-mono">{r.deviceName}</p>
+        </div>
+      ),
+    },
+    {
+      key: 'timings',
+      header: 'Timings',
+      render: (r) => (
+        <div className="text-xs text-[#817A75]">
+          <p>
+            <span className="font-semibold text-[#211B18]">Opened:</span>{' '}
+            {new Date(r.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </p>
+          {r.closedAt ? (
+            <p>
+              <span className="font-semibold text-[#211B18]">Closed:</span>{' '}
+              {new Date(r.closedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </p>
+          ) : (
+            <p className="text-emerald-700 font-semibold">In Progress</p>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'collections',
+      header: 'Intake Summary',
+      render: (r) => (
+        <div className="text-xs">
+          <p className="font-bold text-[#211B18]">
+            {Number(r.totalLiters).toFixed(1)} L{' '}
+            <span className="text-[10px] font-normal text-[#817A75]">({r.totalTransactions} txns)</span>
+          </p>
+          <p className="text-[10px] text-[#817A75]">
+            Cow: {Number(r.cowLiters).toFixed(1)}L • Buf: {Number(r.buffaloLiters).toFixed(1)}L
+          </p>
+        </div>
+      ),
+    },
+    {
+      key: 'totalAmount',
+      header: 'Session Value',
+      render: (r) => (
+        <span className="text-xs font-bold text-[#211B18]">
+          ₹{Number(r.totalAmount).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+        </span>
+      ),
+    },
+    {
+      key: 'operator',
+      header: 'Operator',
+      render: (r) => (
+        <span className="text-xs font-medium text-[#211B18]">
+          {r.operatorName || 'Assigned Operator'}
+        </span>
+      ),
+    },
+  ]
 
   return (
     <div className="space-y-6 text-left">
-      {/* Top Banner: Dairy Profile & Quick Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 bg-gradient-to-r from-white via-[#FFF5EE] to-[#FFE9DC]/50 rounded-2xl border border-[#F1E7E0] shadow-xs">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl font-black text-[#211B18] tracking-tight">
-              {summary.dairyProfile.name}
-            </h1>
-            <ClayBadge variant="cow" className="text-xs">
-              {summary.dairyProfile.code}
-            </ClayBadge>
+      {/* Top Banner: Dairy Profile, Realtime SSE Status, Filters & Quick Actions */}
+      <div className="flex flex-col gap-4 p-6 bg-gradient-to-r from-white via-[#FFF5EE] to-[#FFE9DC]/50 rounded-2xl border border-[#F1E7E0] shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-2xl font-black text-[#211B18] tracking-tight">
+                {user?.dairyName || 'Dairy Cooperative'}
+              </h1>
+              <ClayBadge variant="cow" className="text-xs">
+                {user?.dairyCode || 'DAIRY'}
+              </ClayBadge>
+
+              {/* Realtime Event Stream Status Pill */}
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border shadow-xs bg-white">
+                {isLive ? (
+                  <>
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </span>
+                    <span className="text-emerald-700">LIVE SSE STREAM</span>
+                  </>
+                ) : connectionState === 'CONNECTING' ? (
+                  <>
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500 animate-pulse"></span>
+                    </span>
+                    <span className="text-amber-700">CONNECTING...</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="h-2 w-2 rounded-full bg-stone-400"></span>
+                    <span className="text-stone-600">POLLING (15s FALLBACK)</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <p className="text-xs text-[#817A75] mt-1 font-medium">
+              Primary Financial Authority: <span className="font-bold text-[#211B18]">PostgreSQL</span> • Tenant ID:{' '}
+              <span className="font-mono text-[#211B18]">{user?.dairyId}</span>
+              {dataUpdatedAt ? (
+                <> • Last refreshed: {new Date(dataUpdatedAt).toLocaleTimeString()}</>
+              ) : null}
+            </p>
           </div>
-          <p className="text-xs text-[#817A75] mt-1 font-medium">
-            Tenant Isolated Management Node • Tier:{' '}
-            <span className="font-bold text-[#211B18]">{summary.dairyProfile.subscription}</span>
-          </p>
-        </div>
 
-        <div className="flex items-center gap-2.5">
-          <ClayButton
-            variant="secondary"
-            size="sm"
-            onClick={() => navigate('/collection/sessions')}
-            leftIcon={<Clock size={16} />}
-          >
-            Live Sessions
-          </ClayButton>
-          <ClayButton
-            variant="primary"
-            size="sm"
-            onClick={() => navigate('/customers/approvals')}
-            leftIcon={<Users size={16} />}
-          >
-            Review Registrations ({summary.customers.pendingApprovals})
-          </ClayButton>
-        </div>
-      </div>
-
-      {/* Pending Approvals Alert Banner (if pending) */}
-      {summary.customers.pendingApprovals > 0 && (
-        <ClayAlert
-          type="warning"
-          title="Customer Registrations Pending Review"
-          message={`There are ${summary.customers.pendingApprovals} customer registration requests awaiting your verification of biometric and bank details.`}
-          action={
+          {/* Quick Action Navigation Buttons */}
+          <div className="flex flex-wrap items-center gap-2">
+            <ClayButton
+              variant="secondary"
+              size="sm"
+              onClick={() => refetchMetrics()}
+              leftIcon={<RefreshCw size={14} />}
+            >
+              Refresh
+            </ClayButton>
+            <ClayButton
+              variant="secondary"
+              size="sm"
+              onClick={() => navigate('/collection/sessions')}
+              leftIcon={<Clock size={16} />}
+            >
+              Sessions
+            </ClayButton>
+            <ClayButton
+              variant="secondary"
+              size="sm"
+              onClick={() => navigate('/devices')}
+              leftIcon={<IotMachineVisual size={16} />}
+            >
+              Station Health
+            </ClayButton>
             <ClayButton
               variant="primary"
               size="sm"
               onClick={() => navigate('/customers/approvals')}
-              rightIcon={<ArrowRight size={14} />}
+              leftIcon={<Users size={16} />}
             >
-              Review Now
+              Approvals ({generalSummary?.customers?.pendingApprovals || 0})
             </ClayButton>
-          }
+          </div>
+        </div>
+
+        {/* Filter Strip: Center & Business Date */}
+        <div className="flex flex-col sm:flex-row items-center gap-3 pt-3 border-t border-[#F1E7E0]">
+          <div className="w-full sm:w-72">
+            <ClaySelect
+              options={centerOptions}
+              value={selectedCenterId}
+              onChange={(e) => setSelectedCenterId(e.target.value)}
+            />
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-xs font-semibold text-[#817A75] shrink-0">Business Date:</span>
+            <input
+              type="date"
+              className="clay-input text-xs py-1.5 px-3"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+            />
+          </div>
+
+          {selectedCenterId !== 'ALL' && (
+            <button
+              onClick={() => setSelectedCenterId('ALL')}
+              className="text-xs font-bold text-[#FF6A00] hover:underline cursor-pointer ml-auto"
+            >
+              Clear Center Filter
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Error state */}
+      {isMetricsError && (
+        <ClayAlert
+          type="danger"
+          title="Failed to Load Authoritative Metrics"
+          message="Could not retrieve real-time metrics from PostgreSQL. Fallback polling will retry automatically."
         />
       )}
 
-      {/* Primary Operational Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <ClayStatCard
-          title="Today's Milk Collection"
-          value={summary.todayCollection.totalLiters.toFixed(1)}
-          unit="Liters"
-          subtitle={`${summary.todayCollection.transactionCount} transactions recorded`}
-          trend={{ value: '+4.2%', isPositive: true, label: 'vs yesterday' }}
-          icon={<MilkCanVisual size={24} />}
-          iconBgColor="bg-[#FFE9DC]"
-          onClick={() => navigate('/collection/register')}
-        />
-
-        <ClayStatCard
-          title="Today's Collection Value"
-          value={`₹${summary.todayCollection.totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
-          subtitle="Accredited to customer ledgers"
-          icon={<DollarSign className="text-[#FF6A00]" size={22} />}
-          iconBgColor="bg-[#FFF5EE]"
-          onClick={() => navigate('/ledger')}
-        />
-
-        <ClayStatCard
-          title="Pending Customer Approvals"
-          value={summary.customers.pendingApprovals}
-          subtitle="Awaiting admin verification"
-          icon={<FaceBiometricVisual size={24} />}
-          iconBgColor="bg-amber-100"
-          onClick={() => navigate('/customers/approvals')}
-        />
-
-        <ClayStatCard
-          title="Active Collection Devices"
-          value={`${summary.systemStatus.connectedDevicesCount} Online`}
-          subtitle={
-            summary.systemStatus.offlineDevicesCount > 0
-              ? `${summary.systemStatus.offlineDevicesCount} hardware offline`
-              : 'All machines connected'
-          }
-          icon={<IotMachineVisual size={24} />}
-          iconBgColor="bg-emerald-100"
-          onClick={() => navigate('/devices')}
-        />
-      </div>
-
-      {/* Milk Breakdown & Secondary Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <ClayCard className="flex items-center gap-3.5 !p-4">
-          <div className="w-12 h-12 rounded-xl bg-[#FFF5EE] border border-[#FFE9DC] flex items-center justify-center shrink-0">
-            <CowVisual size={28} />
+      {/* ======================================================================== */}
+      {/* SECTION A: OVERVIEW METRICS (POSTGRESQL-AUTHORITATIVE)                  */}
+      {/* ======================================================================== */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Activity size={18} className="text-[#FF6A00]" />
+            <h2 className="text-base font-bold text-[#211B18]">Operational Overview Metrics</h2>
           </div>
-          <div>
-            <p className="text-[11px] font-bold text-[#817A75] uppercase">Cow Milk Today</p>
-            <h4 className="text-xl font-black text-[#211B18] mt-0.5">
-              {summary.todayCollection.cowLiters.toFixed(1)} <span className="text-xs font-semibold text-[#817A75]">L</span>
-            </h4>
-            <p className="text-[11px] text-[#817A75]">Avg Fat: 4.1% • SNF: 8.6%</p>
-          </div>
-        </ClayCard>
+          <span className="text-[11px] text-[#817A75] font-medium">
+            PostgreSQL Real-Time Aggregates
+          </span>
+        </div>
 
-        <ClayCard className="flex items-center gap-3.5 !p-4">
-          <div className="w-12 h-12 rounded-xl bg-[#F1E7E0] border border-[#E5D8CF] flex items-center justify-center shrink-0">
-            <BuffaloVisual size={28} />
-          </div>
-          <div>
-            <p className="text-[11px] font-bold text-[#817A75] uppercase">Buffalo Milk Today</p>
-            <h4 className="text-xl font-black text-[#211B18] mt-0.5">
-              {summary.todayCollection.buffaloLiters.toFixed(1)} <span className="text-xs font-semibold text-[#817A75]">L</span>
-            </h4>
-            <p className="text-[11px] text-[#817A75]">Avg Fat: 7.1% • SNF: 9.0%</p>
-          </div>
-        </ClayCard>
+        {/* Primary Operational Metric Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <ClayStatCard
+            title="Today's Milk Collection"
+            value={Number(metrics?.totalMilkLiters || 0).toFixed(1)}
+            unit="Liters"
+            subtitle={`${metrics?.transactionCount || 0} verified collections`}
+            icon={<MilkCanVisual size={24} />}
+            iconBgColor="bg-[#FFE9DC]"
+            onClick={() => navigate('/collection/register')}
+          />
 
-        <ClayCard className="flex items-center gap-3.5 !p-4">
-          <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center shrink-0">
-            <LedgerShieldVisual size={28} />
-          </div>
-          <div>
-            <p className="text-[11px] font-bold text-[#817A75] uppercase">Pending Farmer Balances</p>
-            <h4 className="text-xl font-black text-[#211B18] mt-0.5">
-              ₹{summary.finance.pendingCustomerBalances.toLocaleString('en-IN')}
-            </h4>
-            <p className="text-[11px] text-blue-700 font-semibold">Fortnightly Cycle Ready</p>
-          </div>
-        </ClayCard>
+          <ClayStatCard
+            title="Today's Collection Value"
+            value={`₹${Number(metrics?.totalAmount || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+            subtitle="Accredited to farmer ledgers"
+            icon={<DollarSign className="text-[#FF6A00]" size={22} />}
+            iconBgColor="bg-[#FFF5EE]"
+            onClick={() => navigate('/ledger')}
+          />
 
-        <ClayCard className="flex items-center gap-3.5 !p-4">
-          <div className="w-12 h-12 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center shrink-0">
-            <Package className="text-[#FF6A00]" size={24} />
-          </div>
-          <div>
-            <p className="text-[11px] font-bold text-[#817A75] uppercase">Feed Inventory Status</p>
-            <h4 className="text-xl font-black text-[#211B18] mt-0.5">
-              {summary.inventory.totalProducts} Products
-            </h4>
-            <p className="text-[11px] text-amber-700 font-semibold">
-              {summary.inventory.lowStockItemCount} low stock alerts
-            </p>
-          </div>
-        </ClayCard>
-      </div>
+          <ClayStatCard
+            title="Active Collection Sessions"
+            value={`${metrics?.activeSessionsCount || 0} Open`}
+            subtitle={`${centerMetrics.length} total operational centers`}
+            icon={<Clock className="text-[#FF6A00]" size={22} />}
+            iconBgColor="bg-amber-100"
+            onClick={() => navigate('/collection/sessions')}
+          />
 
-      {/* Visual Charts: Milk Volume & Quality Distributions */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Weekly Collection Volume Chart */}
-        <ClayCard className="lg:col-span-2">
-          <div className="flex items-center justify-between pb-4 border-b border-[#F1E7E0] mb-4">
-            <div>
-              <h3 className="text-base font-bold text-[#211B18]">7-Day Milk Collection Volume</h3>
-              <p className="text-xs text-[#817A75] mt-0.5">Daily Cow vs. Buffalo Liters breakdown</p>
+          <ClayStatCard
+            title="Station Health Telemetry"
+            value={`${metrics?.onlineStationsCount || 0} Online`}
+            subtitle={
+              metrics?.degradedStationsCount || metrics?.offlineStationsCount || metrics?.blockedStationsCount
+                ? `${metrics?.degradedStationsCount || 0} degraded • ${metrics?.offlineStationsCount || 0} offline • ${metrics?.blockedStationsCount || 0} blocked`
+                : 'All collection stations operational'
+            }
+            icon={<IotMachineVisual size={24} />}
+            iconBgColor="bg-emerald-100"
+            onClick={() => navigate('/devices')}
+          />
+        </div>
+
+        {/* Secondary Operational Status Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+          <ClayCard className="flex items-center gap-3.5 !p-4">
+            <div className="w-12 h-12 rounded-xl bg-[#FFF5EE] border border-[#FFE9DC] flex items-center justify-center shrink-0">
+              <CowVisual size={28} />
             </div>
-            <ClayButton variant="ghost" size="sm" onClick={() => navigate('/reports')}>
-              View Report
-            </ClayButton>
-          </div>
-
-          <div className="h-72 w-full">
-            {hasCollection ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={collectionTrendsData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1E7E0" />
-                  <XAxis dataKey="day" tick={{ fill: '#817A75', fontSize: 12 }} axisLine={{ stroke: '#F1E7E0' }} />
-                  <YAxis tick={{ fill: '#817A75', fontSize: 12 }} axisLine={{ stroke: '#F1E7E0' }} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#FFFFFF',
-                      borderColor: '#F1E7E0',
-                      borderRadius: '0.75rem',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-                    }}
-                  />
-                  <Legend iconType="circle" />
-                  <Bar dataKey="cow" name="Cow Milk (L)" fill="#FF6A00" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="buffalo" name="Buffalo Milk (L)" fill="#817A75" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-[#817A75] text-xs">
-                <MilkCanVisual size={32} className="mb-2 opacity-40" />
-                <p className="font-semibold text-sm text-[#211B18]">No milk collection transactions yet today.</p>
-                <p className="text-[11px] mt-0.5">Transactions recorded at collection centers will stream here live.</p>
-              </div>
-            )}
-          </div>
-        </ClayCard>
-
-        {/* Quality Analytics Trends */}
-        <ClayCard>
-          <div className="flex items-center justify-between pb-4 border-b border-[#F1E7E0] mb-4">
             <div>
-              <h3 className="text-base font-bold text-[#211B18]">Quality Parameters</h3>
-              <p className="text-xs text-[#817A75] mt-0.5">Average Fat & SNF today</p>
+              <p className="text-[11px] font-bold text-[#817A75] uppercase">Cow Milk Intake</p>
+              <h4 className="text-xl font-black text-[#211B18] mt-0.5">
+                {Number(metrics?.cowLiters || 0).toFixed(1)} <span className="text-xs font-semibold text-[#817A75]">L</span>
+              </h4>
+              <p className="text-[11px] text-[#817A75]">Authoritative backend total</p>
             </div>
-            <ClayButton variant="ghost" size="sm" onClick={() => navigate('/quality/analytics')}>
-              Details
-            </ClayButton>
-          </div>
+          </ClayCard>
 
-          <div className="h-72 w-full">
-            {qualityTrendData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={qualityTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1E7E0" />
-                  <XAxis dataKey="time" tick={{ fill: '#817A75', fontSize: 11 }} />
-                  <YAxis domain={[3.5, 9.5]} tick={{ fill: '#817A75', fontSize: 11 }} />
-                  <Tooltip />
-                  <Legend iconType="circle" />
-                  <Line
-                    type="monotone"
-                    dataKey="fat"
-                    name="Fat %"
-                    stroke="#FF6A00"
-                    strokeWidth={2.5}
-                    dot={{ r: 3 }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="snf"
-                    name="SNF %"
-                    stroke="#10B981"
-                    strokeWidth={2.5}
-                    dot={{ r: 3 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-[#817A75] text-xs">
-                <p className="font-semibold text-sm text-[#211B18]">No quality analyzer readings today.</p>
-                <p className="text-[11px] mt-0.5">Fat and SNF test results will appear upon collection intake.</p>
-              </div>
-            )}
+          <ClayCard className="flex items-center gap-3.5 !p-4">
+            <div className="w-12 h-12 rounded-xl bg-[#F1E7E0] border border-[#E5D8CF] flex items-center justify-center shrink-0">
+              <BuffaloVisual size={28} />
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-[#817A75] uppercase">Buffalo Milk Intake</p>
+              <h4 className="text-xl font-black text-[#211B18] mt-0.5">
+                {Number(metrics?.buffaloLiters || 0).toFixed(1)} <span className="text-xs font-semibold text-[#817A75]">L</span>
+              </h4>
+              <p className="text-[11px] text-[#817A75]">Authoritative backend total</p>
+            </div>
+          </ClayCard>
+
+          <ClayCard className="flex items-center gap-3.5 !p-4">
+            <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center shrink-0">
+              <Radio size={24} className="text-blue-700" />
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-[#817A75] uppercase">Pending Sync Telemetry</p>
+              <h4 className="text-xl font-black text-[#211B18] mt-0.5">
+                {metrics?.pendingSyncCount || 0} <span className="text-xs font-semibold text-[#817A75]">Items</span>
+              </h4>
+              <p className="text-[11px] text-blue-700 font-semibold">Station-reported offline queue</p>
+            </div>
+          </ClayCard>
+
+          <ClayCard className="flex items-center gap-3.5 !p-4">
+            <div className="w-12 h-12 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center shrink-0">
+              <ShieldAlert size={24} className="text-[#FF6A00]" />
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-[#817A75] uppercase">Operational Exceptions</p>
+              <h4 className="text-xl font-black text-[#211B18] mt-0.5">
+                {(metrics?.manualReviewCount || 0) + (metrics?.rejectedCount || 0)}
+              </h4>
+              <p className="text-[11px] text-amber-700 font-semibold">
+                {metrics?.manualReviewCount || 0} review • {metrics?.rejectedCount || 0} rejected
+              </p>
+            </div>
+          </ClayCard>
+        </div>
+      </div>
+
+      {/* ======================================================================== */}
+      {/* SECTION B: CENTRE-WISE LIVE OVERVIEW                                    */}
+      {/* ======================================================================== */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Building size={18} className="text-[#FF6A00]" />
+            <h2 className="text-base font-bold text-[#211B18]">Centre-Wise Live Overview</h2>
           </div>
+          <span className="text-[11px] text-[#817A75] font-medium">
+            {centerMetrics.length} Authorized Centers
+          </span>
+        </div>
+
+        {centerMetrics.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {centerMetrics.map((center) => (
+              <ClayCard key={center.centerId} className="space-y-3">
+                <div className="flex items-center justify-between border-b border-[#F1E7E0] pb-2">
+                  <div>
+                    <h3 className="font-bold text-sm text-[#211B18]">{center.centerName}</h3>
+                    <p className="text-[10px] text-[#817A75] font-mono">{center.centerCode}</p>
+                  </div>
+                  <ClayBadge
+                    variant={center.status === 'OPEN' ? 'active' : 'inactive'}
+                    className="text-[10px]"
+                  >
+                    {center.status}
+                  </ClayBadge>
+                </div>
+
+                {/* Active Session Info */}
+                <div className="text-xs space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-[#817A75]">Active Session:</span>
+                    <span className="font-bold text-[#211B18]">
+                      {center.activeSession
+                        ? `${center.activeSession.shift} (${center.activeSession.operatorName})`
+                        : 'No Active Session'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#817A75]">Today's Intake:</span>
+                    <span className="font-bold text-[#211B18]">
+                      {Number(center.totalLiters).toFixed(1)} L ({center.totalCollections} txns)
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#817A75]">Total Value:</span>
+                    <span className="font-bold text-emerald-800">
+                      ₹{Number(center.totalAmount).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[#817A75]">Latest Collection:</span>
+                    <span className="font-mono text-[11px] text-[#211B18]">
+                      {center.latestCollectionTime
+                        ? new Date(center.latestCollectionTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : 'None today'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Station Telemetry Badges */}
+                <div className="pt-2 border-t border-[#F1E7E0] flex flex-wrap items-center justify-between gap-1 text-[10px]">
+                  <span className="text-emerald-700 font-semibold">
+                    {center.activeStationsCount} stations online
+                  </span>
+                  {center.offlineStationsCount > 0 && (
+                    <span className="text-stone-600 font-semibold">
+                      {center.offlineStationsCount} offline
+                    </span>
+                  )}
+                  {center.pendingSyncCount > 0 && (
+                    <span className="text-amber-700 font-bold">
+                      {center.pendingSyncCount} pending sync
+                    </span>
+                  )}
+                  {center.manualReviewCount > 0 && (
+                    <span className="text-red-700 font-bold">
+                      {center.manualReviewCount} review
+                    </span>
+                  )}
+                </div>
+              </ClayCard>
+            ))}
+          </div>
+        ) : (
+          <ClayCard className="p-8 text-center text-[#817A75] text-xs">
+            <Building size={32} className="mx-auto mb-2 opacity-40" />
+            <p className="font-semibold text-sm text-[#211B18]">No centers registered or matching filters.</p>
+          </ClayCard>
+        )}
+      </div>
+
+      {/* ======================================================================== */}
+      {/* SECTION C: LIVE COLLECTION ACTIVITY FEED                                */}
+      {/* ======================================================================== */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Activity size={18} className="text-[#FF6A00]" />
+            <h2 className="text-base font-bold text-[#211B18]">Live Collection Activity Feed</h2>
+          </div>
+          <span className="text-[11px] text-[#817A75] font-medium">
+            Recent verified transactions • PII Redacted
+          </span>
+        </div>
+
+        <ClayCard className="!p-0 overflow-hidden">
+          <ClayTable
+            columns={feedColumns}
+            data={collectionsFeed}
+            keyExtractor={(item) => item.id}
+            isLoading={isFeedLoading}
+            emptyMessage="No verified collections recorded yet today."
+          />
         </ClayCard>
       </div>
 
-      {/* Operational Fast Links */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-        <button
-          onClick={() => navigate('/customers/directory')}
-          className="p-4 rounded-xl bg-white border border-[#F1E7E0] hover:border-[#FFE9DC] hover:shadow-xs transition-all flex flex-col items-center justify-center text-center gap-2 cursor-pointer"
-        >
-          <Users size={20} className="text-[#FF6A00]" />
-          <span className="text-xs font-bold text-[#211B18]">Customer Directory</span>
-        </button>
+      {/* ======================================================================== */}
+      {/* SECTION D: SESSION MONITORING                                           */}
+      {/* ======================================================================== */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Clock size={18} className="text-[#FF6A00]" />
+            <h2 className="text-base font-bold text-[#211B18]">Session Monitoring</h2>
+          </div>
+          <span className="text-[11px] text-[#817A75] font-medium">
+            Shift sessions for {selectedDate}
+          </span>
+        </div>
 
-        <button
-          onClick={() => navigate('/rate-charts')}
-          className="p-4 rounded-xl bg-white border border-[#F1E7E0] hover:border-[#FFE9DC] hover:shadow-xs transition-all flex flex-col items-center justify-center text-center gap-2 cursor-pointer"
-        >
-          <TrendingUp size={20} className="text-[#FF6A00]" />
-          <span className="text-xs font-bold text-[#211B18]">Rate Charts</span>
-        </button>
-
-        <button
-          onClick={() => navigate('/billing')}
-          className="p-4 rounded-xl bg-white border border-[#F1E7E0] hover:border-[#FFE9DC] hover:shadow-xs transition-all flex flex-col items-center justify-center text-center gap-2 cursor-pointer"
-        >
-          <FileText size={20} className="text-[#FF6A00]" />
-          <span className="text-xs font-bold text-[#211B18]">Fortnightly Settlement</span>
-        </button>
-
-        <button
-          onClick={() => navigate('/reports')}
-          className="p-4 rounded-xl bg-white border border-[#F1E7E0] hover:border-[#FFE9DC] hover:shadow-xs transition-all flex flex-col items-center justify-center text-center gap-2 cursor-pointer"
-        >
-          <MilkCanVisual size={20} />
-          <span className="text-xs font-bold text-[#211B18]">17 Business Reports</span>
-        </button>
+        <ClayCard className="!p-0 overflow-hidden">
+          <ClayTable
+            columns={sessionColumns}
+            data={sessions}
+            keyExtractor={(item) => item.sessionId}
+            isLoading={isSessionsLoading}
+            emptyMessage="No collection sessions recorded for this date."
+          />
+        </ClayCard>
       </div>
     </div>
   )

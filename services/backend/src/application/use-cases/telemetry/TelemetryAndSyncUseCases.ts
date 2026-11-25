@@ -61,10 +61,12 @@ export class ProcessOfflineSyncBatchUseCase {
     deviceId: string;
     operatorId: string;
     operatorName: string;
+    organizationId?: string;
     transactions: Array<{
       clientIntakeUuid: string;
       sessionCode?: string;
       customerId: string;
+      organizationId?: string;
       milkCategory: 'COW' | 'BUFFALO';
       weightLiters: number;
       fatPercentage: number;
@@ -86,6 +88,7 @@ export class ProcessOfflineSyncBatchUseCase {
     for (const item of batch.transactions) {
       try {
         const dto: ProcessMilkIntakeDTO = {
+          organizationId: item.organizationId || batch.organizationId || '',
           sessionCode: item.sessionCode,
           customerId: item.customerId,
           milkCategory: (item as any).milkCategory || (item as any).milkType || 'COW',

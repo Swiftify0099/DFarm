@@ -5,6 +5,7 @@ import {
   CloseShiftSessionUseCase,
   ReopenShiftSessionUseCase,
   ProcessMilkIntakeUseCase,
+  BulkCollectionSyncUseCase,
   GetCustomerCollectionHistoryUseCase,
   GetMonthlyMilkSummaryUseCase,
 } from '../../application/use-cases/index.js';
@@ -18,6 +19,8 @@ import {
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
+import { offlineSessionAuthService } from '../../infrastructure/security/OfflineSessionAuthorizationService.js';
+import { realtimePublisher } from '../../infrastructure/realtime/RealtimeEventPublisher.js';
 
 const router = Router();
 const customerRepo = new PostgresCustomerRepository();
@@ -36,6 +39,11 @@ const processMilkIntakeUseCase = new ProcessMilkIntakeUseCase(
   transactionRepo,
   rateChartRepo,
   ledgerRepo
+);
+const bulkCollectionSyncUseCase = new BulkCollectionSyncUseCase(
+  customerRepo,
+  sessionRepo,
+  transactionRepo
 );
 const getHistoryUseCase = new GetCustomerCollectionHistoryUseCase(transactionRepo);
 const getSummaryUseCase = new GetMonthlyMilkSummaryUseCase(transactionRepo);
@@ -145,12 +153,15 @@ router.get('/sessions/active', optionalAuthenticate, async (req: Request, res: R
       '00000000-0000-0000-0000-000000000003';
     const deviceId = (req.query['deviceId'] as string) || (req.headers['x-device-id'] as string) || 'KIOSK_MAIN';
 
+    const timezone = (req.headers['x-timezone'] as string) || (req.query['timezone'] as string) || undefined;
+
     const session = await getActiveSessionUseCase.execute({
       centerId,
       organizationId,
       operatorId,
       operatorName: req.user?.fullName || 'Counter Operator',
       deviceIdentifier: deviceId,
+      timezone,
     });
 
     if (req.user?.organizationId && session.organizationId !== req.user.organizationId) {
@@ -161,9 +172,49 @@ router.get('/sessions/active', optionalAuthenticate, async (req: Request, res: R
       return;
     }
 
+    const sessionData = session.toJSON();
+    if (session.isOpen) {
+      const offlineAuth = offlineSessionAuthService.generateAuthorization({
+        organizationId: session.organizationId,
+        centerId: session.centerId,
+        sessionId: session.id,
+        sessionCode: session.sessionCode,
+        businessDate: session.businessDate,
+        shift: session.shift,
+        deviceIdentifier: session.deviceIdentifier,
+        operatorId: session.openingOperatorId || operatorId,
+        operatorName: session.openingOperatorName,
+        timezone: session.timezone,
+        validFrom: session.openedAt,
+      });
+      (sessionData as any).offlineAuthorization = offlineAuth;
+    }
+
+    try {
+      realtimePublisher.broadcast({
+        eventId: `EVT-SESS-OPEN-${session.id}`,
+        eventType: 'SESSION_OPENED',
+        schemaVersion: 1,
+        organizationId: session.organizationId,
+        centerId: session.centerId,
+        entityId: session.id,
+        aggregateVersion: 1,
+        occurredAt: session.openedAt,
+        publishedAt: new Date().toISOString(),
+        payload: {
+          sessionId: session.id,
+          sessionCode: session.sessionCode,
+          shift: session.shift,
+          businessDate: session.businessDate,
+          operatorName: session.openingOperatorName,
+          deviceIdentifier: session.deviceIdentifier,
+        },
+      });
+    } catch {}
+
     res.json({
       success: true,
-      data: session.toJSON(),
+      data: sessionData,
     });
   } catch (err) {
     next(err);
@@ -178,7 +229,7 @@ const handleOpenSession = async (req: Request, res: Response, next: NextFunction
     const operatorId = req.user?.userId || '00000000-0000-0000-0000-000000000003';
     const deviceId = (req.body?.deviceId as string) || 'KIOSK_MAIN';
     const shift = req.body?.shift || 'MORNING';
-    const businessDate = req.body?.businessDate || new Date().toISOString().split('T')[0];
+    const timezone = (req.headers['x-timezone'] as string) || (req.body?.timezone as string) || undefined;
 
     const session = await openSessionUseCase.execute({
       centerId,
@@ -186,14 +237,55 @@ const handleOpenSession = async (req: Request, res: Response, next: NextFunction
       operatorId,
       operatorName: req.body?.operatorName || req.user?.fullName || 'Counter Operator',
       shift,
-      businessDate,
+      businessDate: req.body?.businessDate,
       deviceIdentifier: deviceId,
+      timezone,
     });
+
+    const sessionData = session.toJSON();
+    if (session.isOpen) {
+      const offlineAuth = offlineSessionAuthService.generateAuthorization({
+        organizationId: session.organizationId,
+        centerId: session.centerId,
+        sessionId: session.id,
+        sessionCode: session.sessionCode,
+        businessDate: session.businessDate,
+        shift: session.shift,
+        deviceIdentifier: session.deviceIdentifier,
+        operatorId: session.openingOperatorId || operatorId,
+        operatorName: session.openingOperatorName,
+        timezone: session.timezone,
+        validFrom: session.openedAt,
+      });
+      (sessionData as any).offlineAuthorization = offlineAuth;
+    }
+
+    try {
+      realtimePublisher.broadcast({
+        eventId: `EVT-SESS-OPEN-${session.id}`,
+        eventType: 'SESSION_OPENED',
+        schemaVersion: 1,
+        organizationId: session.organizationId,
+        centerId: session.centerId,
+        entityId: session.id,
+        aggregateVersion: 1,
+        occurredAt: session.openedAt,
+        publishedAt: new Date().toISOString(),
+        payload: {
+          sessionId: session.id,
+          sessionCode: session.sessionCode,
+          shift: session.shift,
+          businessDate: session.businessDate,
+          operatorName: session.openingOperatorName,
+          deviceIdentifier: session.deviceIdentifier,
+        },
+      });
+    } catch {}
 
     res.status(201).json({
       success: true,
       message: `Shift session ${session.sessionCode} opened successfully.`,
-      data: session.toJSON(),
+      data: sessionData,
     });
   } catch (err) {
     next(err);
@@ -213,6 +305,29 @@ const handleCloseSession = async (req: Request, res: Response, next: NextFunctio
       operatorId,
       operatorName: req.body?.operatorName || req.user?.fullName || 'Counter Operator',
     });
+
+    try {
+      realtimePublisher.broadcast({
+        eventId: `EVT-SESS-CLOSE-${session.id}`,
+        eventType: 'SESSION_CLOSED',
+        schemaVersion: 1,
+        organizationId: session.organizationId,
+        centerId: session.centerId,
+        entityId: session.id,
+        aggregateVersion: 1,
+        occurredAt: session.closedAt || new Date().toISOString(),
+        publishedAt: new Date().toISOString(),
+        payload: {
+          sessionId: session.id,
+          sessionCode: session.sessionCode,
+          shift: session.shift,
+          businessDate: session.businessDate,
+          totalLiters: session.totals.totalLiters,
+          transactionCount: session.totals.transactionCount,
+          totalAmount: session.totals.totalAmount,
+        },
+      });
+    } catch {}
 
     res.json({
       success: true,
@@ -279,6 +394,24 @@ const handleIntakeTransaction = async (req: Request, res: Response, next: NextFu
       return;
     }
 
+    const operatorId = req.user?.userId;
+    if (!operatorId) {
+      res.status(401).json({ success: false, error: 'Authenticated operator ID is required' });
+      return;
+    }
+
+    const bodyOrgId = (req.body?.organizationId as string) || (req.headers['x-organization-id'] as string) || (req.headers['x-dairy-tenant-id'] as string);
+    if (bodyOrgId && req.user?.organizationId && bodyOrgId !== req.user.organizationId) {
+      res.status(403).json({ success: false, error: 'Cross-dairy collection blocked: Organization mismatch' });
+      return;
+    }
+
+    const resolvedOrgId = orgId || customer.organizationId;
+    if (!resolvedOrgId) {
+      res.status(400).json({ success: false, error: 'Authenticated organization context is required for milk collection' });
+      return;
+    }
+
     // Strict multi-dairy isolation: verify customer belongs to operator's dairy
     if (req.user?.organizationId && customer.organizationId !== req.user.organizationId) {
       res.status(403).json({
@@ -289,7 +422,7 @@ const handleIntakeTransaction = async (req: Request, res: Response, next: NextFu
     }
 
     const result = await processMilkIntakeUseCase.execute({
-      organizationId: orgId,
+      organizationId: resolvedOrgId,
       sessionId: body.sessionId,
       sessionCode: body.sessionCode,
       customerId: customer.id,
@@ -300,8 +433,8 @@ const handleIntakeTransaction = async (req: Request, res: Response, next: NextFu
       clrDensity: body.clrDensity ? Number(body.clrDensity) : undefined,
       identificationMethod: body.identificationMethod || 'MANUAL_SEARCH',
       deviceId: body.deviceId || 'KIOSK_MAIN',
-      operatorId: req.user?.userId || '00000000-0000-0000-0000-000000000003',
-      operatorName: 'Counter Operator',
+      operatorId,
+      operatorName: req.user?.fullName || 'Counter Operator',
       idempotencyKey: body.idempotencyKey || (req.headers['idempotency-key'] as string),
     });
 
@@ -322,6 +455,66 @@ const handleIntakeTransaction = async (req: Request, res: Response, next: NextFu
 };
 router.post('/transactions', authenticate, handleIntakeTransaction);
 router.post('/intake', authenticate, handleIntakeTransaction);
+
+// 4c. Bulk Offline Collection Synchronization Gateway (Prompt 4)
+const handleBulkSync = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const orgId = req.user?.organizationId;
+    const operatorId = req.user?.userId;
+    if (!orgId || !operatorId) {
+      res.status(401).json({ success: false, error: 'Authenticated organization and operator context is required for bulk sync' });
+      return;
+    }
+
+    const requestedOrgId =
+      (req.headers['x-organization-id'] as string) ||
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.body?.organizationId as string);
+    if (requestedOrgId && requestedOrgId !== orgId) {
+      res.status(403).json({ success: false, error: 'Cross-tenant bulk sync blocked: Organization ID mismatch' });
+      return;
+    }
+
+    const operatorName = req.user?.fullName || 'Counter Operator';
+    const authenticatedDeviceId = req.user?.deviceId;
+    const requestId = (req.headers['x-request-id'] as string) || `req-${Date.now().toString(36)}`;
+
+    const { batchId, schemaVersion, deviceId, transactions } = req.body;
+
+    if (!Array.isArray(transactions)) {
+      res.status(400).json({ success: false, error: 'Invalid batch: transactions must be an array' });
+      return;
+    }
+
+    const result = await bulkCollectionSyncUseCase.execute({
+      organizationId: orgId,
+      operatorId,
+      operatorName,
+      authenticatedDeviceId,
+      requestId,
+      batch: {
+        batchId: batchId || `batch-${Date.now().toString(36)}`,
+        schemaVersion: schemaVersion || 1,
+        deviceId: deviceId || 'KIOSK_MAIN',
+        transactions,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      ...result,
+    });
+  } catch (err: any) {
+    if (err.statusCode === 413 || err.code === 'BATCH_SIZE_EXCEEDED') {
+      res.status(413).json({ success: false, error: err.message });
+      return;
+    }
+    next(err);
+  }
+};
+
+router.post('/sync/bulk', authenticate, handleBulkSync);
+router.post('/bulk', authenticate, handleBulkSync);
 
 // 4b. All Dairy-Scoped Transactions (Dairy Admin & Kiosk Register)
 const handleGetTransactions = async (req: Request, res: Response, next: NextFunction): Promise<void> => {

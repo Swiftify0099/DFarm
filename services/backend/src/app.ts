@@ -29,7 +29,19 @@ export function createApp(): Express {
   app.use(requestContextMiddleware);
 
   if (process.env['NODE_ENV'] !== 'test') {
-    app.use(pinoHttp({ logger }));
+    app.use(
+      pinoHttp({
+        logger,
+        serializers: {
+          req(req: any) {
+            if (req.url && typeof req.url === 'string') {
+              req.url = req.url.replace(/([?&](token|ticket|sseToken|accessToken|secret|key)=)[^&]+/gi, '$1[REDACTED]');
+            }
+            return req;
+          },
+        },
+      })
+    );
   }
 
   // Root welcome route for browser & platform checks

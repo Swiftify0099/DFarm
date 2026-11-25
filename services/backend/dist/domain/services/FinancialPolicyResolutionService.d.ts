@@ -1,10 +1,6 @@
 import { RateChart } from '../entities/RateChart.js';
-/**
- * Standard commercial half-up rounding (ROUND_HALF_UP) to eliminate floating-point drift.
- * Guarantees exact 2 decimal places (paise precision) in financial calculations.
- * Example: 12.345 * 45.67 = 563.79615 -> 563.80
- */
-export declare function roundHalfUp(value: number, decimals?: number): number;
+import { roundHalfUp } from '@dfarm/shared-types';
+export { roundHalfUp };
 export interface PricingCalculationSnapshot {
     rateChartId: string;
     rateChartVersion: number;
