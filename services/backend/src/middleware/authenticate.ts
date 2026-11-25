@@ -281,11 +281,11 @@ export async function authenticateDevice(req: Request, _res: Response, next: Nex
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deviceId);
     const devRes = isUuid
       ? await pool.query(
-          'SELECT id, organization_id, center_id, device_identifier, status, max_offline_hours, last_seen_at FROM devices WHERE id = $1;',
+          'SELECT id, organization_id, center_id, device_identifier, status, is_blocked, revoked_at, public_key, device_token_hash, max_offline_hours, last_seen_at FROM devices WHERE id = $1;',
           [deviceId]
         )
       : await pool.query(
-          'SELECT id, organization_id, center_id, device_identifier, status, max_offline_hours, last_seen_at FROM devices WHERE device_identifier = $1;',
+          'SELECT id, organization_id, center_id, device_identifier, status, is_blocked, revoked_at, public_key, device_token_hash, max_offline_hours, last_seen_at FROM devices WHERE device_identifier = $1;',
           [deviceId]
         );
 
@@ -295,8 +295,37 @@ export async function authenticateDevice(req: Request, _res: Response, next: Nex
 
     const device = devRes.rows[0];
 
+    // 1. Permanent revocation check: credentials wiped, revoked_at set, or REVOKED/DECOMMISSIONED status
+    // Replay of an unexpired JWT cannot restore access to a revoked device
+    if (
+      device.status === 'REVOKED' ||
+      device.status === 'DECOMMISSIONED' ||
+      device.revoked_at !== null ||
+      (device.public_key === null && device.device_token_hash === null && device.status !== 'ACTIVE')
+    ) {
+      throw new ForbiddenError(
+        `Device ${device.device_identifier} credentials have been permanently revoked. Access denied.`,
+        'DEVICE_REVOKED'
+      );
+    }
+
+    // 2. Administrative block check
+    if (device.status === 'BLOCKED' || device.is_blocked === true) {
+      throw new ForbiddenError(
+        `Device ${device.device_identifier} is administratively blocked. Access denied.`,
+        'DEVICE_BLOCKED'
+      );
+    }
+
+    // 3. Strict active status check
     if (device.status !== 'ACTIVE') {
       throw new ForbiddenError(`Device ${device.device_identifier} status is ${device.status}. Synchronization is blocked.`, 'DEVICE_REVOKED');
+    }
+
+    // 4. Tenant ownership check
+    const requestedOrg = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-organization-id'] as string) || req.auth?.organizationId;
+    if (requestedOrg && device.organization_id && requestedOrg.trim().toLowerCase() !== device.organization_id.trim().toLowerCase()) {
+      throw new ForbiddenError('Cross-tenant device operation denied: Organization mismatch.', 'CROSS_TENANT_ACCESS_DENIED');
     }
 
     if (device.last_seen_at && device.max_offline_hours) {

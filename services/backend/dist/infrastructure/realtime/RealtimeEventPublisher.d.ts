@@ -20,6 +20,7 @@ export declare class RealtimeEventPublisher {
     private maxRingBufferSize;
     private heartbeatInterval;
     private outboxWorkerInterval;
+    private retentionCleanupInterval;
     private isProcessingOutbox;
     private lastCrossInstanceSyncTime;
     private constructor();
@@ -89,6 +90,15 @@ export declare class RealtimeEventPublisher {
      * Strips sensitive farmer credentials, raw phone numbers, bank details, and secrets from payloads.
      */
     sanitizePayload(payload: Record<string, any>): Record<string, any>;
+    /**
+     * Safe scheduled cleanup for old published outbox events.
+     * - Retains at least the configured recovery window (default 7 days).
+     * - Never deletes PENDING or FAILED events.
+     * - Never deletes events currently claimed by a worker (FOR UPDATE SKIP LOCKED).
+     * - Bounded batch size (500) prevents locking and table contention.
+     * - Fully idempotent.
+     */
+    purgeOldOutboxEvents(retentionDays?: number, batchSize?: number): Promise<number>;
     destroy(): void;
 }
 export declare const realtimePublisher: RealtimeEventPublisher;

@@ -177,7 +177,8 @@ export const handleRateSync = async (req, res, next) => {
                 cells: c.cells,
             })),
         });
-        const digest = crypto.createHash('sha256').update(hashInput).digest('hex').slice(0, 32);
+        // Cryptographic SHA-256 ETag (64 hex characters)
+        const digest = crypto.createHash('sha256').update(hashInput).digest('hex');
         const etag = `"${digest}"`;
         res.setHeader('ETag', etag);
         res.setHeader('Cache-Control', 'private, no-cache, must-revalidate');

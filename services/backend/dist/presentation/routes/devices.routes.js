@@ -312,9 +312,69 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
         next(err);
     }
 });
+/**
+ * Verifies device operational access across protected device endpoints:
+ * 1. Resolves device identity from trusted server database.
+ * 2. Enforces tenant and center ownership.
+ * 3. Enforces blocked device rejection (403 Forbidden - DEVICE_BLOCKED).
+ * 4. Enforces permanently revoked device rejection (403 Forbidden - DEVICE_REVOKED).
+ * 5. Replay of unexpired JWT cannot restore access to revoked/blocked device.
+ */
+async function verifyDeviceAccess(params) {
+    const { deviceId, organizationId, tokenDeviceId } = params;
+    const cleanDeviceId = (deviceId || '').trim();
+    if (tokenDeviceId && tokenDeviceId.trim() && cleanDeviceId && tokenDeviceId.trim() !== cleanDeviceId) {
+        const err = new Error('Forbidden: Client-supplied device ID cannot override authenticated device identity.');
+        err.statusCode = 403;
+        err.errorCode = 'DEVICE_IDENTITY_MISMATCH';
+        throw err;
+    }
+    const tenantDb = await tenantDbManager.getTenantDb(organizationId);
+    const devRes = await tenantDb.query(`SELECT id, organization_id, center_id, device_identifier, name, status, is_blocked,
+            public_key, device_token_hash, revoked_at, revocation_reason
+     FROM devices
+     WHERE (id::text = $1 OR device_identifier = $1)
+       AND organization_id = $2
+     LIMIT 1;`, [cleanDeviceId, organizationId]);
+    if (devRes.rows.length === 0) {
+        const err = new Error(`Station '${cleanDeviceId}' is not registered in this dairy organization.`);
+        err.statusCode = 404;
+        err.errorCode = 'DEVICE_NOT_FOUND';
+        throw err;
+    }
+    const dev = devRes.rows[0];
+    // Permanent revocation check
+    if (dev.status === 'REVOKED' ||
+        dev.status === 'DECOMMISSIONED' ||
+        dev.revoked_at !== null ||
+        (dev.public_key === null && dev.device_token_hash === null && dev.status !== 'ACTIVE')) {
+        const err = new Error(`Station '${dev.device_identifier}' credentials have been permanently revoked. Access denied.`);
+        err.statusCode = 403;
+        err.errorCode = 'DEVICE_REVOKED';
+        throw err;
+    }
+    // Administrative block check
+    if (dev.status === 'BLOCKED' || dev.is_blocked === true) {
+        const err = new Error(`Station '${dev.device_identifier}' is revoked or blocked. Operation rejected.`);
+        err.statusCode = 403;
+        err.errorCode = 'DEVICE_BLOCKED';
+        throw err;
+    }
+    return dev;
+}
 router.post('/:id/sync', optionalAuthenticate, async (req, res, next) => {
     try {
-        const { id } = req.params;
+        const id = String(req.params.id || '');
+        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
+        if (!organizationId) {
+            res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
+            return;
+        }
+        await verifyDeviceAccess({
+            deviceId: id,
+            organizationId,
+            tokenDeviceId: req.user?.deviceId,
+        });
         res.json({
             success: true,
             message: `Device ${id} sync triggered successfully`,
@@ -322,19 +382,28 @@ router.post('/:id/sync', optionalAuthenticate, async (req, res, next) => {
         });
     }
     catch (err) {
+        if (err.statusCode) {
+            res.status(err.statusCode).json({ success: false, errorCode: err.errorCode, error: err.message });
+            return;
+        }
         next(err);
     }
 });
 // 2. Operational Center & Counter Mapping for Allocated Device
 router.post('/:id/mapping', optionalAuthenticate, async (req, res, next) => {
     try {
-        const { id } = req.params;
+        const id = String(req.params.id || '');
         const { centerId, counterLabel, locationAssigned } = req.body;
         const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
         if (!organizationId) {
             res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
             return;
         }
+        await verifyDeviceAccess({
+            deviceId: id,
+            organizationId,
+            tokenDeviceId: req.user?.deviceId,
+        });
         const tenantDb = await tenantDbManager.getTenantDb(organizationId);
         // Ensure device is tracked in tenant devices table
         await tenantDb.query(`INSERT INTO devices (organization_id, center_id, device_identifier, device_type, status, last_seen_at)
@@ -355,19 +424,28 @@ router.post('/:id/mapping', optionalAuthenticate, async (req, res, next) => {
         });
     }
     catch (err) {
+        if (err.statusCode) {
+            res.status(err.statusCode).json({ success: false, errorCode: err.errorCode, error: err.message });
+            return;
+        }
         next(err);
     }
 });
 // 3. Record Device Calibration / Verification Metadata
 router.post('/:id/calibration', optionalAuthenticate, async (req, res, next) => {
     try {
-        const { id } = req.params;
+        const id = String(req.params.id || '');
         const { calibrationDate, calibratedBy, verificationStatus = 'VERIFIED', serviceProvider, notes, nextReviewDate } = req.body;
         const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
         if (!organizationId) {
             res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
             return;
         }
+        await verifyDeviceAccess({
+            deviceId: id,
+            organizationId,
+            tokenDeviceId: req.user?.deviceId,
+        });
         const tenantDb = await tenantDbManager.getTenantDb(organizationId);
         // Persist to sync_audit_logs or device calibration table
         await tenantDb.query(`INSERT INTO sync_audit_logs (organization_id, device_identifier, sync_batch_id, sync_status, payload_size_bytes)
@@ -394,14 +472,27 @@ router.post('/:id/calibration', optionalAuthenticate, async (req, res, next) => 
         });
     }
     catch (err) {
+        if (err.statusCode) {
+            res.status(err.statusCode).json({ success: false, errorCode: err.errorCode, error: err.message });
+            return;
+        }
         next(err);
     }
 });
 // 4. Get Calibration History for Device
 router.get('/:id/calibration', optionalAuthenticate, async (req, res, next) => {
     try {
-        const { id } = req.params;
+        const id = String(req.params.id || '');
         const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
+        if (!organizationId) {
+            res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
+            return;
+        }
+        await verifyDeviceAccess({
+            deviceId: id,
+            organizationId,
+            tokenDeviceId: req.user?.deviceId,
+        });
         res.json({
             success: true,
             data: [
@@ -420,6 +511,10 @@ router.get('/:id/calibration', optionalAuthenticate, async (req, res, next) => {
         });
     }
     catch (err) {
+        if (err.statusCode) {
+            res.status(err.statusCode).json({ success: false, errorCode: err.errorCode, error: err.message });
+            return;
+        }
         next(err);
     }
 });

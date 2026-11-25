@@ -17,18 +17,22 @@ export declare class SseTicketService {
     private readonly secret;
     private consumedTickets;
     private cleanupInterval;
+    private tableInitialized;
     constructor(secret?: string);
     static getInstance(): SseTicketService;
+    ensureRedemptionTable(): Promise<void>;
     /**
      * Issues a short-lived (default 30s), purpose-specific SSE ticket.
      * Scoped strictly to the authenticated user, tenant, role, and SSE streaming purpose.
      */
     issueTicket(user: AuthenticatedUser, ttlSeconds?: number): string;
     /**
-     * Verifies and immediately consumes an SSE ticket.
-     * Single-use: if the ticket was already consumed, subsequent attempts are rejected.
+     * Verifies and immediately consumes an SSE ticket across multiple distributed backend instances.
+     * Atomic shared redemption: Uses PostgreSQL sse_ticket_redemptions table with PRIMARY KEY (jti).
+     * Two independent backend instances cannot accept the same ticket concurrently.
+     * Restarting a backend node does NOT restore validity within its validity window.
      */
-    verifyAndConsumeTicket(ticketStr: string): AuthenticatedUser;
+    verifyAndConsumeTicket(ticketStr: string): Promise<AuthenticatedUser>;
     private purgeExpiredTickets;
     destroy(): void;
 }

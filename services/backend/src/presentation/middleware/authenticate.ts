@@ -63,7 +63,7 @@ export function optionalAuthenticate(req: Request, _res: Response, next: NextFun
  *   Option A: Authorization: Bearer <JWT> header (streaming fetch)
  *   Option B: ?ticket=<short_lived_sse_ticket> query parameter (short-lived, single-use, purpose-scoped)
  */
-export function authenticateSseStream(req: Request, res: Response, next: NextFunction): void {
+export async function authenticateSseStream(req: Request, res: Response, next: NextFunction): Promise<void> {
   // 1. Explicitly reject normal long-lived tokens in query parameters
   if (req.query.token) {
     res.status(400).json({
@@ -85,8 +85,8 @@ export function authenticateSseStream(req: Request, res: Response, next: NextFun
       const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
       user = tokenService.verifyToken(token);
     } else if (ticketQuery) {
-      // Option B: Purpose-specific, short-lived SSE ticket
-      user = sseTicketService.verifyAndConsumeTicket(ticketQuery);
+      // Option B: Purpose-specific, short-lived SSE ticket (distributed atomic single-use)
+      user = await sseTicketService.verifyAndConsumeTicket(ticketQuery);
     } else {
       throw new UnauthorizedError('Authentication token or SSE ticket required');
     }

@@ -54,18 +54,25 @@ export class BulkCollectionSyncUseCase {
     const results: BulkCollectionResultItemDTO[] = [];
     const batchSeenKeys = new Map<string, { item: any; result: BulkCollectionResultItemDTO }>();
 
-    // Verify Station Status (BLOCKED or DECOMMISSIONED stations cannot sync)
+    // Verify Station Status (BLOCKED or DECOMMISSIONED or REVOKED stations cannot sync)
     const targetDeviceId = authenticatedDeviceId || batch.deviceId;
     if (targetDeviceId && targetDeviceId.trim()) {
       try {
         const cleanDevId = targetDeviceId.trim();
         const devRes = await db.query(
-          `SELECT id, organization_id, status FROM devices WHERE device_identifier = $1 OR id::text = $1;`,
+          `SELECT id, organization_id, status, is_blocked, revoked_at, public_key, device_token_hash FROM devices WHERE device_identifier = $1 OR id::text = $1;`,
           [cleanDevId]
         );
         if (devRes.rows && devRes.rows.length > 0) {
           const dev = devRes.rows[0];
-          if (dev.status === 'BLOCKED' || dev.status === 'DECOMMISSIONED') {
+          const isRevoked =
+            dev.status === 'REVOKED' ||
+            dev.status === 'DECOMMISSIONED' ||
+            dev.revoked_at !== null ||
+            (dev.public_key === null && dev.device_token_hash === null && dev.status !== 'ACTIVE');
+          const isBlocked = dev.status === 'BLOCKED' || dev.is_blocked === true;
+
+          if (isBlocked || isRevoked || dev.status !== 'ACTIVE') {
             for (const item of transactions) {
               const clientIntakeUuid = item.clientIntakeUuid || crypto.randomUUID();
               const idempotencyKey = item.idempotencyKey || `SYNC-${clientIntakeUuid}`;
@@ -74,8 +81,8 @@ export class BulkCollectionSyncUseCase {
                 idempotencyKey,
                 status: 'REJECTED',
                 isIdempotentReplay: false,
-                errorCode: 'DEVICE_BLOCKED',
-                errorMessage: `Station '${cleanDevId}' status is ${dev.status}. Synchronization from revoked station is strictly rejected. Pending offline transactions remain preserved locally for administrator audit.`,
+                errorCode: isBlocked ? 'DEVICE_BLOCKED' : 'DEVICE_REVOKED',
+                errorMessage: `Station '${cleanDevId}' status is ${dev.status}. Synchronization from revoked or blocked station is strictly rejected. Pending offline transactions remain preserved locally for administrator audit.`,
               });
             }
             return {

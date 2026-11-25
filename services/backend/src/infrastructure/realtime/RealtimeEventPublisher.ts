@@ -46,8 +46,9 @@ export class RealtimeEventPublisher {
   private maxRingBufferSize = 500;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private outboxWorkerInterval: NodeJS.Timeout | null = null;
+  private retentionCleanupInterval: NodeJS.Timeout | null = null;
   private isProcessingOutbox = false;
-  private lastCrossInstanceSyncTime: Date = new Date();
+  private lastCrossInstanceSyncTime: Date = new Date(Date.now() - 30000);
 
   private constructor() {
     // 1. Send lightweight SSE heartbeat comment every 20 seconds to prevent proxy / Cloudflare timeouts
@@ -66,6 +67,14 @@ export class RealtimeEventPublisher {
     }, 1000);
     if (this.outboxWorkerInterval.unref) {
       this.outboxWorkerInterval.unref();
+    }
+
+    // 3. Periodic safe outbox retention cleanup (every 1 hour)
+    this.retentionCleanupInterval = setInterval(() => {
+      this.purgeOldOutboxEvents(7, 500).catch(() => {});
+    }, 3600000);
+    if (this.retentionCleanupInterval.unref) {
+      this.retentionCleanupInterval.unref();
     }
   }
 
@@ -307,22 +316,23 @@ export class RealtimeEventPublisher {
 
       // 2. Multi-instance cross-instance sync: check for events published by other instances
       if (this.clients.size > 0) {
+        const lookbackTime = new Date(this.lastCrossInstanceSyncTime.getTime() - 5000);
         const crossRes = await db.query(
           `SELECT event_id, event_type, schema_version, organization_id, center_id,
                   entity_id, aggregate_version, occurred_at, published_at, payload, created_at
            FROM dashboard_events_outbox
            WHERE status = 'PUBLISHED'
-             AND created_at > $1
+             AND created_at >= $1
            ORDER BY created_at ASC
-           LIMIT 50;`,
-          [this.lastCrossInstanceSyncTime]
+           LIMIT 100;`,
+          [lookbackTime]
         );
 
         if (crossRes.rows && crossRes.rows.length > 0) {
           for (const row of crossRes.rows) {
-            // Update high water mark
-            if (row.created_at instanceof Date && row.created_at > this.lastCrossInstanceSyncTime) {
-              this.lastCrossInstanceSyncTime = row.created_at;
+            const rowCreatedAt = row.created_at instanceof Date ? row.created_at : new Date(row.created_at);
+            if (rowCreatedAt > this.lastCrossInstanceSyncTime) {
+              this.lastCrossInstanceSyncTime = rowCreatedAt;
             }
 
             // Only broadcast if not already dispatched locally
@@ -526,6 +536,41 @@ export class RealtimeEventPublisher {
     return sanitized;
   }
 
+  /**
+   * Safe scheduled cleanup for old published outbox events.
+   * - Retains at least the configured recovery window (default 7 days).
+   * - Never deletes PENDING or FAILED events.
+   * - Never deletes events currently claimed by a worker (FOR UPDATE SKIP LOCKED).
+   * - Bounded batch size (500) prevents locking and table contention.
+   * - Fully idempotent.
+   */
+  public async purgeOldOutboxEvents(retentionDays = 7, batchSize = 500): Promise<number> {
+    try {
+      const res = await db.query(
+        `WITH candidate_rows AS (
+           SELECT id FROM dashboard_events_outbox
+           WHERE status = 'PUBLISHED'
+             AND published_at < NOW() - ($1 || ' days')::INTERVAL
+           ORDER BY created_at ASC
+           LIMIT $2
+           FOR UPDATE SKIP LOCKED
+         )
+         DELETE FROM dashboard_events_outbox
+         WHERE id IN (SELECT id FROM candidate_rows)
+         RETURNING id;`,
+        [retentionDays, batchSize]
+      );
+      const purgedCount = res.rowCount || (res.rows ? res.rows.length : 0);
+      if (purgedCount > 0) {
+        logger.info({ purgedCount, retentionDays }, '[RealtimeEventPublisher] Purged expired published outbox events');
+      }
+      return purgedCount;
+    } catch (err: any) {
+      logger.debug({ err: err?.message }, '[RealtimeEventPublisher] purgeOldOutboxEvents non-fatal notice');
+      return 0;
+    }
+  }
+
   public destroy(): void {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
@@ -534,6 +579,10 @@ export class RealtimeEventPublisher {
     if (this.outboxWorkerInterval) {
       clearInterval(this.outboxWorkerInterval);
       this.outboxWorkerInterval = null;
+    }
+    if (this.retentionCleanupInterval) {
+      clearInterval(this.retentionCleanupInterval);
+      this.retentionCleanupInterval = null;
     }
   }
 }

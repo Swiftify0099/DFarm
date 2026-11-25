@@ -26,5 +26,5 @@ export declare function optionalAuthenticate(req: Request, _res: Response, next:
  *   Option A: Authorization: Bearer <JWT> header (streaming fetch)
  *   Option B: ?ticket=<short_lived_sse_ticket> query parameter (short-lived, single-use, purpose-scoped)
  */
-export declare function authenticateSseStream(req: Request, res: Response, next: NextFunction): void;
+export declare function authenticateSseStream(req: Request, res: Response, next: NextFunction): Promise<void>;
 //# sourceMappingURL=authenticate.d.ts.map
