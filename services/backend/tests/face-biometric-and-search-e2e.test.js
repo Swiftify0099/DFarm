@@ -45,6 +45,13 @@ test('DFARM Targeted Fix E2E: Face Biometric Update, Test Face, Collection Recog
   await suite.test('0. Setup: Initialize Dairy, Provision Tenant DB & Admin Session', async () => {
     const controlDb = tenantDbManager.getControlPlaneDb();
 
+    // Clean any pre-existing farmer registration state for this mobile number
+    await controlDb.query(`
+      DELETE FROM customer_dairy_memberships WHERE organization_id = '${warnaDairyId}';
+      DELETE FROM global_customer_identities WHERE normalized_mobile_number = '+91${customerMobile}';
+      DELETE FROM customers WHERE organization_id = '${warnaDairyId}';
+    `).catch(() => {});
+
     // Register organization in control plane
     await controlDb.query(
       `INSERT INTO organizations (id, name, code, status, business_phone, business_email)
@@ -70,8 +77,32 @@ test('DFARM Targeted Fix E2E: Face Biometric Update, Test Face, Collection Recog
       dairyName: warnaDairyName,
     });
 
+    const tenantDb = await tenantDbManager.getTenantDb(warnaDairyId);
+    await tenantDb.query(
+      `INSERT INTO dairy_centers (
+         id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status
+       ) VALUES (
+         '38918630-4fee-4cec-96ea-a3a899aae701', $1, 'C-01', 'Warna Main Center', 'Kavathe Piran', 'Kavathe Piran', 'Sangli', 'Maharashtra', '416417', '+919834388787', 'ACTIVE'
+       ) ON CONFLICT (id) DO NOTHING;`,
+      [warnaDairyId]
+    );
+    await tenantDb.query(`DELETE FROM customers WHERE organization_id = $1;`, [warnaDairyId]).catch(() => {});
+    await tenantDb.query(
+      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+       VALUES ($1, $2, 'admin_warna_01', 'Warna Admin 01', '+919834388787', 'DAIRY_ADMIN', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      ['38918630-4fee-4cec-96ea-000000000011', warnaDairyId]
+    );
+    const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+    await db.query(
+      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+       VALUES ($1, $2, 'admin_warna_01', 'Warna Admin 01', '+919834388787', 'DAIRY_ADMIN', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      ['38918630-4fee-4cec-96ea-000000000011', warnaDairyId]
+    );
+
     dairyAdminToken = tokenService.signToken({
-      userId: 'admin-warna-01',
+      userId: '38918630-4fee-4cec-96ea-000000000011',
       role: 'DAIRY_ADMIN',
       organizationId: warnaDairyId,
       actorType: 'STAFF',
@@ -81,9 +112,10 @@ test('DFARM Targeted Fix E2E: Face Biometric Update, Test Face, Collection Recog
   });
 
   await suite.test('1. Onboard Farmer into Selected Dairy Tenant Database', async () => {
-    // 1. Register customer via onboarding API
+    // 1. Register customer via onboarding API (staff-assisted with authenticated DAIRY_ADMIN)
     const regRes = await request(app)
       .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${dairyAdminToken}`)
       .send({
         fullName: customerFullName,
         mobileNumber: customerMobile,
@@ -154,6 +186,7 @@ test('DFARM Targeted Fix E2E: Face Biometric Update, Test Face, Collection Recog
   await suite.test('3. Issue C: Collection App retrieves decrypted 128D enrolled templates for Dairy', async () => {
     const templatesRes = await request(app)
       .get(`/api/v1/identity/face/templates?organizationId=${warnaDairyId}`)
+      .set('Authorization', `Bearer ${dairyAdminToken}`)
       .set('X-Dairy-Id', warnaDairyId);
 
     assert.equal(templatesRes.status, 200);
@@ -183,6 +216,7 @@ test('DFARM Targeted Fix E2E: Face Biometric Update, Test Face, Collection Recog
     // 1. Probe matching exact enrolled face
     const matchRes = await request(app)
       .post('/api/v1/identity/face/match')
+      .set('Authorization', `Bearer ${dairyAdminToken}`)
       .set('X-Dairy-Id', warnaDairyId)
       .send({
         embedding: TEST_EMBEDDING_128D,
@@ -204,6 +238,7 @@ test('DFARM Targeted Fix E2E: Face Biometric Update, Test Face, Collection Recog
 
     const unknownRes = await request(app)
       .post('/api/v1/identity/face/match')
+      .set('Authorization', `Bearer ${dairyAdminToken}`)
       .set('X-Dairy-Id', warnaDairyId)
       .send({
         embedding: unknownEmbedding,
@@ -218,6 +253,7 @@ test('DFARM Targeted Fix E2E: Face Biometric Update, Test Face, Collection Recog
     // 1. Lookup by farmerCode C-101
     const searchCodeRes = await request(app)
       .get(`/api/v1/customers?search=${assignedFarmerCode}&organizationId=${warnaDairyId}`)
+      .set('Authorization', `Bearer ${dairyAdminToken}`)
       .set('X-Dairy-Id', warnaDairyId);
 
     assert.equal(searchCodeRes.status, 200);
@@ -229,6 +265,7 @@ test('DFARM Targeted Fix E2E: Face Biometric Update, Test Face, Collection Recog
     // 2. Lookup by mobileNumber 7755995615
     const searchPhoneRes = await request(app)
       .get(`/api/v1/customers?search=${customerMobile}&organizationId=${warnaDairyId}`)
+      .set('Authorization', `Bearer ${dairyAdminToken}`)
       .set('X-Dairy-Id', warnaDairyId);
 
     assert.equal(searchPhoneRes.status, 200);
@@ -238,6 +275,7 @@ test('DFARM Targeted Fix E2E: Face Biometric Update, Test Face, Collection Recog
     // 3. Lookup by partial name 'Shubhangi'
     const searchNameRes = await request(app)
       .get(`/api/v1/customers?search=Shubhangi&organizationId=${warnaDairyId}`)
+      .set('Authorization', `Bearer ${dairyAdminToken}`)
       .set('X-Dairy-Id', warnaDairyId);
 
     assert.equal(searchNameRes.status, 200);
@@ -247,6 +285,7 @@ test('DFARM Targeted Fix E2E: Face Biometric Update, Test Face, Collection Recog
     // 4. Verify search without organizationId parameter but with X-Dairy-Id header succeeds
     const headerSearchRes = await request(app)
       .get(`/api/v1/customers?search=${assignedFarmerCode}`)
+      .set('Authorization', `Bearer ${dairyAdminToken}`)
       .set('X-Dairy-Id', warnaDairyId);
 
     assert.equal(headerSearchRes.status, 200);
@@ -255,6 +294,7 @@ test('DFARM Targeted Fix E2E: Face Biometric Update, Test Face, Collection Recog
     // 5. Lookup non-existent customer returns empty list cleanly without 500 error
     const notFoundRes = await request(app)
       .get(`/api/v1/customers?search=NONEXISTENT_9999&organizationId=${warnaDairyId}`)
+      .set('Authorization', `Bearer ${dairyAdminToken}`)
       .set('X-Dairy-Id', warnaDairyId);
 
     assert.equal(notFoundRes.status, 200);

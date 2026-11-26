@@ -24,6 +24,9 @@ export declare class CategoryNotAuthorizedError extends DomainError {
 export declare class SessionClosedError extends DomainError {
     constructor(sessionCode: string);
 }
+export declare class SessionConflictError extends DomainError {
+    constructor(message: string, code?: string);
+}
 export declare class RateCellNotFoundError extends DomainError {
     constructor(category: string, fat: number, snf: number, version: number | string);
 }

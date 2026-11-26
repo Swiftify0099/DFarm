@@ -53,6 +53,12 @@ export class SessionClosedError extends DomainError {
   }
 }
 
+export class SessionConflictError extends DomainError {
+  constructor(message: string, code = 'ACTIVE_SESSION_ALREADY_EXISTS') {
+    super(message, code, 409);
+  }
+}
+
 export class RateCellNotFoundError extends DomainError {
   constructor(category: string, fat: number, snf: number, version: number | string) {
     super(

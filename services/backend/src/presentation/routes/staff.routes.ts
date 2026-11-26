@@ -234,28 +234,33 @@ router.post('/', authenticate, async (req: Request, res: Response, next: NextFun
     let assignedCenterId = centerId;
     let assignedCenterName = 'Main Collection Center';
     let assignedCenterCode = 'C-01';
+    let assignedCenterRow: any = null;
 
     if (assignedCenterId) {
       const centerCheck = await db.query(
-        `SELECT id, name, code FROM dairy_centers WHERE id = $1 AND organization_id = $2;`,
+        `SELECT id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status
+         FROM dairy_centers WHERE id = $1 AND organization_id = $2;`,
         [assignedCenterId, targetOrgId]
       );
       if (centerCheck.rows.length === 0) {
         res.status(400).json({ success: false, error: `Center '${assignedCenterId}' does not belong to this Dairy.` });
         return;
       }
-      assignedCenterName = centerCheck.rows[0].name;
-      assignedCenterCode = centerCheck.rows[0].code;
+      assignedCenterRow = centerCheck.rows[0];
+      assignedCenterName = assignedCenterRow.name;
+      assignedCenterCode = assignedCenterRow.code;
     } else {
       // Auto-assign primary/first center
       const defaultCenter = await db.query(
-        `SELECT id, name, code FROM dairy_centers WHERE organization_id = $1 AND status = 'ACTIVE' LIMIT 1;`,
+        `SELECT id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status
+         FROM dairy_centers WHERE organization_id = $1 AND status = 'ACTIVE' LIMIT 1;`,
         [targetOrgId]
       );
       if (defaultCenter.rows.length > 0) {
-        assignedCenterId = defaultCenter.rows[0].id;
-        assignedCenterName = defaultCenter.rows[0].name;
-        assignedCenterCode = defaultCenter.rows[0].code;
+        assignedCenterRow = defaultCenter.rows[0];
+        assignedCenterId = assignedCenterRow.id;
+        assignedCenterName = assignedCenterRow.name;
+        assignedCenterCode = assignedCenterRow.code;
       }
     }
 
@@ -349,6 +354,27 @@ router.post('/', authenticate, async (req: Request, res: Response, next: NextFun
         );
 
         if (assignedCenterId) {
+          if (assignedCenterRow) {
+            await tenantClient.query(
+              `INSERT INTO dairy_centers (
+                 id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+               ON CONFLICT (id) DO NOTHING;`,
+              [
+                assignedCenterRow.id,
+                targetOrgId,
+                assignedCenterRow.code || 'C-01',
+                assignedCenterRow.name || 'Main Collection Center',
+                assignedCenterRow.address_line1 || 'Main Road',
+                assignedCenterRow.village_town || 'Town',
+                assignedCenterRow.district || 'District',
+                assignedCenterRow.state || 'Maharashtra',
+                assignedCenterRow.postal_code || '000000',
+                assignedCenterRow.contact_phone || '+910000000000',
+                assignedCenterRow.status || 'ACTIVE',
+              ]
+            );
+          }
           await tenantClient.query(
             `INSERT INTO user_center_assignments (id, user_id, center_id, is_primary)
              VALUES ($1, $2, $3, TRUE)

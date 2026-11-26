@@ -34,9 +34,9 @@ export interface ICustomerMembershipRepository {
     getMembershipCount(globalCustomerId: string): Promise<number>;
 }
 export interface IShiftSessionRepository {
-    findActiveSession(centerId: string, deviceIdentifier: string, organizationId?: string): Promise<KioskShiftSession | null>;
-    findByCode(sessionCode: string, organizationId?: string): Promise<KioskShiftSession | null>;
-    findById(sessionId: string, organizationId?: string): Promise<KioskShiftSession | null>;
+    findActiveSession(centerId: string, deviceIdentifier: string, organizationId: string): Promise<KioskShiftSession | null>;
+    findByCode(sessionCode: string, organizationId: string): Promise<KioskShiftSession | null>;
+    findById(sessionId: string, organizationId: string): Promise<KioskShiftSession | null>;
     save(session: KioskShiftSession): Promise<void>;
 }
 export interface AtomicMilkIntakeParams {

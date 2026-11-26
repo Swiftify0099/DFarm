@@ -138,6 +138,34 @@ test('DFARM End-to-End Biometric Pipeline & Multi-Tenant Database Isolation Suit
       [adminAUserId, dairyAId, adminBUserId, dairyBId]
     );
 
+    const tenantDbA = await tenantDbManager.getTenantDb(dairyAId);
+    await tenantDbA.query(
+      `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+       VALUES ($1, $2, 'C-WA1', 'Warna Center 1', 'Road 1', 'Kavathe Piran', 'Sangli', 'MH', '416417', '+919834388787', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [centerAId, dairyAId]
+    );
+    await tenantDbA.query(
+      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+       VALUES ($1, $2, 'fb_admin_a', 'Admin A', '+919834388787', 'DAIRY_ADMIN', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [adminAUserId, dairyAId]
+    );
+
+    const tenantDbB = await tenantDbManager.getTenantDb(dairyBId);
+    await tenantDbB.query(
+      `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+       VALUES ($1, $2, 'C-RB1', 'Rajhans Center 1', 'Road 2', 'Shiroli', 'Kolhapur', 'MH', '416001', '+919834388788', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [centerBId, dairyBId]
+    );
+    await tenantDbB.query(
+      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+       VALUES ($1, $2, 'fb_admin_b', 'Admin B', '+919834388788', 'DAIRY_ADMIN', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [adminBUserId, dairyBId]
+    );
+
     dairyAdminAToken = tokenService.signToken({
       userId: adminAUserId,
       role: 'DAIRY_ADMIN',

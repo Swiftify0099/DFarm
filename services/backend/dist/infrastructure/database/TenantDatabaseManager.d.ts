@@ -29,6 +29,8 @@ export declare class TenantDatabaseUnavailableError extends Error {
     readonly dairyId: string;
     readonly status: string;
     readonly details?: string | undefined;
+    readonly statusCode = 503;
+    readonly code: string;
     constructor(dairyId: string, status: string, details?: string | undefined);
 }
 export declare class TenantDatabaseManager {
@@ -48,6 +50,16 @@ export declare class TenantDatabaseManager {
     isPlatformFederationDairy(dairyId?: string): boolean;
     getPlatformFederationMapping(): TenantDatabaseMapping;
     getTenantMapping(dairyId: string): TenantDatabaseMapping | null;
+    /**
+     * Resolves the authoritative tenant database mapping from memory or central dairy_database_mappings
+     * without fabricating a synthetic test mapping.
+     */
+    resolveTenantMapping(dairyId: string): Promise<TenantDatabaseMapping | null>;
+    /**
+     * Strict tenant DB resolver: validates mapping existence and ACTIVE provisioning state,
+     * never fabricates a test mapping, and never falls back to central control-plane DB.
+     */
+    getStrictTenantDb(dairyId: string): Promise<IDatabaseClient>;
     getAllMappings(): TenantDatabaseMapping[];
     getAllTenantDbs(): IDatabaseClient[];
     /**

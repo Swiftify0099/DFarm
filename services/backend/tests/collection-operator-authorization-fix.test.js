@@ -26,6 +26,20 @@ test('DFarm Collection Operator Authorization & Complete Lifecycle Suite', async
   const customerPhone = '9876543299';
   const unregisteredPhone = '9111222333';
 
+  // Ensure isolated tenant DB exists for Warna before onboarding & session tests
+  await tenantDbManager.provisionTenantDatabase({
+    dairyId: warnaDairyId,
+    dairyCode: 'DF-SAN-2395',
+    dairyName: "Warna Milk's",
+  });
+  const warnaTenantDb = await tenantDbManager.getStrictTenantDb(warnaDairyId);
+  await warnaTenantDb.query(
+    `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+     VALUES ($1, $2, 'C-01', 'Warna Main Center', 'Main Road', 'Kavathe Piran', 'Sangli', 'Maharashtra', '416417', '+919834388787', 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING;`,
+    [warnaCenterId, warnaDairyId]
+  );
+
   // Seed customer user for negative RBAC testing
   await db.query(`
     INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)

@@ -1,3 +1,4 @@
+import { DomainValidationError } from '../../../domain/errors/index.js';
 import { db } from '../../../infrastructure/database/PostgresPool.js';
 export class GetDeviceTelemetryUseCase {
     async execute(deviceId) {
@@ -56,11 +57,26 @@ export class ProcessOfflineSyncBatchUseCase {
         this.milkIntakeUseCase = milkIntakeUseCase;
     }
     async execute(batch) {
+        if (!batch.organizationId || !batch.organizationId.trim()) {
+            throw new DomainValidationError('Authenticated organization ID is strictly required for offline batch sync.', 'MISSING_ORGANIZATION_ID');
+        }
+        const batchOrgId = batch.organizationId.trim();
         const results = [];
         for (const item of batch.transactions) {
             try {
+                const itemOrgId = (item.organizationId || item.dairyId || '').trim();
+                if (itemOrgId && itemOrgId.toLowerCase() !== batchOrgId.toLowerCase()) {
+                    results.push({
+                        clientIntakeUuid: item.clientIntakeUuid,
+                        success: false,
+                        errorCode: 'CROSS_TENANT_ITEM_BLOCKED',
+                        error: 'Transaction item organizationId does not match authenticated dairy organization.',
+                        isIdempotentReplay: false,
+                    });
+                    continue;
+                }
                 const dto = {
-                    organizationId: item.organizationId || batch.organizationId || '',
+                    organizationId: batchOrgId,
                     sessionCode: item.sessionCode,
                     customerId: item.customerId,
                     milkCategory: item.milkCategory || item.milkType || 'COW',

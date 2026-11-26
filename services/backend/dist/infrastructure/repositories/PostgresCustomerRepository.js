@@ -1,6 +1,6 @@
 import { Customer } from '../../domain/entities/Customer.js';
+import { DomainValidationError, ForbiddenError, ForbiddenTenantError } from '../../domain/errors/index.js';
 import { tenantDbManager } from '../database/TenantDatabaseManager.js';
-import { config } from '../../config/env.js';
 export class PostgresCustomerRepository {
     mapRowToCustomer(row, categories, faceEnrolled) {
         const defaultCats = Array.isArray(categories) && categories.length > 0
@@ -139,25 +139,10 @@ export class PostgresCustomerRepository {
                 }
             }
         }
-        // In isolated test runner environment or development fallback, check active tenant instances
-        if (!resolvedOrgId && (process.env.NODE_ENV === 'test' || config.NODE_ENV === 'development' || process.execArgv.includes('--test') || process.argv.some(a => a.includes('test')))) {
-            for (const cl of tenantDbManager.getAllTenantDbs()) {
-                try {
-                    const testRow = await cl.query('SELECT organization_id FROM customers WHERE id = $1 OR global_customer_id = $1 LIMIT 1;', [id]);
-                    if (testRow.rows.length > 0 && testRow.rows[0].organization_id) {
-                        resolvedOrgId = testRow.rows[0].organization_id;
-                        break;
-                    }
-                }
-                catch {
-                    // Continue searching test DBs
-                }
-            }
-        }
         if (!resolvedOrgId) {
             return null;
         }
-        const client = await tenantDbManager.getTenantDb(resolvedOrgId);
+        const client = await tenantDbManager.getStrictTenantDb(resolvedOrgId);
         const conditions = ['(c.id = $1 OR c.global_customer_id = $1)', 'c.organization_id = $2'];
         if (!includeDeleted) {
             conditions.push('c.is_deleted = FALSE');
@@ -226,24 +211,10 @@ export class PostgresCustomerRepository {
             }
         }
         if (!resolvedOrgId) {
-            for (const cl of tenantDbManager.getAllTenantDbs()) {
-                try {
-                    const testRow = await cl.query('SELECT organization_id FROM customers WHERE normalized_mobile_number = $1 AND is_deleted = FALSE LIMIT 1;', [phoneE164]);
-                    if (testRow.rows.length > 0 && testRow.rows[0].organization_id) {
-                        resolvedOrgId = testRow.rows[0].organization_id;
-                        break;
-                    }
-                }
-                catch {
-                    // Continue searching
-                }
-            }
-        }
-        if (!resolvedOrgId) {
             // Customer is not registered in any dairy tenant database
             return null;
         }
-        const client = await tenantDbManager.getTenantDb(resolvedOrgId);
+        const client = await tenantDbManager.getStrictTenantDb(resolvedOrgId);
         const sql = `
       ${this.getBaseSelectQuery()}
       WHERE c.normalized_mobile_number = $1 AND c.organization_id = $2 AND c.is_deleted = FALSE
@@ -291,19 +262,31 @@ export class PostgresCustomerRepository {
     }
     async save(customer) {
         if (!customer.organizationId) {
-            throw new Error('Customer organizationId is mandatory for persistence');
+            throw new DomainValidationError('Customer organizationId is mandatory for persistence', 'MISSING_ORGANIZATION_ID');
         }
-        const client = await tenantDbManager.getTenantDb(customer.organizationId);
+        const client = await tenantDbManager.getStrictTenantDb(customer.organizationId);
         await client.withTransaction(async (dbClient) => {
-            // Guarantee organization exists in this tenant DB (safety net for tenant operational DB)
-            await dbClient.query(`INSERT INTO organizations (id, name, code, status)
-         VALUES ($1, 'Registered Cooperative Dairy', $2, 'ACTIVE')
-         ON CONFLICT (id) DO NOTHING;`, [customer.organizationId, `D-${customer.organizationId.slice(0, 6).toUpperCase()}`]);
-            // Guarantee primary center exists in this tenant DB
-            if (customer.centerId) {
-                await dbClient.query(`INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
-           VALUES ($1, $2, 'C-01', 'Main Collection Center', 'Center Road', 'Local', 'District', 'State', '400001', '+919876543210', 'ACTIVE')
-           ON CONFLICT (id) DO NOTHING;`, [customer.centerId, customer.organizationId]);
+            // Verify organization exists and is active in tenant DB (never auto-create fake org)
+            const orgCheck = await dbClient.query(`SELECT id, status FROM organizations WHERE id = $1 LIMIT 1;`, [customer.organizationId]);
+            if (orgCheck.rows.length === 0) {
+                throw new DomainValidationError(`Organization '${customer.organizationId}' does not exist in tenant database.`, 'INVALID_ORGANIZATION');
+            }
+            if (String(orgCheck.rows[0].status || '').toUpperCase() !== 'ACTIVE') {
+                throw new ForbiddenError(`Organization '${customer.organizationId}' is not active.`, 'ORGANIZATION_INACTIVE');
+            }
+            // Verify primary center exists, belongs to this organization, and is active (never auto-create fake center)
+            if (!customer.centerId) {
+                throw new DomainValidationError('Customer primary centerId is mandatory.', 'MISSING_CENTER_ID');
+            }
+            const centerCheck = await dbClient.query(`SELECT id, organization_id, status FROM dairy_centers WHERE id = $1 LIMIT 1;`, [customer.centerId]);
+            if (centerCheck.rows.length === 0) {
+                throw new DomainValidationError(`Collection center '${customer.centerId}' does not exist in tenant database.`, 'INVALID_CENTER');
+            }
+            if (String(centerCheck.rows[0].organization_id || '').toLowerCase() !== customer.organizationId.toLowerCase()) {
+                throw new ForbiddenTenantError(`Cross-tenant center '${customer.centerId}' does not belong to organization '${customer.organizationId}'.`);
+            }
+            if (String(centerCheck.rows[0].status || '').toUpperCase() !== 'ACTIVE') {
+                throw new DomainValidationError(`Collection center '${customer.centerId}' is inactive.`, 'INACTIVE_CENTER');
             }
             const upsertCustomerSql = `
         INSERT INTO customers (
@@ -355,12 +338,16 @@ export class PostgresCustomerRepository {
         `;
                 await dbClient.query(addressSql, [customer.id, customer.village]);
             }
-            // Save milk category permissions
+            // Save milk category permissions using an authoritative staff user from tenant DB if available
             if (customer.permittedCategories && customer.permittedCategories.length > 0) {
-                for (const cat of customer.permittedCategories) {
-                    await dbClient.query(`INSERT INTO customer_milk_categories (customer_id, milk_category, is_authorized, authorized_by)
-             VALUES ($1, $2, TRUE, '00000000-0000-0000-0000-000000000099')
-             ON CONFLICT (customer_id, milk_category) DO NOTHING;`, [customer.id, cat]).catch(() => { });
+                const staffRes = await dbClient.query(`SELECT id FROM users WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1;`, [customer.organizationId]).catch(() => ({ rows: [] }));
+                const authUserId = staffRes.rows[0]?.id;
+                if (authUserId) {
+                    for (const cat of customer.permittedCategories) {
+                        await dbClient.query(`INSERT INTO customer_milk_categories (customer_id, milk_category, is_authorized, authorized_by)
+               VALUES ($1, $2, TRUE, $3)
+               ON CONFLICT (customer_id, milk_category) DO NOTHING;`, [customer.id, cat, authUserId]).catch(() => { });
+                    }
                 }
             }
             // Ensure ledger account exists
@@ -427,10 +414,13 @@ export class PostgresCustomerRepository {
       `, [orgId, cardUid]);
             const cardId = cardRes.rows[0]?.id;
             // 2. Fetch centerId and staff user
-            const custRes = await dbClient.query(`SELECT primary_center_id FROM customers WHERE id = $1;`, [customerId]);
-            const centerId = custRes.rows[0]?.primary_center_id || '00000000-0000-0000-0000-000000000011';
-            const userRes = await dbClient.query(`SELECT id FROM users WHERE organization_id = $1 LIMIT 1;`, [orgId]);
-            const operatorId = userRes.rows[0]?.id || '00000000-0000-0000-0000-000000000003';
+            const custRes = await dbClient.query(`SELECT primary_center_id FROM customers WHERE id = $1 AND organization_id = $2;`, [customerId, orgId]);
+            const centerId = custRes.rows[0]?.primary_center_id;
+            const userRes = await dbClient.query(`SELECT id FROM users WHERE organization_id = $1 AND status = 'ACTIVE' LIMIT 1;`, [orgId]);
+            const operatorId = userRes.rows[0]?.id;
+            if (!centerId || !operatorId) {
+                throw new DomainValidationError('Valid customer center and active tenant operator are required for RFID assignment.', 'RFID_ASSIGNMENT_PRECONDITION_FAILED');
+            }
             // 3. Deactivate existing active assignment for this customer or card
             await dbClient.query(`
         UPDATE rfid_card_assignments SET is_active = FALSE WHERE (customer_id = $1 OR rfid_card_id = $2) AND is_active = TRUE;
@@ -465,21 +455,9 @@ export class PostgresCustomerRepository {
             }
         }
         if (!orgId) {
-            for (const tenantDb of tenantDbManager.getAllTenantDbs()) {
-                try {
-                    const res = await tenantDb.query('SELECT organization_id FROM customers WHERE id = $1 OR global_customer_id = $1 LIMIT 1;', [customerId]);
-                    if (res.rows.length > 0) {
-                        orgId = res.rows[0].organization_id;
-                        break;
-                    }
-                }
-                catch { }
-            }
+            throw new DomainValidationError(`Tenant context (organizationId) could not be resolved for customer '${customerId}' biometric enrollment.`, 'MISSING_ORGANIZATION_ID');
         }
-        if (!orgId) {
-            throw new Error(`Tenant context (organizationId) could not be resolved for customer '${customerId}' biometric enrollment.`);
-        }
-        const client = await tenantDbManager.getTenantDb(orgId);
+        const client = await tenantDbManager.getStrictTenantDb(orgId);
         // Resolve model version UUID
         let modelVersionId = 'f0000000-0000-0000-0000-000000000001';
         try {
@@ -506,34 +484,21 @@ export class PostgresCustomerRepository {
             }
         }
         catch { }
-        // Resolve operator/staff ID
-        let enrolledBy = '00000000-0000-0000-0000-000000000003';
-        try {
-            const uRes = await client.query('SELECT id FROM users LIMIT 1;');
-            if (uRes.rows.length > 0) {
-                enrolledBy = uRes.rows[0].id;
-            }
-            else {
-                // Ensure parent organization exists in tenant DB if constrained
-                try {
-                    await client.query(`
-            INSERT INTO organizations (id, name, code, status, business_phone, business_email)
-            VALUES ($1, 'Tenant Dairy', 'DF-TENANT', 'ACTIVE', '9999999999', 'dairy@dfarm.internal')
-            ON CONFLICT (id) DO NOTHING;
-          `, [orgId]);
-                }
-                catch { }
-                // Ensure system operator user exists in tenant db to satisfy foreign key constraint
-                await client.query(`
-          INSERT INTO users (
-            id, organization_id, username, full_name, email, phone_number, role, status
-          ) VALUES (
-            $1, $2, 'kiosk_biometric_service', 'Kiosk Biometric Service', 'kiosk@dfarm.internal', '+919999999999', 'COLLECTION_OPERATOR', 'ACTIVE'
-          ) ON CONFLICT (id) DO NOTHING;
-        `, [enrolledBy, orgId]);
+        // Resolve authoritative active staff operator in tenant DB (never fabricate a fake user)
+        let enrolledBy = null;
+        const uRes = await client.query(`SELECT id FROM users WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1;`, [orgId]);
+        if (uRes.rows.length > 0) {
+            enrolledBy = uRes.rows[0].id;
+        }
+        else {
+            const anyUserRes = await client.query(`SELECT id FROM users WHERE status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1;`);
+            if (anyUserRes.rows.length > 0) {
+                enrolledBy = anyUserRes.rows[0].id;
             }
         }
-        catch { }
+        if (!enrolledBy) {
+            throw new DomainValidationError(`No active staff user found in tenant database '${orgId}' to attribute biometric enrollment.`, 'NO_ACTIVE_OPERATOR');
+        }
         const payload = typeof encryptedPayload === 'string' ? JSON.parse(encryptedPayload) : encryptedPayload;
         const encDataB64 = payload.encryptedData || '';
         const ivB64 = payload.iv || '';

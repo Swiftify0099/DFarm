@@ -35,7 +35,7 @@ export declare class CloseShiftSessionUseCase {
         sessionCode: string;
         operatorId: string;
         operatorName: string;
-        organizationId?: string;
+        organizationId: string;
     }): Promise<KioskShiftSession>;
 }
 export declare class ReopenShiftSessionUseCase {
@@ -45,7 +45,7 @@ export declare class ReopenShiftSessionUseCase {
         sessionCode: string;
         operatorId?: string;
         operatorName?: string;
-        organizationId?: string;
+        organizationId: string;
     }): Promise<KioskShiftSession>;
 }
 //# sourceMappingURL=ShiftSessionUseCases.d.ts.map

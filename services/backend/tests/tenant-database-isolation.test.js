@@ -124,11 +124,19 @@ test('DFarm Multi-Tenant Isolation & Provisioning Test Suite', async (t) => {
     const tenantADb = await tenantManager.getTenantDb(dairyAId);
     const tenantBDb = await tenantManager.getTenantDb(dairyBId);
 
+    const centerAId = crypto.randomUUID();
+    await tenantADb.query(
+      `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+       VALUES ($1, $2, 'C-ISO-A', 'Isolation Center A', 'Road A', 'Shiroli', 'Kolhapur', 'Maharashtra', '416122', '+919822119900', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [centerAId, dairyAId]
+    );
+
     // Create a customer in Dairy A
     const customerA = new Customer({
       id: crypto.randomUUID(),
       organizationId: dairyAId,
-      centerId: crypto.randomUUID(),
+      centerId: centerAId,
       farmerCode: 'C-701',
       fullName: 'Anand Gopalrao Patil',
       mobileNumber: '+919822119901',

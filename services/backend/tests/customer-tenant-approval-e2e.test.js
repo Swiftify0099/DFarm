@@ -29,16 +29,14 @@ test('DFARM Customer Registration -> Selected Dairy Tenant DB -> Admin Approval 
   let customerTenantId = '';
   let dairyAdminToken = '';
   let otherAdminToken = '';
+  let guestCustomerToken = '';
 
   await suite.test('0. Setup: Clean State & Initialize Authoritative Warna Dairy with FAILED DB', async () => {
     const controlDb = tenantDbManager.getControlPlaneDb();
 
-    // Clean any previous test data
-    await controlDb.query(`
-      DELETE FROM customer_dairy_memberships WHERE organization_id = '${warnaDairyId}';
-      DELETE FROM global_customer_identities WHERE normalized_mobile_number = '${customerMobileE164}';
-      DELETE FROM organizations WHERE id = '${warnaDairyId}';
-    `).catch(() => {});
+    // Clean any previous customer test data in control plane (separately to avoid FK errors on organizations)
+    await controlDb.query(`DELETE FROM customer_dairy_memberships WHERE organization_id = $1;`, [warnaDairyId]).catch(() => {});
+    await controlDb.query(`DELETE FROM global_customer_identities WHERE normalized_mobile_number = $1;`, [customerMobileE164]).catch(() => {});
 
     // Insert authoritative organization into control plane
     await controlDb.query(
@@ -73,11 +71,25 @@ test('DFARM Customer Registration -> Selected Dairy Tenant DB -> Admin Approval 
       lastVerifiedAt: new Date().toISOString(),
     };
     tenantDbManager.tenantMappings.set(warnaDairyId, failedMapping);
+
+    // Obtain verified GUEST_FARMER registration token via OTP flow (RESTART-02.1)
+    doveOtpService.resetCooldown(customerMobileE164);
+    const otpReq = await request(app)
+      .post('/api/v1/auth/request-otp')
+      .send({ mobileNumber: customerMobile });
+    assert.equal(otpReq.status, 200);
+    const otpVerify = await request(app)
+      .post('/api/v1/auth/verify-otp')
+      .send({ mobileNumber: customerMobile, otp: otpReq.body.previewOtp });
+    assert.equal(otpVerify.status, 200);
+    guestCustomerToken = otpVerify.body.accessToken;
+    assert.ok(guestCustomerToken);
   });
 
   await suite.test('1. Stage 4 Pre-Condition: Registration MUST FAIL SAFELY when Tenant DB is in FAILED State', async () => {
     const regRes = await request(app)
       .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${guestCustomerToken}`)
       .send({
         fullName: customerFullName,
         mobileNumber: customerMobile,
@@ -107,11 +119,25 @@ test('DFARM Customer Registration -> Selected Dairy Tenant DB -> Admin Approval 
     assert.ok(tenantDb, 'Tenant DB connection must be operational');
     const aliveCheck = await tenantDb.query('SELECT 1 as alive;');
     assert.equal(aliveCheck.rows[0].alive, 1);
+
+    // Ensure clean tenant customer table before E2E registration
+    await tenantDb.query(`DELETE FROM customers WHERE organization_id = $1;`, [warnaDairyId]).catch(() => {});
+
+    // Seed authoritative collection center into Warna tenant DB (as done during dairy provisioning)
+    await tenantDb.query(
+      `INSERT INTO dairy_centers (
+         id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status
+       ) VALUES (
+         '38918630-4fee-4cec-96ea-a3a899aae701', $1, 'C-01', 'Warna Main Center', 'Kavathe Piran', 'Kavathe Piran', 'Sangli', 'Maharashtra', '416417', '+919834388787', 'ACTIVE'
+       ) ON CONFLICT (id) DO NOTHING;`,
+      [warnaDairyId]
+    );
   });
 
   await suite.test('3. Stage 4 & 5: Customer Registration saves into Authoritative Tenant DB as PENDING_APPROVAL', async () => {
     const regRes = await request(app)
       .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${guestCustomerToken}`)
       .send({
         fullName: customerFullName,
         mobileNumber: customerMobile,
@@ -156,6 +182,7 @@ test('DFARM Customer Registration -> Selected Dairy Tenant DB -> Admin Approval 
   await suite.test('4. Stage 5: Duplicate Registration within Same Dairy is Rejected', async () => {
     const dupRes = await request(app)
       .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${guestCustomerToken}`)
       .send({
         fullName: 'Shubhangi popat Yewale Duplicate',
         mobileNumber: customerMobile,
@@ -220,8 +247,20 @@ test('DFARM Customer Registration -> Selected Dairy Tenant DB -> Admin Approval 
       dairyName: otherDairyName,
     });
 
+    const otherAdminId = crypto.randomUUID();
+    const controlDb = tenantDbManager.getControlPlaneDb();
+    await controlDb.query(
+      `INSERT INTO organizations (id, name, code, status) VALUES ($1, $2, $3, 'ACTIVE') ON CONFLICT (id) DO NOTHING;`,
+      [otherDairyId, otherDairyName, otherDairyCode]
+    );
+    await controlDb.query(
+      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+       VALUES ($1, $2, $3, 'Other Admin', $4, 'DAIRY_ADMIN', 'ACTIVE') ON CONFLICT (id) DO NOTHING;`,
+      [otherAdminId, otherDairyId, `other_admin_${otherAdminId.slice(0, 8)}`, `+919811${Math.floor(100000 + Math.random() * 899999)}`]
+    );
+
     otherAdminToken = tokenService.signToken({
-      userId: crypto.randomUUID(),
+      userId: otherAdminId,
       organizationId: otherDairyId,
       role: 'DAIRY_ADMIN',
       actorType: 'STAFF',
@@ -282,6 +321,7 @@ test('DFARM Customer Registration -> Selected Dairy Tenant DB -> Admin Approval 
   await suite.test('9. Stage 10: Customer App Status Polling reflects APPROVED and assigned Dairy Name', async () => {
     const statusRes = await request(app)
       .get(`/api/v1/customers/${customerTenantId}/status`)
+      .set('Authorization', `Bearer ${dairyAdminToken}`)
       .query({ organizationId: warnaDairyId });
 
     assert.equal(statusRes.status, 200);

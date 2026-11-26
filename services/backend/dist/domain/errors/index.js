@@ -44,6 +44,11 @@ export class SessionClosedError extends DomainError {
         super(`Shift session '${sessionCode}' is concluded. New transactions are rejected.`, 'SESSION_CLOSED', 409);
     }
 }
+export class SessionConflictError extends DomainError {
+    constructor(message, code = 'ACTIVE_SESSION_ALREADY_EXISTS') {
+        super(message, code, 409);
+    }
+}
 export class RateCellNotFoundError extends DomainError {
     constructor(category, fat, snf, version) {
         super(`No approved rate cell found for ${category} milk at Fat ${fat}% and SNF ${snf}% in chart version ${version}`, 'RATE_CELL_NOT_FOUND', 404);

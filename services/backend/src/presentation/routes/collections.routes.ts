@@ -16,7 +16,6 @@ import {
   PostgresRateChartRepository,
   PostgresLedgerRepository,
 } from '../../infrastructure/index.js';
-import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { authorizePermission } from '../middleware/authorize.js';
@@ -100,13 +99,8 @@ router.get(
       ORDER BY s.opened_at DESC;
     `;
 
-    const tenantDb = await tenantDbManager.getTenantDb(organizationId);
-    let result;
-    try {
-      result = await tenantDb.query(query, [organizationId]);
-    } catch {
-      result = await db.query(query, [organizationId]);
-    }
+    const tenantDb = await tenantDbManager.getStrictTenantDb(organizationId);
+    const result = await tenantDb.query(query, [organizationId]);
 
     const sessions = result.rows.map((s: any) => ({
       id: s.id,
@@ -166,12 +160,16 @@ router.get(
         res.status(400).json({ success: false, error: 'Authenticated dairy organization and operator context are required.' });
         return;
       }
+      const tenantDb = await tenantDbManager.getStrictTenantDb(organizationId);
       let centerId =
         req.user?.centerId ||
         (req.query['centerId'] as string) ||
         (req.headers['x-center-id'] as string);
       if (!centerId) {
-        const cRes = await db.query(`SELECT id FROM dairy_centers WHERE organization_id = $1 LIMIT 1;`, [organizationId]).catch(() => ({ rows: [] as any[] }));
+        const cRes = await tenantDb.query(
+          `SELECT id FROM dairy_centers WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1;`,
+          [organizationId]
+        );
         centerId = cRes.rows[0]?.id;
       }
       if (!centerId) {
@@ -255,7 +253,8 @@ const handleOpenSession = async (req: Request, res: Response, next: NextFunction
       (req.headers['x-dairy-tenant-id'] as string) ||
       (req.headers['x-dairy-id'] as string) ||
       (req.headers['x-organization-id'] as string) ||
-      (req.body?.organizationId as string);
+      (req.body?.organizationId as string) ||
+      (req.body?.dairyId as string);
     if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
       res.status(403).json({ success: false, error: 'Cross-dairy shift session open blocked.' });
       return;
@@ -268,9 +267,13 @@ const handleOpenSession = async (req: Request, res: Response, next: NextFunction
       res.status(400).json({ success: false, error: 'Authenticated dairy organization and operator context are required.' });
       return;
     }
+    const tenantDb = await tenantDbManager.getStrictTenantDb(organizationId);
     let centerId = req.user?.centerId || (req.body?.centerId as string) || (req.headers['x-center-id'] as string);
     if (!centerId) {
-      const cRes = await db.query(`SELECT id FROM dairy_centers WHERE organization_id = $1 LIMIT 1;`, [organizationId]).catch(() => ({ rows: [] as any[] }));
+      const cRes = await tenantDb.query(
+        `SELECT id FROM dairy_centers WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1;`,
+        [organizationId]
+      );
       centerId = cRes.rows[0]?.id;
     }
     if (!centerId) {
@@ -348,9 +351,22 @@ router.patch('/sessions/:sessionId/open', authenticate, authorizePermission('ses
 // 3. Close active shift session
 const handleCloseSession = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const sessionCode = req.params.sessionId || req.body?.sessionCode || req.body?.sessionId;
+    const rawSessionCode = req.params.sessionId || req.body?.sessionCode || req.body?.sessionId;
+    const sessionCode = Array.isArray(rawSessionCode) ? rawSessionCode[0] : rawSessionCode;
+    const requestedOrgId =
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.headers['x-dairy-id'] as string) ||
+      (req.headers['x-organization-id'] as string) ||
+      (req.body?.organizationId as string) ||
+      (req.body?.dairyId as string);
+    if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy shift session close blocked.' });
+      return;
+    }
     const operatorId = req.user?.userId;
-    const organizationId = req.user?.organizationId;
+    const organizationId = req.user?.role === 'SUPER_ADMIN'
+      ? (requestedOrgId || req.user?.organizationId)
+      : req.user?.organizationId;
     if (!operatorId || !organizationId) {
       res.status(400).json({ success: false, error: 'Authenticated dairy organization and operator context are required.' });
       return;
@@ -407,7 +423,9 @@ const handleReopenSession = async (req: Request, res: Response, next: NextFuncti
     const requestedOrgId =
       (req.headers['x-dairy-tenant-id'] as string) ||
       (req.headers['x-dairy-id'] as string) ||
-      (req.headers['x-organization-id'] as string);
+      (req.headers['x-organization-id'] as string) ||
+      (req.body?.organizationId as string) ||
+      (req.body?.dairyId as string);
     if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
       res.status(403).json({ success: false, error: 'Cross-dairy shift session reopen blocked.' });
       return;
@@ -446,37 +464,39 @@ router.post('/sessions/reopen', authenticate, authorizePermission('sessions:mana
 const handleIntakeTransaction = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const body = req.body;
-    const orgId =
-      req.user?.organizationId ||
-      (req.headers['x-dairy-tenant-id'] as string) ||
-      (req.headers['x-dairy-id'] as string) ||
-      (req.headers['x-organization-id'] as string);
-    const customer = await customerRepo.findById(body.customerId, orgId);
-    if (!customer) {
-      res.status(404).json({ success: false, error: `Customer ${body.customerId} not found` });
-      return;
-    }
-
     const operatorId = req.user?.userId;
     if (!operatorId) {
       res.status(401).json({ success: false, error: 'Authenticated operator ID is required' });
       return;
     }
 
-    const bodyOrgId = (req.body?.organizationId as string) || (req.headers['x-organization-id'] as string) || (req.headers['x-dairy-tenant-id'] as string);
-    if (bodyOrgId && req.user?.organizationId && bodyOrgId !== req.user.organizationId) {
+    const requestedOrgId =
+      (req.body?.organizationId as string) ||
+      (req.body?.dairyId as string) ||
+      (req.headers['x-organization-id'] as string) ||
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.headers['x-dairy-id'] as string);
+    if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
       res.status(403).json({ success: false, error: 'Cross-dairy collection blocked: Organization mismatch' });
       return;
     }
 
-    const resolvedOrgId = orgId || customer.organizationId;
+    const resolvedOrgId = req.user?.role === 'SUPER_ADMIN'
+      ? (requestedOrgId || req.user?.organizationId)
+      : req.user?.organizationId;
     if (!resolvedOrgId) {
       res.status(400).json({ success: false, error: 'Authenticated organization context is required for milk collection' });
       return;
     }
 
+    const customer = await customerRepo.findById(body.customerId, resolvedOrgId);
+    if (!customer) {
+      res.status(404).json({ success: false, error: `Customer ${body.customerId} not found` });
+      return;
+    }
+
     // Strict multi-dairy isolation: verify customer belongs to operator's dairy
-    if (req.user?.organizationId && customer.organizationId !== req.user.organizationId) {
+    if (customer.organizationId !== resolvedOrgId) {
       res.status(403).json({
         success: false,
         error: 'Cross-dairy collection blocked: Customer does not belong to authorized dairy.',
@@ -532,7 +552,9 @@ const handleBulkSync = async (req: Request, res: Response, next: NextFunction): 
     const requestedOrgId =
       (req.headers['x-organization-id'] as string) ||
       (req.headers['x-dairy-tenant-id'] as string) ||
-      (req.body?.organizationId as string);
+      (req.headers['x-dairy-id'] as string) ||
+      (req.body?.organizationId as string) ||
+      (req.body?.dairyId as string);
     if (requestedOrgId && requestedOrgId !== orgId) {
       res.status(403).json({ success: false, error: 'Cross-tenant bulk sync blocked: Organization ID mismatch' });
       return;
@@ -670,13 +692,8 @@ const handleGetTransactions = async (req: Request, res: Response, next: NextFunc
 
     query += ` ORDER BY mc.created_at DESC LIMIT 200;`;
 
-    const tenantDb = await tenantDbManager.getTenantDb(organizationId);
-    let result;
-    try {
-      result = await tenantDb.query(query, params);
-    } catch {
-      result = await db.query(query, params);
-    }
+    const tenantDb = await tenantDbManager.getStrictTenantDb(organizationId);
+    const result = await tenantDb.query(query, params);
 
     const txns = result.rows.map((t: any) => ({
       id: t.id,
@@ -739,24 +756,30 @@ router.post(
         return;
       }
 
-      const organizationId = req.user?.organizationId;
-      const tenantDb = organizationId ? await tenantDbManager.getTenantDb(organizationId).catch(() => db) : db;
-      let txnRes = await tenantDb.query(
+      const requestedOrgId =
+        (req.headers['x-dairy-tenant-id'] as string) ||
+        (req.headers['x-dairy-id'] as string) ||
+        (req.headers['x-organization-id'] as string) ||
+        (req.body?.organizationId as string);
+      if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy transaction adjustment blocked.' });
+        return;
+      }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrgId || req.user?.organizationId)
+        : req.user?.organizationId;
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+        return;
+      }
+      const tenantDb = await tenantDbManager.getStrictTenantDb(organizationId);
+      const txnRes = await tenantDb.query(
         `SELECT mc.*, c.organization_id AS cust_org_id
          FROM milk_collections mc
          JOIN customers c ON c.id = mc.customer_id
-         WHERE mc.id = $1`,
-        [id]
+         WHERE mc.id = $1 AND c.organization_id = $2`,
+        [id, organizationId]
       );
-      if (txnRes.rows.length === 0 && tenantDb !== db) {
-        txnRes = await db.query(
-          `SELECT mc.*, c.organization_id AS cust_org_id
-           FROM milk_collections mc
-           JOIN customers c ON c.id = mc.customer_id
-           WHERE mc.id = $1`,
-          [id]
-        );
-      }
       if (txnRes.rows.length === 0) {
         res.status(404).json({ success: false, error: 'Collection transaction not found' });
         return;
@@ -853,13 +876,8 @@ router.get(
       ORDER BY mc.created_at DESC
       LIMIT 100;
     `;
-    const tenantDb = await tenantDbManager.getTenantDb(organizationId);
-    let result;
-    try {
-      result = await tenantDb.query(query, [organizationId]);
-    } catch {
-      result = await db.query(query, [organizationId]);
-    }
+    const tenantDb = await tenantDbManager.getStrictTenantDb(organizationId);
+    const result = await tenantDb.query(query, [organizationId]);
     const readings = result.rows.map((r: any) => ({
       id: r.id,
       timestamp: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),

@@ -43,6 +43,53 @@ test('Customer Face Biometrics Update 404 Resolution Suite', async (suite) => {
 
   const faceEmbedding = generateNormalizedVector(42);
 
+  await suite.test('0. Setup: Provision tenant DB and seed authoritative farmer + center records', async () => {
+    const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+    await db.query(
+      `INSERT INTO organizations (id, name, code, status) VALUES ($1, 'BioTest Dairy', 'BIO-389', 'ACTIVE') ON CONFLICT (id) DO NOTHING;`,
+      [dairyId]
+    );
+    await tenantDbManager.provisionTenantDatabase({
+      dairyId,
+      dairyCode: 'BIO-389',
+      dairyName: 'BioTest Dairy',
+    });
+    const tenantDb = await tenantDbManager.getStrictTenantDb(dairyId);
+    await tenantDb.query(
+      `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+       VALUES ('38918630-4fee-4cec-96ea-a3a899aae701', $1, 'C-01', 'Warna Main Center', 'Main Road', 'Kavathe Piran', 'Sangli', 'Maharashtra', '416417', '+919834388787', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [dairyId]
+    );
+    await db.query(
+      `INSERT INTO global_customer_identities (id, normalized_mobile_number, phone_verified_at)
+       VALUES ($1, $2, NOW()) ON CONFLICT (normalized_mobile_number) DO NOTHING;`,
+      [globalId, phone]
+    );
+    await db.query(
+      `INSERT INTO customer_dairy_memberships (id, global_customer_id, organization_id, tenant_customer_id, farmer_code, customer_name, membership_status)
+       VALUES ('38918630-4fee-4cec-96ea-a3a899aa0001', $1, $2, $3, 'F-101', 'Pandurang Patil', 'APPROVED')
+       ON CONFLICT DO NOTHING;`,
+      [globalId, dairyId, customerId]
+    );
+    await tenantDb.query(
+      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+       VALUES ('00000000-0000-0000-0000-000000000099', $1, 'bio_staff', 'Bio Staff', '+919800000099', 'COLLECTION_OPERATOR', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [dairyId]
+    );
+    await tenantDb.query(
+      `INSERT INTO customers (
+         id, organization_id, primary_center_id, farmer_code, full_name,
+         normalized_mobile_number, status, registration_status, is_deleted, global_customer_id
+       ) VALUES (
+         $1, $2, '38918630-4fee-4cec-96ea-a3a899aae701', 'F-101', 'Pandurang Patil',
+         $3, 'ACTIVE', 'APPROVED', FALSE, $4
+       ) ON CONFLICT (id) DO NOTHING;`,
+      [customerId, dairyId, phone, globalId]
+    );
+  });
+
   await suite.test('1. Explicit customerId POST /customers/:id/biometrics/update succeeds (no 404)', async () => {
     const res = await request(app)
       .post(`/api/v1/customers/${customerId}/biometrics/update`)
@@ -78,7 +125,7 @@ test('Customer Face Biometrics Update 404 Resolution Suite', async (suite) => {
     assert.equal(res.body.isBiometricEnrolled, true);
   });
 
-  await suite.test('3. Guest farmer with unregistered session auto-resolves or self-heals in development', async () => {
+  await suite.test('3. Unregistered guest session resolves existing registered farmer via verified phone or rejects unregistered (DF-015 no fake auto-provisioning)', async () => {
     const guestEmbedding = generateNormalizedVector(44);
     const res = await request(app)
       .post('/api/v1/customers/me/biometrics/update')
@@ -92,9 +139,33 @@ test('Customer Face Biometrics Update 404 Resolution Suite', async (suite) => {
 
     assert.equal(res.status, 200, `Expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
     assert.equal(res.body.success, true);
+
+    const unregisteredPhone = '+917755000099';
+    const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+    await db.query(
+      `INSERT INTO global_customer_identities (id, normalized_mobile_number, phone_verified_at)
+       VALUES ('38918630-4fee-4cec-96ea-a3a899aa0099', $1, NOW()) ON CONFLICT (normalized_mobile_number) DO NOTHING;`,
+      [unregisteredPhone]
+    );
+    const trulyUnregisteredToken = tokenService.signToken({
+      userId: `unregistered:${unregisteredPhone}`,
+      globalCustomerId: '38918630-4fee-4cec-96ea-a3a899aa0099',
+      role: 'GUEST_FARMER',
+      actorType: 'CUSTOMER',
+    });
+    const unregRes = await request(app)
+      .post('/api/v1/customers/me/biometrics/update')
+      .set('Authorization', `Bearer ${trulyUnregisteredToken}`)
+      .set('x-organization-id', dairyId)
+      .send({
+        embedding: guestEmbedding,
+        modelVersion: 'sface_int8_2021dec',
+        organizationId: dairyId,
+      });
+    assert.equal(unregRes.status, 404);
   });
 
-  await suite.test('4. Unmapped customer UUID rejected 401; centrally mapped membership self-heals tenant record', async () => {
+  await suite.test('4. Unmapped customer UUID rejected 401; explicitly seeded tenant customer succeeds without route auto-provisioning', async () => {
     const unmappedToken = tokenService.signToken({
       userId: '77777777-8888-9999-aaaa-ffffffffffff',
       organizationId: dairyId,
@@ -124,6 +195,17 @@ test('Customer Face Biometrics Update 404 Resolution Suite', async (suite) => {
        ON CONFLICT DO NOTHING;`,
       [dairyId, randomCustId]
     );
+    const tenantDb = await tenantDbManager.getTenantDb(dairyId);
+    await tenantDb.query(
+      `INSERT INTO customers (
+         id, organization_id, primary_center_id, farmer_code, full_name,
+         normalized_mobile_number, status, registration_status, is_deleted, global_customer_id
+       ) VALUES (
+         $1, $2, '38918630-4fee-4cec-96ea-a3a899aae701', 'F-HEAL1', 'Self Heal Farmer',
+         '+917755995699', 'ACTIVE', 'APPROVED', FALSE, '77777777-8888-9999-aaaa-bbbbbbbbbbb0'
+       ) ON CONFLICT (id) DO NOTHING;`,
+      [randomCustId, dairyId]
+    );
 
     const devToken = tokenService.signToken({
       userId: randomCustId,
@@ -146,6 +228,36 @@ test('Customer Face Biometrics Update 404 Resolution Suite', async (suite) => {
     assert.equal(res.status, 200, `Expected 200, got ${res.status}: ${JSON.stringify(res.body)}`);
     assert.equal(res.body.success, true);
     assert.equal(res.body.isBiometricEnrolled, true);
+
+    // Centrally mapped membership WITHOUT tenant customer record must return 404 (no fake customer auto-provisioning)
+    const missingTenantCustId = '77777777-8888-9999-aaaa-cccccccccccc';
+    await db.query(
+      `INSERT INTO global_customer_identities (id, normalized_mobile_number, phone_verified_at)
+       VALUES ('77777777-8888-9999-aaaa-ccccccccccc0', '+917755995688', NOW()) ON CONFLICT (normalized_mobile_number) DO NOTHING;`
+    );
+    await db.query(
+      `INSERT INTO customer_dairy_memberships (id, global_customer_id, organization_id, tenant_customer_id, farmer_code, customer_name, membership_status)
+       VALUES ('77777777-8888-9999-aaaa-ccccccccccc1', '77777777-8888-9999-aaaa-ccccccccccc0', $1, $2, 'F-MISS1', 'Missing Tenant Farmer', 'APPROVED')
+       ON CONFLICT DO NOTHING;`,
+      [dairyId, missingTenantCustId]
+    );
+    const missingToken = tokenService.signToken({
+      userId: missingTenantCustId,
+      organizationId: dairyId,
+      globalCustomerId: '77777777-8888-9999-aaaa-ccccccccccc0',
+      role: 'FARMER_CUSTOMER',
+      actorType: 'CUSTOMER',
+    });
+    const missingRes = await request(app)
+      .post(`/api/v1/customers/${missingTenantCustId}/biometrics/update`)
+      .set('Authorization', `Bearer ${missingToken}`)
+      .set('x-organization-id', dairyId)
+      .send({
+        embedding: faceEmbedding,
+        modelVersion: 'sface_int8_2021dec',
+        organizationId: dairyId,
+      });
+    assert.equal(missingRes.status, 404);
   });
 
   await suite.test('5. Verify AES-256-GCM encryption in tenant DB face_enrollments', async () => {

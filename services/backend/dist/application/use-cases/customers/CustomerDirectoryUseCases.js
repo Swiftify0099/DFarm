@@ -109,23 +109,39 @@ export class RegisterCustomerUseCase {
                 }
             }
             catch { }
+            let centerName = 'Collection Center';
+            try {
+                const tenantDb = await tenantDbManager.getStrictTenantDb(dto.organizationId);
+                const centerRes = await tenantDb.query(`SELECT name FROM dairy_centers WHERE id = $1 AND organization_id = $2 LIMIT 1;`, [updatedCustomer.centerId, dto.organizationId]);
+                if (centerRes.rows.length > 0 && centerRes.rows[0].name) {
+                    centerName = centerRes.rows[0].name;
+                }
+            }
+            catch { }
             const mem = new CustomerMembership({
                 id: existingMembership?.id || crypto.randomUUID(),
                 globalCustomerId: globalIdentity.id,
                 organizationId: dto.organizationId,
                 tenantCustomerId: updatedCustomer.id,
                 farmerCode: updatedCustomer.farmerCode,
+                customerName: updatedCustomer.fullName,
                 membershipStatus: 'PENDING_APPROVAL',
                 dairyName,
                 dairyCode,
                 dairyAddress,
-                centerId: dto.centerId,
-                centerName: 'Main Collection Center',
+                centerId: updatedCustomer.centerId,
+                centerName,
             });
             await this.membershipRepo.saveMembership(mem);
             return updatedCustomer.toJSON();
         }
-        const tenantDb = await tenantDbManager.getTenantDb(dto.organizationId);
+        const tenantDb = await tenantDbManager.getStrictTenantDb(dto.organizationId);
+        // Resolve authoritative center name from tenant DB
+        let centerName = 'Collection Center';
+        const centerNameRes = await tenantDb.query(`SELECT name FROM dairy_centers WHERE id = $1 AND organization_id = $2 LIMIT 1;`, [dto.centerId, dto.organizationId]);
+        if (centerNameRes.rows.length > 0 && centerNameRes.rows[0].name) {
+            centerName = centerNameRes.rows[0].name;
+        }
         // Auto-generate farmer code based on count in center
         let farmerCode = `F-${Math.floor(100 + Math.random() * 900)}`;
         try {
@@ -139,7 +155,7 @@ export class RegisterCustomerUseCase {
         const newCustomerId = crypto.randomUUID();
         // ADMINISTRATIVE APPROVAL POLICY: Customer registrations are never approved automatically.
         // Account status is strictly INACTIVE until Dairy Admin verifies identity, village boundaries, bank credentials, and biometrics.
-        const customer = new Customer({
+        let customer = new Customer({
             id: newCustomerId,
             organizationId: dto.organizationId,
             centerId: dto.centerId,
@@ -154,20 +170,46 @@ export class RegisterCustomerUseCase {
             bankDetails: dto.bankDetails,
             balanceDue: 0.0,
         });
-        await this.customerRepo.save(customer);
-        // Save milk category permissions if database is active
         try {
-            for (const cat of customer.permittedCategories) {
-                await db.query(`INSERT INTO customer_milk_categories (customer_id, milk_category, is_authorized, authorized_by)
-           VALUES (
-             $1, $2, TRUE,
-             (SELECT id FROM users WHERE role IN ('DAIRY_ADMIN', 'SUPER_ADMIN') LIMIT 1)
-           )
-           ON CONFLICT (customer_id, milk_category) DO NOTHING;`, [customer.id, cat]);
-            }
+            await this.customerRepo.save(customer);
         }
-        catch {
-            // Offline fallback
+        catch (saveErr) {
+            if (saveErr?.code === '23505') {
+                const msg = String(saveErr?.message || '');
+                if (msg.includes('uq_customer_code_per_center')) {
+                    // Concurrent new registration generated same sequential farmer_code; retry once with unique suffix
+                    farmerCode = `F-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
+                    customer = new Customer({
+                        id: newCustomerId,
+                        organizationId: dto.organizationId,
+                        centerId: dto.centerId,
+                        farmerCode,
+                        fullName: dto.fullName.trim(),
+                        mobileNumber: phone.e164,
+                        globalCustomerId: globalIdentity.id,
+                        status: 'INACTIVE',
+                        registrationStatus: 'PENDING_APPROVAL',
+                        permittedCategories: dto.categories || ['COW'],
+                        village: dto.village,
+                        bankDetails: dto.bankDetails,
+                        balanceDue: 0.0,
+                    });
+                    await this.customerRepo.save(customer);
+                }
+                else {
+                    // Concurrent retry for same mobile/global identity in this org
+                    const concurrentExisting = await this.customerRepo.findByPhone(phone.e164, dto.organizationId);
+                    if (concurrentExisting && concurrentExisting.registrationStatus === 'PENDING_APPROVAL') {
+                        customer = concurrentExisting;
+                    }
+                    else {
+                        throw new DomainValidationError('A customer with this mobile number already exists in this dairy.');
+                    }
+                }
+            }
+            else {
+                throw saveErr;
+            }
         }
         // Persist to central multi-dairy membership routing directory
         let dairyName = 'DFarm Cooperative Society';
@@ -188,12 +230,13 @@ export class RegisterCustomerUseCase {
             organizationId: dto.organizationId,
             tenantCustomerId: customer.id,
             farmerCode: customer.farmerCode,
+            customerName: customer.fullName,
             membershipStatus: 'PENDING_APPROVAL',
             dairyName,
             dairyCode,
             dairyAddress,
             centerId: dto.centerId,
-            centerName: 'Main Collection Center',
+            centerName,
         });
         await this.membershipRepo.saveMembership(membership);
         return customer.toJSON();

@@ -79,13 +79,13 @@ test('DFarm Roadmap Phase 07 — Dairy Admin Operational Management Verification
       `);
 
       await targetDb.query(`
-        INSERT INTO users (id, organization_id, username, phone_number, full_name, role, status)
+        INSERT INTO users (id, organization_id, username, phone_number, full_name, role, user_role, status)
         VALUES 
-          ('00000000-0000-0000-0000-000000000084', '${testDairyA}', 'admin_primary', '+919876543284', 'Primary Admin', 'DAIRY_ADMIN', 'ACTIVE'),
-          ('00000000-0000-0000-0000-000000000085', '${testDairyA}', 'admin_vasant', '+919876543285', 'Vasantrao Patil', 'DAIRY_ADMIN', 'ACTIVE'),
-          ('00000000-0000-0000-0000-000000000086', '${testDairyA}', 'operator_vikas', '+919876543286', 'Kiosk Operator Vikas', 'COLLECTION_OPERATOR', 'ACTIVE'),
-          ('00000000-0000-0000-0000-000000000087', '${testDairyB}', 'admin_sanjay', '+919876543287', 'Sanjay Deshmukh', 'DAIRY_ADMIN', 'ACTIVE')
-        ON CONFLICT (id) DO NOTHING;
+          ('00000000-0000-0000-0000-000000000084', '${testDairyA}', 'admin_primary', '+919876543284', 'Primary Admin', 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'ACTIVE'),
+          ('00000000-0000-0000-0000-000000000085', '${testDairyA}', 'admin_vasant', '+919876543285', 'Vasantrao Patil', 'DAIRY_ADMIN', 'DAIRY_ADMIN', 'ACTIVE'),
+          ('00000000-0000-0000-0000-000000000086', '${testDairyA}', 'operator_vikas', '+919876543286', 'Kiosk Operator Vikas', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE'),
+          ('00000000-0000-0000-0000-000000000087', '${testDairyB}', 'admin_sanjay', '+919876543287', 'Sanjay Deshmukh', 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'ACTIVE')
+        ON CONFLICT (id) DO UPDATE SET role = EXCLUDED.role, user_role = EXCLUDED.user_role, status = 'ACTIVE';
       `);
     } catch (err) {
       console.error('Seed error:', err);

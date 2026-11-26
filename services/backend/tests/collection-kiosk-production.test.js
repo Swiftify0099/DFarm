@@ -54,11 +54,12 @@ test('DFarm Collection App / Kiosk Counter Production Verification Suite', async
       `);
 
       await targetDb.query(`
-        INSERT INTO users (id, organization_id, username, phone_number, full_name, role, status)
+        INSERT INTO users (id, organization_id, username, phone_number, full_name, role, user_role, status)
         VALUES 
-          ('${testOperatorA}', '${testDairyA}', 'operator_vikas', '+919876543212', 'Counter Operator Vikas', 'COLLECTION_OPERATOR', 'ACTIVE'),
-          ('00000000-0000-0000-0000-000000000004', '${testDairyB}', 'operator_ramesh', '+919876543213', 'Operator Ramesh Warana', 'COLLECTION_OPERATOR', 'ACTIVE')
-        ON CONFLICT (id) DO NOTHING;
+          ('00000000-0000-0000-0000-000000000001', '${testDairyA}', 'admin_rajesh', '+919876543211', 'Rajesh Patil', 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'ACTIVE'),
+          ('${testOperatorA}', '${testDairyA}', 'operator_vikas', '+919876543212', 'Counter Operator Vikas', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE'),
+          ('00000000-0000-0000-0000-000000000004', '${testDairyB}', 'operator_ramesh', '+919876543213', 'Operator Ramesh Warana', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE')
+        ON CONFLICT (id) DO UPDATE SET organization_id = EXCLUDED.organization_id, role = EXCLUDED.role, user_role = EXCLUDED.user_role, status = 'ACTIVE';
       `);
 
       await targetDb.query(`
@@ -140,17 +141,26 @@ test('DFarm Collection App / Kiosk Counter Production Verification Suite', async
   // GROUP B: Real Farmer Identification (Face + RFID)
   // ============================================================================
   await suite.test('GROUP B: Real Farmer Identification (Face + RFID)', async (t) => {
-    // 1. Create and approve a test farmer in Dairy A
-    const phone = `+9198${Math.floor(100000 + Math.random() * 900000)}`;
+    // 1. Create and approve a test farmer in Dairy A using verified OTP proof & biometric consent
+    const phone = `+9198${Math.floor(10000000 + Math.random() * 89999999)}`;
+    const otpReqRes = await request(app)
+      .post('/api/v1/auth/request-otp')
+      .send({ mobileNumber: phone });
+    assert.equal(otpReqRes.status, 200);
+    const otp = otpReqRes.body.previewOtp;
+    assert.ok(otp);
+
     const regRes = await request(app)
       .post('/api/v1/customers/register')
       .send({
         fullName: 'Balu Tanaji Patil',
         mobileNumber: phone,
+        otp,
         organizationId: testDairyA,
         centerId: testCenterA,
         village: 'Shirgaon',
         milkSupplyType: 'COW',
+        biometricConsent: true,
         bankDetails: {
           accountNumber: '998877665544',
           ifscCode: 'MAHB0000456',

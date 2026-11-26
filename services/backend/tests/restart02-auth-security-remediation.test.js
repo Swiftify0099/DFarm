@@ -21,6 +21,7 @@ const { doveSmsService } = await import('../dist/infrastructure/sms/DoveSmsServi
 const { WhatsAppWebhookHandler } = await import('../dist/modules/notifications/webhooks/whatsapp-webhook.handler.js');
 const { authenticate: rootDbAuthenticate } = await import('../dist/middleware/authenticate.js');
 const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+const { tenantDbManager } = await import('../dist/infrastructure/database/TenantDatabaseManager.js');
 const { signJwt } = await import('../dist/jwt.js');
 
 const app = createApp();
@@ -89,6 +90,36 @@ test('RESTART-02: Complete Auth, Authorization, OTP, JWT & Secrets Remediation S
        ($2, $5, $4, 'R02-F2', 'R02 Farmer B', '+919822000002', 'ACTIVE', 'APPROVED', FALSE)
      ON CONFLICT (id) DO UPDATE SET status = 'ACTIVE', is_deleted = FALSE, organization_id = EXCLUDED.organization_id;`,
     [farmerAId, farmerBId, orgAId, centerAId, orgBId]
+  );
+
+  await tenantDbManager.provisionTenantDatabase({ dairyId: orgAId, dairyCode: 'R02-A', dairyName: 'Restart02 Dairy A' });
+  await tenantDbManager.provisionTenantDatabase({ dairyId: orgBId, dairyCode: 'R02-B', dairyName: 'Restart02 Dairy B' });
+  const tenantDbA = await tenantDbManager.getStrictTenantDb(orgAId);
+  const tenantDbB = await tenantDbManager.getStrictTenantDb(orgBId);
+  const centerBId = '22222222-1111-4111-a111-000000000202';
+  await tenantDbA.query(
+    `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+     VALUES ($1, $2, 'C-R02', 'Main R02 Center', 'Road 1', 'Village A', 'Pune', 'Maharashtra', '411001', '+919800000001', 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING;`,
+    [centerAId, orgAId]
+  );
+  await tenantDbA.query(
+    `INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted)
+     VALUES ($1, $2, $3, 'R02-F1', 'R02 Farmer A', '+919822000001', 'ACTIVE', 'APPROVED', FALSE)
+     ON CONFLICT (id) DO NOTHING;`,
+    [farmerAId, orgAId, centerAId]
+  );
+  await tenantDbB.query(
+    `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+     VALUES ($1, $2, 'C-R02B', 'Main R02B Center', 'Road 2', 'Village B', 'Pune', 'Maharashtra', '411001', '+919800000002', 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING;`,
+    [centerBId, orgBId]
+  );
+  await tenantDbB.query(
+    `INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted)
+     VALUES ($1, $2, $3, 'R02-F2', 'R02 Farmer B', '+919822000002', 'ACTIVE', 'APPROVED', FALSE)
+     ON CONFLICT (id) DO NOTHING;`,
+    [farmerBId, orgBId, centerBId]
   );
 
   const superAdminToken = tokenService.signToken({

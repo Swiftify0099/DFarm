@@ -51,9 +51,13 @@ export interface ProvisionTenantParams {
 export const PLATFORM_FEDERATION_DAIRY_ID = '00000000-0000-0000-0000-000000000001';
 
 export class TenantDatabaseUnavailableError extends Error {
+  public readonly statusCode = 503;
+  public readonly code: string;
+
   constructor(public readonly dairyId: string, public readonly status: string, public readonly details?: string) {
     super(`Tenant database for dairy ${dairyId} is unavailable (status: ${status}). ${details || ''}`);
     this.name = 'TenantDatabaseUnavailableError';
+    this.code = status === 'UNMAPPED' ? 'TENANT_MAPPING_MISSING' : 'TENANT_DATABASE_UNAVAILABLE';
   }
 }
 
@@ -202,6 +206,128 @@ export class TenantDatabaseManager {
       return this.getPlatformFederationMapping();
     }
     return this.tenantMappings.get(dairyId) || null;
+  }
+
+  /**
+   * Resolves the authoritative tenant database mapping from memory or central dairy_database_mappings
+   * without fabricating a synthetic test mapping.
+   */
+  public async resolveTenantMapping(dairyId: string): Promise<TenantDatabaseMapping | null> {
+    if (!dairyId || !dairyId.trim()) {
+      return null;
+    }
+    if (this.isPlatformFederationDairy(dairyId)) {
+      return this.getPlatformFederationMapping();
+    }
+    const cached = this.tenantMappings.get(dairyId);
+    if (cached) {
+      return cached;
+    }
+    const controlDb = this.getControlPlaneDb();
+    try {
+      const res = await controlDb.query(
+        'SELECT * FROM dairy_database_mappings WHERE dairy_id = $1;',
+        [dairyId]
+      );
+      if (res.rows.length > 0) {
+        const row = res.rows[0];
+        const mapping: TenantDatabaseMapping = {
+          id: row.id,
+          dairyId: row.dairy_id,
+          dairyCode: row.dairy_code,
+          databaseName: row.database_name,
+          resourceType: row.resource_type === 'ISOLATED_TEST_INSTANCE' ? 'ISOLATED_TEST_INSTANCE' : 'PHYSICAL_DATABASE',
+          connectionUriEncrypted: row.connection_uri_encrypted,
+          schemaVersion: row.schema_version,
+          provisioningStatus: row.provisioning_status,
+          provisioningError: row.provisioning_error,
+          provisionedAt: row.provisioned_at?.toISOString?.() || row.provisioned_at,
+          lastVerifiedAt: row.last_verified_at?.toISOString?.() || row.last_verified_at,
+        };
+        this.tenantMappings.set(dairyId, mapping);
+        return mapping;
+      }
+    } catch (err: any) {
+      throw new TenantDatabaseUnavailableError(
+        dairyId,
+        'CONTROL_PLANE_UNAVAILABLE',
+        err?.message || 'Unable to query tenant database mapping'
+      );
+    }
+    return null;
+  }
+
+  /**
+   * Strict tenant DB resolver: validates mapping existence and ACTIVE provisioning state,
+   * never fabricates a test mapping, and never falls back to central control-plane DB.
+   */
+  public async getStrictTenantDb(dairyId: string): Promise<IDatabaseClient> {
+    if (!dairyId || !dairyId.trim()) {
+      throw new TenantDatabaseUnavailableError('UNKNOWN', 'UNMAPPED', 'Organization ID is required');
+    }
+    if (this.isPlatformFederationDairy(dairyId)) {
+      return this.getControlPlaneDb();
+    }
+
+    const mapping = await this.resolveTenantMapping(dairyId);
+    if (!mapping) {
+      throw new TenantDatabaseUnavailableError(
+        dairyId,
+        'UNMAPPED',
+        'No tenant database mapping found for this organization'
+      );
+    }
+
+    if (mapping.provisioningStatus !== 'ACTIVE') {
+      throw new TenantDatabaseUnavailableError(
+        dairyId,
+        mapping.provisioningStatus,
+        mapping.provisioningError || `Tenant database provisioning status is ${mapping.provisioningStatus}`
+      );
+    }
+
+    if (this.tenantPools.has(dairyId)) {
+      return this.wrapPgPool(this.tenantPools.get(dairyId)!);
+    }
+    if (this.tenantMemDbs.has(dairyId)) {
+      return this.tenantMemDbs.get(dairyId)!;
+    }
+
+    if (mapping.resourceType === 'ISOLATED_TEST_INSTANCE') {
+      const memClient = this.createIsolatedMemoryDatabase(dairyId);
+      this.tenantMemDbs.set(dairyId, memClient);
+      return memClient;
+    }
+
+    if (!mapping.connectionUriEncrypted) {
+      if (mapping.databaseName === 'postgres' || mapping.databaseName === 'dfarm_control_plane') {
+        return this.getControlPlaneDb();
+      }
+      throw new TenantDatabaseUnavailableError(
+        dairyId,
+        'CREDENTIALS_MISSING',
+        'Tenant database connection credentials are missing'
+      );
+    }
+
+    try {
+      const decryptedUri = CredentialEncryption.decrypt(mapping.connectionUriEncrypted);
+      const tenantPool = new pg.Pool({
+        connectionString: decryptedUri,
+        max: config.TENANT_POOL_MAX || 5,
+        idleTimeoutMillis: config.TENANT_POOL_IDLE_TIMEOUT_MS || 30000,
+        connectionTimeoutMillis: config.TENANT_POOL_CONNECTION_TIMEOUT_MS || 30000,
+        ssl: this.getSslConfig(decryptedUri),
+      });
+      this.tenantPools.set(dairyId, tenantPool);
+      return this.wrapPgPool(tenantPool);
+    } catch (err: any) {
+      throw new TenantDatabaseUnavailableError(
+        dairyId,
+        'CONNECTION_FAILED',
+        err?.message || 'Failed to initialize tenant database pool'
+      );
+    }
   }
 
   public getAllMappings(): TenantDatabaseMapping[] {
@@ -943,6 +1069,7 @@ export class TenantDatabaseManager {
       '041_dairy_admin_realtime_and_station_monitoring.sql',
       '042_union_bank_farmer_payout_and_settlement_system.sql',
       '043_distributed_sse_tickets_and_retention.sql',
+      '045_kiosk_shift_session_concurrency_and_ownership.sql',
     ];
 
     const possibleDirs = [
@@ -1070,7 +1197,7 @@ export class TenantDatabaseManager {
       `);
       db.public.none(`
         INSERT INTO user_center_assignments (id, user_id, center_id, is_primary)
-        VALUES ('${operatorAId}-ca', '${operatorAId}', '${centerAId}', TRUE)
+        VALUES ('00000000-0000-0000-0000-000000000111', '${operatorAId}', '${centerAId}', TRUE)
         ON CONFLICT DO NOTHING;
       `);
       if (!_dairyId || _dairyId === '38918630-4fee-4cec-96ea-a3a899aae7bc') {

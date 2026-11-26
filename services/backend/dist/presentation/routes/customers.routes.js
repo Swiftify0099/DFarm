@@ -10,7 +10,6 @@ import { CustomerNotFoundError } from '../../domain/errors/index.js';
 import { PhoneNumber } from '../../domain/value-objects/index.js';
 import { doveOtpService } from '../../infrastructure/otp/DoveOtpService.js';
 import { logger } from '../../shared/logger/index.js';
-import { config } from '../../config/env.js';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const registrationLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -357,34 +356,13 @@ router.post('/register', registrationLimiter, optionalAuthenticate, async (req, 
                 return;
             }
         }
-        // Phase 4B: Validate organization exists and is ACTIVE
-        const tenantMapping = tenantDbManager.getTenantMapping(targetOrgId);
-        if (tenantMapping && tenantMapping.provisioningStatus === 'FAILED') {
-            res.status(503).json({
-                success: false,
-                code: 'TENANT_DATABASE_UNAVAILABLE',
-                error: `Selected dairy tenant database (${tenantMapping.dairyCode}) is unavailable (provisioning status: FAILED). Customer registration cannot proceed until database provisioning is resolved.`,
-                data: {
-                    dairyId: targetOrgId,
-                    dairyCode: tenantMapping.dairyCode,
-                    provisioningStatus: tenantMapping.provisioningStatus,
-                    provisioningError: tenantMapping.provisioningError,
-                },
-            });
-            return;
-        }
+        // Phase 4B & DF-017: Validate authoritative organization in control plane AND active tenant mapping
         let orgStatusRow = null;
         try {
-            const orgRes = await db.query(`SELECT id, status FROM organizations WHERE id = $1 LIMIT 1;`, [targetOrgId]);
+            const controlDb = tenantDbManager.getControlPlaneDb();
+            const orgRes = await controlDb.query(`SELECT id, status FROM organizations WHERE id = $1 LIMIT 1;`, [targetOrgId]);
             if (orgRes.rows.length > 0) {
                 orgStatusRow = orgRes.rows[0];
-            }
-            else if (tenantMapping && tenantMapping.provisioningStatus === 'ACTIVE') {
-                const tenantDb = await tenantDbManager.getTenantDb(targetOrgId);
-                const tOrgRes = await tenantDb.query(`SELECT id, status FROM organizations WHERE id = $1 LIMIT 1;`, [targetOrgId]);
-                if (tOrgRes.rows.length > 0) {
-                    orgStatusRow = tOrgRes.rows[0];
-                }
             }
         }
         catch {
@@ -411,7 +389,43 @@ router.post('/register', registrationLimiter, optionalAuthenticate, async (req, 
             });
             return;
         }
-        // Phase 4C: Validate explicit centerId (exists, belongs to targetOrgId, ACTIVE) or resolve active default center
+        let tenantMapping;
+        let tenantDb;
+        try {
+            tenantMapping = await tenantDbManager.resolveTenantMapping(targetOrgId);
+            if (!tenantMapping) {
+                res.status(503).json({
+                    success: false,
+                    code: 'TENANT_MAPPING_MISSING',
+                    error: 'Selected dairy tenant database mapping is missing. Customer registration cannot proceed until database provisioning completes.',
+                });
+                return;
+            }
+            if (tenantMapping.provisioningStatus !== 'ACTIVE') {
+                res.status(503).json({
+                    success: false,
+                    code: 'TENANT_DATABASE_UNAVAILABLE',
+                    error: `Selected dairy tenant database (${tenantMapping.dairyCode}) is unavailable (provisioning status: ${tenantMapping.provisioningStatus}). Customer registration cannot proceed until database provisioning is resolved.`,
+                    data: {
+                        dairyId: targetOrgId,
+                        dairyCode: tenantMapping.dairyCode,
+                        provisioningStatus: tenantMapping.provisioningStatus,
+                        provisioningError: tenantMapping.provisioningError,
+                    },
+                });
+                return;
+            }
+            tenantDb = await tenantDbManager.getStrictTenantDb(targetOrgId);
+        }
+        catch (tenantErr) {
+            res.status(503).json({
+                success: false,
+                code: tenantErr?.code || 'TENANT_DATABASE_UNAVAILABLE',
+                error: tenantErr?.message || 'Selected dairy tenant database is unavailable. Please retry.',
+            });
+            return;
+        }
+        // Phase 4C & DF-017: Resolve center EXCLUSIVELY from the selected dairy's authoritative tenant database
         let centerId = body.centerId;
         if (centerId) {
             if (!UUID_REGEX.test(centerId)) {
@@ -424,16 +438,9 @@ router.post('/register', registrationLimiter, optionalAuthenticate, async (req, 
             }
             let centerRow = null;
             try {
-                const cRes = await db.query(`SELECT id, organization_id, status FROM dairy_centers WHERE id = $1 LIMIT 1;`, [centerId]);
-                if (cRes.rows.length > 0) {
-                    centerRow = cRes.rows[0];
-                }
-                else {
-                    const tenantDb = await tenantDbManager.getTenantDb(targetOrgId);
-                    const tcRes = await tenantDb.query(`SELECT id, organization_id, status FROM dairy_centers WHERE id = $1 LIMIT 1;`, [centerId]);
-                    if (tcRes.rows.length > 0) {
-                        centerRow = tcRes.rows[0];
-                    }
+                const tcRes = await tenantDb.query(`SELECT id, organization_id, status FROM dairy_centers WHERE id = $1 LIMIT 1;`, [centerId]);
+                if (tcRes.rows.length > 0) {
+                    centerRow = tcRes.rows[0];
                 }
             }
             catch {
@@ -445,10 +452,29 @@ router.post('/register', registrationLimiter, optionalAuthenticate, async (req, 
                 return;
             }
             if (!centerRow) {
+                // Read-only diagnostic check on central directory strictly to return accurate 403 CROSS_TENANT_CENTER error code
+                // when caller explicitly submits a center belonging to another dairy. Never accepts central-only centers.
+                try {
+                    const controlDb = tenantDbManager.getControlPlaneDb();
+                    const crossCheck = await controlDb.query(`SELECT organization_id FROM dairy_centers WHERE id = $1 LIMIT 1;`, [centerId]);
+                    if (crossCheck.rows.length > 0 &&
+                        crossCheck.rows[0].organization_id &&
+                        String(crossCheck.rows[0].organization_id).toLowerCase() !== targetOrgId.toLowerCase()) {
+                        res.status(403).json({
+                            success: false,
+                            code: 'CROSS_TENANT_CENTER',
+                            error: 'Selected collection center does not belong to the chosen dairy organization.',
+                        });
+                        return;
+                    }
+                }
+                catch {
+                    // Proceed with strict INVALID_CENTER rejection below
+                }
                 res.status(400).json({
                     success: false,
                     code: 'INVALID_CENTER',
-                    error: 'Selected collection center does not exist.',
+                    error: 'Selected collection center does not exist in the selected dairy.',
                 });
                 return;
             }
@@ -472,11 +498,7 @@ router.post('/register', registrationLimiter, optionalAuthenticate, async (req, 
         else {
             let centerRes;
             try {
-                centerRes = await db.query(`SELECT id FROM dairy_centers WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1;`, [targetOrgId]);
-                if (centerRes.rows.length === 0 && tenantMapping) {
-                    const tenantDb = await tenantDbManager.getTenantDb(targetOrgId);
-                    centerRes = await tenantDb.query(`SELECT id FROM dairy_centers WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1;`, [targetOrgId]);
-                }
+                centerRes = await tenantDb.query(`SELECT id FROM dairy_centers WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1;`, [targetOrgId]);
             }
             catch {
                 res.status(503).json({
@@ -517,11 +539,25 @@ router.post('/register', registrationLimiter, optionalAuthenticate, async (req, 
                 });
             }
             catch (bioErr) {
-                logger.warn({ customerId: data.id, err: bioErr?.message }, 'Biometric enrollment failed during /register');
-                res.status(bioErr?.statusCode || 400).json({
-                    success: false,
-                    code: bioErr?.code || 'BIOMETRIC_ENROLLMENT_FAILED',
-                    error: bioErr?.message || 'Customer registered as pending, but biometric enrollment failed validation.',
+                logger.warn({ customerId: data.id, err: bioErr?.message }, 'Biometric enrollment failed during /register after pending customer creation');
+                res.status(201).json({
+                    success: true,
+                    partialSuccess: true,
+                    customerCreated: true,
+                    biometricEnrolled: false,
+                    code: 'BIOMETRIC_ENROLLMENT_PARTIAL_FAILURE',
+                    warning: bioErr?.message || 'Customer registered as pending approval, but biometric enrollment failed. Please retry face enrollment.',
+                    biometricError: {
+                        code: bioErr?.code || 'BIOMETRIC_ENROLLMENT_FAILED',
+                        message: bioErr?.message || 'Biometric enrollment failed.',
+                    },
+                    data: {
+                        ...data,
+                        isBiometricEnrolled: false,
+                    },
+                    customerUuid: data.id,
+                    status: data.registrationStatus,
+                    submissionTimestamp: new Date().toISOString(),
                 });
                 return;
             }
@@ -865,147 +901,25 @@ const handleBiometricsUpdate = async (req, res, next) => {
         const orgId = req.user?.organizationId || requestedOrgId;
         // Resolve canonical customer record strictly in tenant DB context
         let customer = await customerRepo.findById(customerId, orgId);
-        // 1. Fallback: Lookup customer in any dairy if not found with orgId
-        if (!customer && customerId) {
-            customer = await customerRepo.findById(customerId);
-        }
-        // 2. Fallback: Lookup by globalCustomerId
+        // Fallback: Lookup by globalCustomerId within orgId
         if (!customer && req.user?.globalCustomerId && req.user.globalCustomerId !== customerId) {
             customer = await customerRepo.findById(req.user.globalCustomerId, orgId);
-            if (!customer) {
-                customer = await customerRepo.findById(req.user.globalCustomerId);
-            }
         }
-        // 3. Fallback: Lookup by userId (if valid UUID and not 'unregistered:...')
+        // Fallback: Lookup by userId within orgId
         if (!customer && req.user?.userId && req.user.userId !== customerId && !req.user.userId.startsWith('unregistered:')) {
             customer = await customerRepo.findById(req.user.userId, orgId);
-            if (!customer) {
-                customer = await customerRepo.findById(req.user.userId);
-            }
         }
-        // 4. Fallback: Lookup by phone
+        // Fallback: Lookup by verified phone within orgId
         const cleanPhone = req.user?.mobileNumber ||
             req.user?.phoneNumber ||
             (req.user?.userId?.startsWith('unregistered:') ? req.user.userId.replace('unregistered:', '') : null) ||
             req.body?.phone ||
             req.body?.mobileNumber;
-        if (!customer && cleanPhone) {
+        if (!customer && cleanPhone && orgId) {
             customer = await customerRepo.findByPhone(cleanPhone, orgId);
-            if (!customer) {
-                customer = await customerRepo.findByPhone(cleanPhone);
-            }
-        }
-        // 5. Development Self-Healing: In development / test environment, if DB was reset or running in-memory,
-        // auto-provision customer so farmers and mobile test clients never hit a dead-end 404.
-        // If an administrative user explicitly requests a non-existent customer, we maintain standard 404 behavior.
-        const isSelfOrMobileFarmer = !isExplicitId ||
-            rawId === 'me' ||
-            customerId === 'me' ||
-            (req.user && (req.user.userId === customerId || req.user.globalCustomerId === customerId)) ||
-            (req.user?.role === 'FARMER' || req.user?.role === 'FARMER_CUSTOMER' || req.user?.actorType === 'CUSTOMER') ||
-            customerId === 'ccd1cd2d-64f9-4650-9d38-d3373aa89eca' ||
-            (typeof customerId === 'string' && customerId.startsWith('unregistered:'));
-        if (!customer && isSelfOrMobileFarmer && (config.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production')) {
-            const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            const targetDairyId = orgId || req.user?.organizationId || requestedOrgId || '38918630-4fee-4cec-96ea-a3a899aae7bc';
-            const devCustId = isUuid.test(customerId)
-                ? customerId
-                : (req.user?.userId && isUuid.test(req.user.userId)
-                    ? req.user.userId
-                    : (req.user?.globalCustomerId && isUuid.test(req.user.globalCustomerId)
-                        ? req.user.globalCustomerId
-                        : 'ccd1cd2d-64f9-4650-9d38-d3373aa89eca'));
-            const devGlobalId = (req.user?.globalCustomerId && isUuid.test(req.user.globalCustomerId))
-                ? req.user.globalCustomerId
-                : (isUuid.test(devCustId) ? devCustId : 'ccd1cd2d-64f9-4650-9d38-d3373aa89ec0');
-            const numericHash = Math.abs(parseInt(devCustId.replace(/[^0-9]/g, '').slice(0, 8) || '12345678', 10));
-            const devCode = `F-${100 + (numericHash % 899)}`;
-            const devPhone = cleanPhone || ('+91' + (7000000000 + (numericHash % 2000000000)));
-            let devCenterId = '38918630-4fee-4cec-96ea-a3a899aae701';
-            try {
-                const tenantDb = await tenantDbManager.getTenantDb(targetDairyId);
-                const centerRes = await tenantDb.query('SELECT id FROM dairy_centers WHERE organization_id = $1 LIMIT 1;', [targetDairyId]);
-                if (centerRes.rows.length > 0 && centerRes.rows[0].id) {
-                    devCenterId = centerRes.rows[0].id;
-                }
-                else {
-                    await tenantDb.query(`
-            INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
-            VALUES ($1, $2, 'C-01', 'Main Collection Center', 'Center Road', 'Local', 'District', 'State', '400001', '+919876543210', 'ACTIVE')
-            ON CONFLICT (id) DO NOTHING;
-          `, [devCenterId, targetDairyId]);
-                }
-                const realCustName = (req.body?.fullName || req.body?.name || req.user?.name || 'Farmer Customer');
-                const controlDb = tenantDbManager.getControlPlaneDb();
-                let orgName = 'DFarm Cooperative Society';
-                let orgCode = 'DFARM';
-                try {
-                    const orgInfo = await controlDb.query('SELECT name, code FROM organizations WHERE id = $1 LIMIT 1;', [targetDairyId]);
-                    if (orgInfo.rows.length > 0) {
-                        orgName = orgInfo.rows[0].name || orgName;
-                        orgCode = orgInfo.rows[0].code || orgCode;
-                    }
-                }
-                catch { }
-                await tenantDb.query(`
-          INSERT INTO customers (
-            id, organization_id, primary_center_id, farmer_code, full_name,
-            normalized_mobile_number, status, registration_status,
-            is_deleted, global_customer_id, created_at, updated_at
-          ) VALUES (
-            $1, $2, $3, $4, $5,
-            $6, 'ACTIVE', 'APPROVED',
-            FALSE, $7, NOW(), NOW()
-          ) ON CONFLICT (id) DO UPDATE SET
-            is_deleted = FALSE,
-            status = 'ACTIVE',
-            registration_status = 'APPROVED',
-            organization_id = EXCLUDED.organization_id,
-            full_name = COALESCE(customers.full_name, EXCLUDED.full_name);
-        `, [devCustId, targetDairyId, devCenterId, devCode, realCustName, devPhone, devGlobalId]);
-                await tenantDb.query(`
-          INSERT INTO customer_milk_categories (customer_id, milk_category, is_authorized, authorized_by)
-          VALUES ($1, 'COW', TRUE, '00000000-0000-0000-0000-000000000099'),
-                 ($1, 'BUFFALO', TRUE, '00000000-0000-0000-0000-000000000099')
-          ON CONFLICT (customer_id, milk_category) DO NOTHING;
-        `, [devCustId]).catch(() => { });
-                await controlDb.query(`
-          INSERT INTO customer_dairy_memberships (
-            id, global_customer_id, organization_id, tenant_customer_id,
-            farmer_code, customer_name, membership_status, dairy_name, dairy_code, center_id, center_name,
-            created_at, updated_at
-          ) VALUES (
-            gen_random_uuid(), $1, $2, $3,
-            $4, $5, 'APPROVED', $6, $7, $8, 'Main Center',
-            NOW(), NOW()
-          ) ON CONFLICT (organization_id, global_customer_id) DO UPDATE SET
-            customer_name = COALESCE(EXCLUDED.customer_name, customer_dairy_memberships.customer_name);
-        `, [devGlobalId, targetDairyId, devCustId, devCode, realCustName, orgName, orgCode, devCenterId]).catch(() => { });
-                await controlDb.query(`
-          CREATE TABLE IF NOT EXISTS customer_tenant_lookup (
-            customer_id UUID PRIMARY KEY,
-            organization_id UUID NOT NULL,
-            normalized_mobile_number VARCHAR(30),
-            registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
-        `).catch(() => { });
-                await controlDb.query(`
-          INSERT INTO customer_tenant_lookup (
-            customer_id, organization_id, normalized_mobile_number
-          ) VALUES (
-            $1, $2, $3
-          ) ON CONFLICT (customer_id) DO UPDATE SET
-            organization_id = EXCLUDED.organization_id,
-            normalized_mobile_number = EXCLUDED.normalized_mobile_number;
-        `, [devCustId, targetDairyId, devPhone]).catch(() => { });
-                customer = await customerRepo.findById(devCustId, targetDairyId);
-            }
-            catch (err) {
-                logger.warn({ error: err.message }, 'Development auto-provisioning customer failed');
-            }
         }
         if (!customer) {
-            // If customer was explicitly requested but not in this orgId, check globally to distinguish 403 vs 404
+            // If customer was explicitly requested but not in this orgId, check central registry to distinguish 403 vs 404
             const customerInAnyDairy = isExplicitId ? await customerRepo.findById(customerId) : null;
             if (customerInAnyDairy && orgId && customerInAnyDairy.organizationId !== orgId) {
                 res.status(403).json({
@@ -1259,26 +1173,19 @@ router.put('/:id/bank-details', authenticate, async (req, res, next) => {
             return;
         }
         const orgId = customer.organizationId || req.user?.organizationId;
-        const client = orgId ? await tenantDbManager.getTenantDb(orgId) : db;
+        if (!orgId) {
+            res.status(400).json({ success: false, error: 'Dairy organization context is required.' });
+            return;
+        }
+        const client = await tenantDbManager.getStrictTenantDb(orgId);
         const holder = accountHolderName || customer.fullName;
-        try {
-            await client.query(`UPDATE customers 
-         SET bank_name = $1, 
-             bank_account_number = $2, 
-             bank_ifsc_code = $3, 
-             bank_account_holder_name = $4,
-             updated_at = NOW()
-         WHERE id = $5;`, [bankName, cleanAcc, cleanIfsc, holder, customerId]);
-        }
-        catch {
-            await db.query(`UPDATE customers 
-         SET bank_name = $1, 
-             bank_account_number = $2, 
-             bank_ifsc_code = $3, 
-             bank_account_holder_name = $4,
-             updated_at = NOW()
-         WHERE id = $5;`, [bankName, cleanAcc, cleanIfsc, holder, customerId]);
-        }
+        await client.query(`UPDATE customers 
+       SET bank_name = $1, 
+           bank_account_number = $2, 
+           bank_ifsc_code = $3, 
+           bank_account_holder_name = $4,
+           updated_at = NOW()
+       WHERE id = $5 AND organization_id = $6;`, [bankName, cleanAcc, cleanIfsc, holder, customerId, orgId]);
         const mask = cleanAcc.length >= 4 ? `XXXX-XXXX-${cleanAcc.slice(-4)}` : 'XXXX';
         res.json({
             success: true,

@@ -53,12 +53,13 @@ export declare class ProcessOfflineSyncBatchUseCase {
         deviceId: string;
         operatorId: string;
         operatorName: string;
-        organizationId?: string;
+        organizationId: string;
         transactions: Array<{
             clientIntakeUuid: string;
             sessionCode?: string;
             customerId: string;
             organizationId?: string;
+            dairyId?: string;
             milkCategory: 'COW' | 'BUFFALO';
             weightLiters: number;
             fatPercentage: number;
@@ -77,6 +78,7 @@ export declare class ProcessOfflineSyncBatchUseCase {
         items: {
             clientIntakeUuid: string;
             success: boolean;
+            errorCode?: string;
             error?: string;
             transactionId?: string;
             receiptNumber?: string;
@@ -85,6 +87,7 @@ export declare class ProcessOfflineSyncBatchUseCase {
         details: {
             clientIntakeUuid: string;
             success: boolean;
+            errorCode?: string;
             error?: string;
             transactionId?: string;
             receiptNumber?: string;

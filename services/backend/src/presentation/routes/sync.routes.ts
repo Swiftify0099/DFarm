@@ -48,7 +48,9 @@ const handleBulkSync = async (req: Request, res: Response, next: NextFunction): 
     const requestedOrgId =
       (req.headers['x-organization-id'] as string) ||
       (req.headers['x-dairy-tenant-id'] as string) ||
-      (req.body?.organizationId as string);
+      (req.headers['x-dairy-id'] as string) ||
+      (req.body?.organizationId as string) ||
+      (req.body?.dairyId as string);
     if (requestedOrgId && requestedOrgId !== orgId) {
       res.status(403).json({ success: false, error: 'Cross-tenant bulk sync blocked: Organization ID mismatch' });
       return;
@@ -106,7 +108,9 @@ const handleSyncBatch = async (req: Request, res: Response, next: NextFunction) 
     const requestedOrgId =
       (req.headers['x-organization-id'] as string) ||
       (req.headers['x-dairy-tenant-id'] as string) ||
-      (req.body?.organizationId as string);
+      (req.headers['x-dairy-id'] as string) ||
+      (req.body?.organizationId as string) ||
+      (req.body?.dairyId as string);
     if (requestedOrgId && requestedOrgId !== orgId) {
       res.status(403).json({ success: false, error: 'Cross-tenant sync blocked: Organization ID mismatch' });
       return;
@@ -116,6 +120,7 @@ const handleSyncBatch = async (req: Request, res: Response, next: NextFunction) 
     const operatorName = req.user?.fullName || 'Counter Operator';
 
     const result = await syncUseCase.execute({
+      organizationId: orgId,
       deviceId: deviceId || 'KIOSK_MAIN',
       operatorId,
       operatorName,

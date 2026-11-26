@@ -422,9 +422,25 @@ test('RESTART-02.1: Durable Token Revocation, Account Authority, Centers & Regis
       });
     assert.equal(staffCrossRes.status, 403);
 
-    // 7. Missing center in org with zero active centers returns 400 NO_ACTIVE_CENTER (no fabricated center)
+    // 7. Missing center in active provisioned org with zero active centers returns 400 NO_ACTIVE_CENTER (no fabricated center)
+    const unmappedOrg = '44444444-dead-4111-a111-666666666666';
+    await db.query(`INSERT INTO organizations (id, name, code, status) VALUES ($1, 'Unmapped Org', 'UNMAPPED_R021', 'ACTIVE') ON CONFLICT (id) DO NOTHING;`, [unmappedOrg]);
+    const unmappedOrgRes = await request(app)
+      .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${guestToken}`)
+      .send({ mobileNumber: newPhone, organizationId: unmappedOrg, fullName: 'Unmapped Org Farmer' });
+    assert.equal(unmappedOrgRes.status, 503);
+    assert.equal(unmappedOrgRes.body.code, 'TENANT_MAPPING_MISSING');
+
     const zeroCenterOrg = '44444444-dead-4111-a111-777777777777';
     await db.query(`INSERT INTO organizations (id, name, code, status) VALUES ($1, 'Zero Center Org', 'ZERO_C_R021', 'ACTIVE') ON CONFLICT (id) DO NOTHING;`, [zeroCenterOrg]);
+    await tenantDbManager.provisionTenantDatabase({
+      dairyId: zeroCenterOrg,
+      dairyCode: 'ZERO_C_R021',
+      dairyName: 'Zero Center Org',
+    });
+    const zeroCenterTenantDb = await tenantDbManager.getStrictTenantDb(zeroCenterOrg);
+    await zeroCenterTenantDb.query(`DELETE FROM dairy_centers;`);
     const noCenterRes = await request(app)
       .post('/api/v1/customers/register')
       .set('Authorization', `Bearer ${guestToken}`)

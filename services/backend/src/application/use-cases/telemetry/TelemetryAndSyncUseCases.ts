@@ -1,4 +1,5 @@
 import { ProcessMilkIntakeUseCase, ProcessMilkIntakeDTO } from '../collections/MilkIntakeUseCases.js';
+import { DomainValidationError } from '../../../domain/errors/index.js';
 import { db } from '../../../infrastructure/database/PostgresPool.js';
 
 export class GetDeviceTelemetryUseCase {
@@ -61,12 +62,13 @@ export class ProcessOfflineSyncBatchUseCase {
     deviceId: string;
     operatorId: string;
     operatorName: string;
-    organizationId?: string;
+    organizationId: string;
     transactions: Array<{
       clientIntakeUuid: string;
       sessionCode?: string;
       customerId: string;
       organizationId?: string;
+      dairyId?: string;
       milkCategory: 'COW' | 'BUFFALO';
       weightLiters: number;
       fatPercentage: number;
@@ -76,9 +78,18 @@ export class ProcessOfflineSyncBatchUseCase {
       idempotencyKey?: string;
     }>;
   }) {
+    if (!batch.organizationId || !batch.organizationId.trim()) {
+      throw new DomainValidationError(
+        'Authenticated organization ID is strictly required for offline batch sync.',
+        'MISSING_ORGANIZATION_ID'
+      );
+    }
+    const batchOrgId = batch.organizationId.trim();
+
     const results: Array<{
       clientIntakeUuid: string;
       success: boolean;
+      errorCode?: string;
       error?: string;
       transactionId?: string;
       receiptNumber?: string;
@@ -87,8 +98,20 @@ export class ProcessOfflineSyncBatchUseCase {
 
     for (const item of batch.transactions) {
       try {
+        const itemOrgId = (item.organizationId || item.dairyId || '').trim();
+        if (itemOrgId && itemOrgId.toLowerCase() !== batchOrgId.toLowerCase()) {
+          results.push({
+            clientIntakeUuid: item.clientIntakeUuid,
+            success: false,
+            errorCode: 'CROSS_TENANT_ITEM_BLOCKED',
+            error: 'Transaction item organizationId does not match authenticated dairy organization.',
+            isIdempotentReplay: false,
+          });
+          continue;
+        }
+
         const dto: ProcessMilkIntakeDTO = {
-          organizationId: item.organizationId || batch.organizationId || '',
+          organizationId: batchOrgId,
           sessionCode: item.sessionCode,
           customerId: item.customerId,
           milkCategory: (item as any).milkCategory || (item as any).milkType || 'COW',

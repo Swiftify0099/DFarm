@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { MilkCollectionTransaction } from '../../../domain/entities/MilkCollectionTransaction.js';
-import { CustomerNotFoundError, SessionClosedError, DomainValidationError, } from '../../../domain/errors/index.js';
+import { CustomerNotFoundError, SessionClosedError, DomainValidationError, ForbiddenTenantError, } from '../../../domain/errors/index.js';
 import { FatPercentage, SnfPercentage, MilkWeight } from '../../../domain/value-objects/index.js';
 import { financialPolicyResolutionService } from '../../../domain/services/FinancialPolicyResolutionService.js';
 export class ProcessMilkIntakeUseCase {
@@ -39,13 +39,16 @@ export class ProcessMilkIntakeUseCase {
         new FatPercentage(dto.fatPercentage, dto.milkCategory);
         new SnfPercentage(dto.snfPercentage, dto.milkCategory);
         // 3. Verify Customer & Permissions
-        const customer = await this.customerRepo.findById(dto.customerId, dto.organizationId);
+        const customer = await this.customerRepo.findById(dto.customerId, orgId);
         if (!customer) {
             throw new CustomerNotFoundError(dto.customerId);
         }
+        if (customer.organizationId.toLowerCase() !== orgId.toLowerCase()) {
+            throw new ForbiddenTenantError('Cross-dairy collection blocked: customer belongs to a different organization.');
+        }
         customer.validateCanDeliver(dto.milkCategory);
         // 4. Verify Active Session
-        const resolvedOrgId = orgId || customer.organizationId;
+        const resolvedOrgId = orgId;
         let session = dto.sessionId
             ? await this.sessionRepo.findById(dto.sessionId, resolvedOrgId)
             : null;
@@ -61,6 +64,9 @@ export class ProcessMilkIntakeUseCase {
         }
         if (!session || !session.isOpen) {
             throw new SessionClosedError(dto.sessionCode || dto.sessionId || 'Unknown');
+        }
+        if (session.organizationId.toLowerCase() !== resolvedOrgId.toLowerCase()) {
+            throw new ForbiddenTenantError('Cross-dairy collection blocked: session belongs to a different organization.');
         }
         // 5. Authoritative Rate & Amount Calculation
         const rateChart = await this.rateChartRepo.getActiveRateChart(customer.centerId, customer.organizationId, dto.milkCategory, session.businessDate);

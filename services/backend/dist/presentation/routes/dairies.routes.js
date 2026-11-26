@@ -1204,6 +1204,58 @@ router.post('/', authenticate, authorizeRoles('SUPER_ADMIN'), async (req, res, n
         let tenantDbMapping = null;
         try {
             tenantDbMapping = await tenantDbManager.provisionTenantDatabase(orgId, orgCode, name.trim());
+            if (tenantDbMapping && tenantDbMapping.provisioningStatus === 'ACTIVE') {
+                const tenantDb = await tenantDbManager.getStrictTenantDb(orgId);
+                // Mirror authoritative primary collection center into tenant operational DB
+                await tenantDb.query(`INSERT INTO dairy_centers (
+            id, organization_id, code, name, address_line1, village_town,
+            district, state, postal_code, contact_phone, contact_email,
+            latitude, longitude, formatted_address, place_id, country, location_updated_at, status
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'India', NOW(), 'ACTIVE'
+          ) ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            status = 'ACTIVE',
+            updated_at = NOW();`, [
+                    centerId,
+                    orgId,
+                    centerCode,
+                    `${name.trim()} Main Center`,
+                    addressLine1 || 'Main Road',
+                    villageLocality || district || 'Town',
+                    district || 'District',
+                    state || 'State',
+                    pincode || '000000',
+                    businessPhone || cleanedMobile,
+                    normalizedEmail,
+                    latitude !== undefined ? latitude : null,
+                    longitude !== undefined ? longitude : null,
+                    formattedAddress || null,
+                    placeId || null,
+                ]);
+                // Mirror primary dairy admin user and center assignment into tenant operational DB
+                await tenantDb.query(`INSERT INTO users (
+            id, organization_id, username, full_name, email, phone_number, mobile_number, normalized_mobile_number, role, user_role, status, activated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $6, $7, 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'ACTIVE', NOW()
+          ) ON CONFLICT (id) DO UPDATE SET
+            organization_id = EXCLUDED.organization_id,
+            status = 'ACTIVE',
+            role = 'DAIRY_ADMIN',
+            user_role = 'PRIMARY_DAIRY_ADMIN',
+            activated_at = NOW();`, [
+                    adminId,
+                    orgId,
+                    `admin_${cleanedMobile}`,
+                    trimmedAdminName,
+                    normalizedEmail,
+                    cleanedMobile,
+                    `+91${cleanedMobile}`,
+                ]);
+                await tenantDb.query(`INSERT INTO user_center_assignments (id, user_id, center_id, is_primary)
+           VALUES (gen_random_uuid(), $1, $2, TRUE)
+           ON CONFLICT (user_id, center_id) DO UPDATE SET is_primary = TRUE;`, [adminId, centerId]);
+            }
         }
         catch (err) {
             logger.error({ error: err.message, orgId, orgCode }, 'Tenant database provisioning encountered an issue');
@@ -1360,6 +1412,41 @@ router.patch('/:id/location', authenticate, authorizeRoles('SUPER_ADMIN', 'DAIRY
         }
         catch {
             // Database offline; memory cache retained
+        }
+        // Propagate location update to active tenant operational DB center record
+        try {
+            const mapping = await tenantDbManager.resolveTenantMapping(dairyId);
+            if (mapping && mapping.provisioningStatus === 'ACTIVE') {
+                const tenantDb = await tenantDbManager.getStrictTenantDb(dairyId);
+                await tenantDb.query(`UPDATE dairy_centers
+           SET 
+             latitude = COALESCE($2, latitude),
+             longitude = COALESCE($3, longitude),
+             formatted_address = COALESCE($4, formatted_address),
+             place_id = COALESCE($5, place_id),
+             address_line1 = COALESCE($6, address_line1),
+             district = COALESCE($7, district),
+             state = COALESCE($8, state),
+             postal_code = COALESCE($9, postal_code),
+             village_town = COALESCE($10, village_town),
+             location_updated_at = NOW(),
+             updated_at = NOW()
+           WHERE organization_id = $1;`, [
+                    dairyId,
+                    latitude !== undefined ? Number(latitude) : null,
+                    longitude !== undefined ? Number(longitude) : null,
+                    formattedAddress || null,
+                    placeId || null,
+                    addressLine1 || null,
+                    district || null,
+                    state || null,
+                    pincode || null,
+                    villageLocality || null,
+                ]);
+            }
+        }
+        catch {
+            // Tenant DB update best-effort after authoritative control-plane update
         }
         res.json({
             success: true,

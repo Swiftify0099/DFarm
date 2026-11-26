@@ -177,7 +177,20 @@ export class BulkCollectionSyncUseCase {
       }
 
       try {
-        // 1. Basic Field Validation
+        // 1. Basic Field Validation & Cross-Tenant Item Rejection
+        const itemOrgId = String((item as any).organizationId || (item as any).dairyId || '').trim();
+        if (itemOrgId && itemOrgId.toLowerCase() !== orgId.toLowerCase()) {
+          results.push({
+            clientIntakeUuid,
+            idempotencyKey,
+            status: 'REJECTED',
+            isIdempotentReplay: false,
+            errorCode: 'CROSS_TENANT_ITEM_BLOCKED',
+            errorMessage: 'Transaction item organizationId does not match authenticated dairy organization',
+          });
+          continue;
+        }
+
         if (!item.customerId) {
           results.push({
             clientIntakeUuid,
