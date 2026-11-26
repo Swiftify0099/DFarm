@@ -28,7 +28,7 @@ export interface MeResponse {
 }
 export declare class AuthService {
     static getMe(context: AuthContext): Promise<MeResponse>;
-    static getCenters(context: AuthContext): Promise<Array<{
+    static getCenters(context: AuthContext, requestedOrganizationId?: string): Promise<Array<{
         id: string;
         code: string;
         name: string;

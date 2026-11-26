@@ -51,7 +51,12 @@ export function requireSuperAdminRole(req, res, next) {
     }
     next();
 }
-// Attach token extraction and base platform staff role check
+// Phase 7 Classification: Preserve optionalAuthenticate followed immediately by requirePlatformStaffRole.
+// optionalAuthenticate runs full DB-backed JWT + revocation + AccountAuthorityService verification
+// when a Bearer token is supplied (and fails closed with 503 on DB outage), leaving req.user
+// undefined when missing/invalid/revoked so requirePlatformStaffRole rejects unauthenticated
+// callers with the exact documented 401 JSON shape (`{ success: false, error: string }`) and
+// non-platform roles (CUSTOMER, COLLECTION_OPERATOR, DAIRY_ADMIN) with 403.
 router.use(optionalAuthenticate);
 router.use(requirePlatformStaffRole);
 // ============================================================================

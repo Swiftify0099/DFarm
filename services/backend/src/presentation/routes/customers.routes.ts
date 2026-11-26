@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import crypto from 'node:crypto';
+import rateLimit from 'express-rate-limit';
 import {
   GetCustomersUseCase,
   GetCustomerByIdUseCase,
@@ -26,8 +26,24 @@ import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseMan
 import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
 import { authorizePermission, hasPermission } from '../middleware/authorize.js';
 import { CustomerNotFoundError } from '../../domain/errors/index.js';
+import { PhoneNumber } from '../../domain/value-objects/index.js';
+import { doveOtpService } from '../../infrastructure/otp/DoveOtpService.js';
 import { logger } from '../../shared/logger/index.js';
 import { config } from '../../config/env.js';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const registrationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: () => (process.env['NODE_ENV'] === 'test' ? 500 : 15),
+  message: {
+    success: false,
+    code: 'TOO_MANY_REQUESTS',
+    error: 'Too many registration requests from this IP. Please try again in a minute.',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 const router = Router();
 const customerRepo = new PostgresCustomerRepository();
@@ -226,44 +242,173 @@ router.post('/switch-dairy', authenticate, async (req: Request, res: Response, n
   }
 });
 
-// 3. Register Customer (Self-registration)
-router.post('/register', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+// 3. Register Customer (Self-registration with mandatory identity proof or authorized staff onboarding)
+router.post('/register', registrationLimiter, optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const body = req.body;
     const userPhone = req.user?.userId?.startsWith('unregistered:')
       ? req.user.userId.replace('unregistered:', '')
-      : undefined;
-    const phone = body.mobileNumber || body.phone || userPhone;
+      : req.user?.phoneNumber;
+    const rawPhone = body.mobileNumber || body.phone || userPhone;
 
-    if (!phone) {
+    if (!rawPhone) {
       res.status(400).json({
         success: false,
+        code: 'MISSING_PHONE',
         error: 'Mobile number is mandatory for producer registration.',
       });
       return;
     }
 
-    const targetOrgId = body.organizationId || body.dairyId || body.selectedDairyId;
-    if (!targetOrgId) {
+    let phoneE164: string;
+    try {
+      phoneE164 = new PhoneNumber(rawPhone).e164;
+    } catch (phoneErr: any) {
       res.status(400).json({
         success: false,
-        error: 'Dairy selection (organizationId) is required for customer registration.',
+        code: 'INVALID_PHONE',
+        error: phoneErr?.message || 'Invalid mobile number format.',
       });
       return;
     }
 
+    const targetOrgId = (body.organizationId || body.dairyId || body.selectedDairyId) as string | undefined;
+    if (!targetOrgId) {
+      res.status(400).json({
+        success: false,
+        code: 'MISSING_ORGANIZATION',
+        error: 'Dairy selection (organizationId) is required for customer registration.',
+      });
+      return;
+    }
+    if (!UUID_REGEX.test(targetOrgId)) {
+      res.status(400).json({
+        success: false,
+        code: 'INVALID_ORGANIZATION_ID',
+        error: 'Invalid dairy organization identifier.',
+      });
+      return;
+    }
+
+    // Phase 4A: Verify caller identity proof before creating or updating any customer record
     if (req.user?.actorType === 'STAFF') {
-      if (!hasPermission(req.user.role, 'customers:update') && !hasPermission(req.user.role, 'customers:approve') && req.user.role !== 'SUPER_ADMIN') {
+      if (
+        !hasPermission(req.user.role, 'customers:update') &&
+        !hasPermission(req.user.role, 'customers:approve') &&
+        req.user.role !== 'SUPER_ADMIN'
+      ) {
         res.status(403).json({ success: false, error: 'Forbidden: Staff role lacks customer registration permission.' });
         return;
       }
-      if (req.user.role !== 'SUPER_ADMIN' && req.user.organizationId && targetOrgId !== req.user.organizationId) {
+      if (req.user.role !== 'SUPER_ADMIN' && req.user.organizationId && targetOrgId.toLowerCase() !== req.user.organizationId.toLowerCase()) {
         res.status(403).json({ success: false, error: 'Cross-dairy customer registration blocked.' });
+        return;
+      }
+    } else if (req.user?.actorType === 'CUSTOMER') {
+      if (!userPhone) {
+        res.status(401).json({
+          success: false,
+          code: 'REGISTRATION_PROOF_REQUIRED',
+          error: 'Verified phone registration session is required.',
+        });
+        return;
+      }
+      let tokenPhoneE164: string;
+      try {
+        tokenPhoneE164 = new PhoneNumber(userPhone).e164;
+      } catch {
+        res.status(401).json({
+          success: false,
+          code: 'REGISTRATION_PROOF_REQUIRED',
+          error: 'Verified phone registration session is invalid.',
+        });
+        return;
+      }
+      if (tokenPhoneE164 !== phoneE164) {
+        res.status(403).json({
+          success: false,
+          code: 'PHONE_MISMATCH',
+          error: 'Authenticated phone number does not match registration mobile number.',
+        });
+        return;
+      }
+    } else {
+      // Unauthenticated caller must present a valid OTP proof bound to the normalized phone number
+      const inlineOtp = typeof body.otp === 'string' ? body.otp.trim() : '';
+      if (!inlineOtp) {
+        res.status(401).json({
+          success: false,
+          code: 'REGISTRATION_PROOF_REQUIRED',
+          error: 'Phone verification proof (OTP or verified registration token) is required before registration.',
+        });
+        return;
+      }
+      try {
+        const otpValid = await doveOtpService.verifyOtp(phoneE164, inlineOtp, 'CUSTOMER_AUTH');
+        if (!otpValid) {
+          res.status(401).json({
+            success: false,
+            code: 'INVALID_REGISTRATION_OTP',
+            error: 'Invalid or expired registration OTP.',
+          });
+          return;
+        }
+      } catch (otpErr: any) {
+        res.status(otpErr?.statusCode || 401).json({
+          success: false,
+          code: otpErr?.code || 'INVALID_REGISTRATION_OTP',
+          error: otpErr?.message || 'Registration OTP verification failed.',
+        });
         return;
       }
     }
 
-    // Strict Tenant Database Availability Verification
+    // Phase 4D: Validate biometric payload and explicit consent upfront before mutating DB
+    if (body.faceTemplate !== undefined && body.faceTemplate !== null) {
+      if (body.biometricConsent !== true) {
+        res.status(400).json({
+          success: false,
+          code: 'BIOMETRIC_CONSENT_REQUIRED',
+          error: 'Explicit biometricConsent: true is required to enroll facial biometrics during registration.',
+        });
+        return;
+      }
+      const emb = body.faceTemplate?.embedding;
+      if (
+        !Array.isArray(emb) ||
+        emb.length !== 128 ||
+        emb.some((v: unknown) => typeof v !== 'number' || !Number.isFinite(v))
+      ) {
+        res.status(400).json({
+          success: false,
+          code: 'INVALID_BIOMETRIC_PAYLOAD',
+          error: 'Face template embedding must be a finite 128-dimensional vector.',
+        });
+        return;
+      }
+      const sqNorm = emb.reduce((acc: number, v: number) => acc + v * v, 0);
+      if (sqNorm < 0.01) {
+        res.status(400).json({
+          success: false,
+          code: 'INVALID_BIOMETRIC_PAYLOAD',
+          error: 'Face template embedding has insufficient signal energy.',
+        });
+        return;
+      }
+      if (
+        body.faceTemplate.confidence !== undefined &&
+        (typeof body.faceTemplate.confidence !== 'number' || body.faceTemplate.confidence < 0.5)
+      ) {
+        res.status(400).json({
+          success: false,
+          code: 'LOW_BIOMETRIC_QUALITY',
+          error: 'Face biometric quality confidence is below the minimum acceptance threshold.',
+        });
+        return;
+      }
+    }
+
+    // Phase 4B: Validate organization exists and is ACTIVE
     const tenantMapping = tenantDbManager.getTenantMapping(targetOrgId);
     if (tenantMapping && tenantMapping.provisioningStatus === 'FAILED') {
       res.status(503).json({
@@ -280,36 +425,154 @@ router.post('/register', optionalAuthenticate, async (req: Request, res: Respons
       return;
     }
 
-    // Resolve primary center for this dairy
-    let centerId = body.centerId;
-    if (!centerId) {
-      try {
-        const centerRes = await db.query(
-          `SELECT id FROM dairy_centers WHERE organization_id = $1 LIMIT 1;`,
+    let orgStatusRow: { id: string; status: string } | null = null;
+    try {
+      const orgRes = await db.query(
+        `SELECT id, status FROM organizations WHERE id = $1 LIMIT 1;`,
+        [targetOrgId]
+      );
+      if (orgRes.rows.length > 0) {
+        orgStatusRow = orgRes.rows[0] as { id: string; status: string };
+      } else if (tenantMapping && tenantMapping.provisioningStatus === 'ACTIVE') {
+        const tenantDb = await tenantDbManager.getTenantDb(targetOrgId);
+        const tOrgRes = await tenantDb.query(
+          `SELECT id, status FROM organizations WHERE id = $1 LIMIT 1;`,
           [targetOrgId]
         );
-        if (centerRes.rows.length > 0) {
-          centerId = centerRes.rows[0].id;
+        if (tOrgRes.rows.length > 0) {
+          orgStatusRow = tOrgRes.rows[0] as { id: string; status: string };
+        }
+      }
+    } catch {
+      res.status(503).json({
+        success: false,
+        code: 'ORGANIZATION_DB_UNAVAILABLE',
+        error: 'Dairy organization verification database is unavailable. Please retry.',
+      });
+      return;
+    }
+
+    if (!orgStatusRow) {
+      res.status(400).json({
+        success: false,
+        code: 'INVALID_ORGANIZATION',
+        error: 'Selected dairy organization does not exist.',
+      });
+      return;
+    }
+
+    if (String(orgStatusRow.status || '').toUpperCase() !== 'ACTIVE') {
+      res.status(403).json({
+        success: false,
+        code: 'ORGANIZATION_INACTIVE',
+        error: 'Selected dairy organization is suspended or inactive and cannot accept registrations.',
+      });
+      return;
+    }
+
+    // Phase 4C: Validate explicit centerId (exists, belongs to targetOrgId, ACTIVE) or resolve active default center
+    let centerId = body.centerId as string | undefined;
+    if (centerId) {
+      if (!UUID_REGEX.test(centerId)) {
+        res.status(400).json({
+          success: false,
+          code: 'INVALID_CENTER_ID',
+          error: 'Invalid collection center identifier.',
+        });
+        return;
+      }
+
+      let centerRow: { id: string; organization_id: string; status: string } | null = null;
+      try {
+        const cRes = await db.query(
+          `SELECT id, organization_id, status FROM dairy_centers WHERE id = $1 LIMIT 1;`,
+          [centerId]
+        );
+        if (cRes.rows.length > 0) {
+          centerRow = cRes.rows[0] as { id: string; organization_id: string; status: string };
         } else {
-          const newCenterId = crypto.randomUUID();
-          await db.query(
-            `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, status)
-             VALUES ($1, $2, 'C-01', 'Main Collection Center', 'Center Road', 'Local', 'District', 'State', '400001', 'ACTIVE')
-             ON CONFLICT DO NOTHING;`,
-            [newCenterId, targetOrgId]
+          const tenantDb = await tenantDbManager.getTenantDb(targetOrgId);
+          const tcRes = await tenantDb.query(
+            `SELECT id, organization_id, status FROM dairy_centers WHERE id = $1 LIMIT 1;`,
+            [centerId]
           );
-          centerId = newCenterId;
+          if (tcRes.rows.length > 0) {
+            centerRow = tcRes.rows[0] as { id: string; organization_id: string; status: string };
+          }
         }
       } catch {
-        centerId = '00000000-0000-0000-0000-000000000002';
+        res.status(503).json({
+          success: false,
+          code: 'CENTER_DB_UNAVAILABLE',
+          error: 'Registration center lookup database is unavailable. Please retry.',
+        });
+        return;
       }
+
+      if (!centerRow) {
+        res.status(400).json({
+          success: false,
+          code: 'INVALID_CENTER',
+          error: 'Selected collection center does not exist.',
+        });
+        return;
+      }
+
+      if (String(centerRow.organization_id || '').toLowerCase() !== targetOrgId.toLowerCase()) {
+        res.status(403).json({
+          success: false,
+          code: 'CROSS_TENANT_CENTER',
+          error: 'Selected collection center does not belong to the chosen dairy organization.',
+        });
+        return;
+      }
+
+      if (String(centerRow.status || '').toUpperCase() !== 'ACTIVE') {
+        res.status(400).json({
+          success: false,
+          code: 'INACTIVE_CENTER',
+          error: 'Selected collection center is inactive.',
+        });
+        return;
+      }
+    } else {
+      let centerRes;
+      try {
+        centerRes = await db.query(
+          `SELECT id FROM dairy_centers WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1;`,
+          [targetOrgId]
+        );
+        if (centerRes.rows.length === 0 && tenantMapping) {
+          const tenantDb = await tenantDbManager.getTenantDb(targetOrgId);
+          centerRes = await tenantDb.query(
+            `SELECT id FROM dairy_centers WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1;`,
+            [targetOrgId]
+          );
+        }
+      } catch {
+        res.status(503).json({
+          success: false,
+          code: 'CENTER_DB_UNAVAILABLE',
+          error: 'Registration center lookup database is unavailable. Please retry.',
+        });
+        return;
+      }
+      if (centerRes.rows.length === 0) {
+        res.status(400).json({
+          success: false,
+          code: 'NO_ACTIVE_CENTER',
+          error: 'No active collection center found for the selected dairy. Contact the dairy administrator.',
+        });
+        return;
+      }
+      centerId = centerRes.rows[0].id as string;
     }
 
     const categories = body.categories || (body.milkSupplyType ? (body.milkSupplyType === 'BOTH' ? ['COW', 'BUFFALO'] : [body.milkSupplyType]) : (body.category ? [body.category] : ['COW']));
 
     const data = await registerCustomerUseCase.execute({
       fullName: body.fullName || body.name || 'Registered Producer',
-      mobileNumber: phone,
+      mobileNumber: phoneE164,
       organizationId: targetOrgId,
       centerId,
       village: body.village,
@@ -317,7 +580,7 @@ router.post('/register', optionalAuthenticate, async (req: Request, res: Respons
       bankDetails: body.bankDetails,
     });
 
-    // If face biometric embedding is submitted, encrypt and save
+    // If face biometric embedding is submitted, encrypt and save after registration succeeds
     if (body.faceTemplate?.embedding && Array.isArray(body.faceTemplate.embedding)) {
       try {
         await updateBiometricsUseCase.execute({
@@ -326,8 +589,14 @@ router.post('/register', optionalAuthenticate, async (req: Request, res: Respons
           embedding: body.faceTemplate.embedding,
           modelVersion: body.faceTemplate.modelVersion || 'sface_int8_2021dec',
         });
-      } catch (err: any) {
-        console.error('Biometric enrollment error in /register:', err?.message, err?.stack);
+      } catch (bioErr: any) {
+        logger.warn({ customerId: data.id, err: bioErr?.message }, 'Biometric enrollment failed during /register');
+        res.status(bioErr?.statusCode || 400).json({
+          success: false,
+          code: bioErr?.code || 'BIOMETRIC_ENROLLMENT_FAILED',
+          error: bioErr?.message || 'Customer registered as pending, but biometric enrollment failed validation.',
+        });
+        return;
       }
     }
 

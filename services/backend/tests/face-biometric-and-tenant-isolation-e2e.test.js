@@ -115,15 +115,38 @@ test('DFARM End-to-End Biometric Pipeline & Multi-Tenant Database Isolation Suit
       dairyName: dairyBName,
     });
 
+    const adminAUserId = '38918630-4fee-4cec-96ea-00000000000a';
+    const adminBUserId = '88888888-8888-8888-8888-00000000000b';
+    const centerAId = '38918630-4fee-4cec-96ea-0000000000c1';
+    const centerBId = '88888888-8888-8888-8888-0000000000c2';
+
+    await controlDb.query(
+      `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+       VALUES
+         ($1, $2, 'C-WA1', 'Warna Center 1', 'Road 1', 'Kavathe Piran', 'Sangli', 'MH', '416417', '+919834388787', 'ACTIVE'),
+         ($3, $4, 'C-RB1', 'Rajhans Center 1', 'Road 2', 'Shiroli', 'Kolhapur', 'MH', '416001', '+919834388788', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [centerAId, dairyAId, centerBId, dairyBId]
+    );
+
+    await controlDb.query(
+      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+       VALUES
+         ($1, $2, 'fb_admin_a', 'Admin A', '+919834388787', 'DAIRY_ADMIN', 'ACTIVE'),
+         ($3, $4, 'fb_admin_b', 'Admin B', '+919834388788', 'DAIRY_ADMIN', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [adminAUserId, dairyAId, adminBUserId, dairyBId]
+    );
+
     dairyAdminAToken = tokenService.signToken({
-      userId: 'admin-a',
+      userId: adminAUserId,
       role: 'DAIRY_ADMIN',
       organizationId: dairyAId,
       actorType: 'STAFF',
     });
 
     dairyAdminBToken = tokenService.signToken({
-      userId: 'admin-b',
+      userId: adminBUserId,
       role: 'DAIRY_ADMIN',
       organizationId: dairyBId,
       actorType: 'STAFF',
@@ -134,9 +157,10 @@ test('DFARM End-to-End Biometric Pipeline & Multi-Tenant Database Isolation Suit
   });
 
   await suite.test('2. Customer Registration & Dairy Admin Approval Lifecycle', async () => {
-    // Register Customer A in Dairy A
+    // Register Customer A in Dairy A (staff-assisted)
     const regResA = await request(app)
       .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${dairyAdminAToken}`)
       .send({
         selectedDairyId: dairyAId,
         organizationId: dairyAId,
@@ -165,9 +189,10 @@ test('DFARM End-to-End Biometric Pipeline & Multi-Tenant Database Isolation Suit
     assert.strictEqual(approveResA.body.data.status, 'ACTIVE');
     assert.strictEqual(approveResA.body.data.farmerCode, 'C-201');
 
-    // Register Customer B in Dairy B
+    // Register Customer B in Dairy B (staff-assisted)
     const regResB = await request(app)
       .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${dairyAdminBToken}`)
       .send({
         selectedDairyId: dairyBId,
         organizationId: dairyBId,

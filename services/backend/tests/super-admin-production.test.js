@@ -36,6 +36,35 @@ const farmerToken = tokenService.signToken({
 });
 
 test('Super Admin Access Control & Role Boundary Verification', async (t) => {
+  const testOrgId = '00000000-0000-0000-0000-000000000010';
+  const testCenterId = '00000000-0000-0000-0000-000000000011';
+  await db.query(
+    `INSERT INTO organizations (id, name, code, status)
+     VALUES ($1, 'SuperAdmin Test Org', 'SA-TEST-10', 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING;`,
+    [testOrgId]
+  );
+  await db.query(
+    `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+     VALUES ($1, $2, 'C-SA10', 'SA Test Center', 'Road 1', 'V1', 'D1', 'MH', '416001', '+919800010010', 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING;`,
+    [testCenterId, testOrgId]
+  );
+  await db.query(
+    `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+     VALUES
+       ('00000000-0000-0000-0000-000000000099', $1, 'sa_chief_admin', 'Chief Platform Administrator', '+919800010099', 'SUPER_ADMIN', 'ACTIVE'),
+       ('00000000-0000-0000-0000-000000000001', $1, 'sa_local_op', 'Local Milk Collector', '+919800010001', 'COLLECTION_OPERATOR', 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING;`,
+    [testOrgId]
+  );
+  await db.query(
+    `INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted)
+     VALUES ('00000000-0000-0000-0000-000000000002', $1, $2, 'F-SA2', 'Ramesh Patil', '+919800010002', 'ACTIVE', 'APPROVED', FALSE)
+     ON CONFLICT (id) DO NOTHING;`,
+    [testOrgId, testCenterId]
+  );
+
   await t.test('1. Super Admin with SUPER_ADMIN role can access platform metrics', async () => {
     const res = await request(app)
       .get('/api/v1/super-admin/dashboard/metrics')

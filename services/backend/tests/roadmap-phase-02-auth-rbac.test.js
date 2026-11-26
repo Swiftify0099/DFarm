@@ -72,6 +72,37 @@ const guestFarmerToken = tokenService.signToken({
 });
 
 test('ROADMAP PHASE 02: Authentication & Complete RBAC Verification Suite', async (suite) => {
+  await db.query(
+    `INSERT INTO organizations (id, name, code, status)
+     VALUES ('00000000-0000-0000-0000-000000000010', 'Baramati Cooperative Dairy', 'BARAMATI-10', 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING;`
+  );
+  await db.query(
+    `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+     VALUES ('00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000010', 'C-BAR1', 'Baramati Main Center', 'Road 1', 'Baramati', 'Pune', 'Maharashtra', '413102', '+919876543011', 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING;`
+  );
+  await db.query(
+    `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, user_role, status)
+     VALUES
+       ('00000000-0000-0000-0000-000000000099', '00000000-0000-0000-0000-000000000010', 'p2_super', 'Chief Super Administrator', '+919876540099', 'SUPER_ADMIN', 'SUPER_ADMIN', 'ACTIVE'),
+       ('00000000-0000-0000-0000-000000000098', '00000000-0000-0000-0000-000000000010', 'p2_plat_op', 'Platform Operations Engineer', '+919876540098', 'CENTER_MANAGER', 'PLATFORM_OPERATOR', 'ACTIVE'),
+       ('00000000-0000-0000-0000-000000000097', '00000000-0000-0000-0000-000000000010', 'p2_prim_admin', 'Baramati Chief Dairy Admin', '+919876540097', 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'ACTIVE'),
+       ('00000000-0000-0000-0000-000000000096', '00000000-0000-0000-0000-000000000010', 'p2_dairy_admin', 'Baramati Assistant Admin', '+919876540096', 'DAIRY_ADMIN', 'DAIRY_ADMIN', 'ACTIVE'),
+       ('00000000-0000-0000-0000-000000000095', '00000000-0000-0000-0000-000000000010', 'p2_col_op', 'Counter Staff', '+919876540095', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE'),
+       ('00000000-0000-0000-0000-000000000094', '00000000-0000-0000-0000-000000000010', 'p2_supv', 'Field Supervisor', '+919876540094', 'SUPERVISOR', 'SUPERVISOR', 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING;`
+  );
+  await db.query(
+    `INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted)
+     VALUES ('00000000-0000-0000-0000-000000000093', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000011', 'F-P293', 'Suresh Patil', '+919876540093', 'ACTIVE', 'APPROVED', FALSE)
+     ON CONFLICT (id) DO NOTHING;`
+  );
+  await db.query(
+    `INSERT INTO global_customer_identities (id, normalized_mobile_number, phone_verified_at)
+     VALUES ('00000000-0000-0000-0000-000000000092', '+919876543299', NOW())
+     ON CONFLICT (normalized_mobile_number) DO NOTHING;`
+  );
 
   await suite.test('GROUP 1: Standardized 8 Roles & Granular Permission Matrix Logic', async (t) => {
     await t.test('1.1. SUPER_ADMIN holds universal wildcard (*) permissions', () => {

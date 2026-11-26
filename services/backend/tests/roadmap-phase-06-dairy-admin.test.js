@@ -71,12 +71,12 @@ test('DFarm Roadmap Phase 06 — Dairy Admin Core Operations Verification Suite'
       `);
 
       await targetDb.query(`
-        INSERT INTO users (id, organization_id, username, phone_number, full_name, role, status)
+        INSERT INTO users (id, organization_id, username, phone_number, full_name, role, user_role, status)
         VALUES 
-          ('00000000-0000-0000-0000-000000000081', '${testDairyA}', 'admin_vasant', '+919876543281', 'Vasantrao Patil', 'DAIRY_ADMIN', 'ACTIVE'),
-          ('00000000-0000-0000-0000-000000000082', '${testDairyA}', 'admin_mahesh', '+919876543282', 'Mahesh Shinde', 'DAIRY_ADMIN', 'ACTIVE'),
-          ('00000000-0000-0000-0000-000000000083', '${testDairyB}', 'admin_sanjay', '+919876543283', 'Sanjay Deshmukh', 'DAIRY_ADMIN', 'ACTIVE'),
-          ('00000000-0000-0000-0000-000000000084', '${testDairyA}', 'operator_vikas', '+919876543284', 'Kiosk Operator Vikas', 'COLLECTION_OPERATOR', 'ACTIVE')
+          ('00000000-0000-0000-0000-000000000081', '${testDairyA}', 'admin_vasant', '+919876543281', 'Vasantrao Patil', 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'ACTIVE'),
+          ('00000000-0000-0000-0000-000000000082', '${testDairyA}', 'admin_mahesh', '+919876543282', 'Mahesh Shinde', 'DAIRY_ADMIN', 'DAIRY_ADMIN', 'ACTIVE'),
+          ('00000000-0000-0000-0000-000000000083', '${testDairyB}', 'admin_sanjay', '+919876543283', 'Sanjay Deshmukh', 'DAIRY_ADMIN', 'DAIRY_ADMIN', 'ACTIVE'),
+          ('00000000-0000-0000-0000-000000000084', '${testDairyA}', 'operator_vikas', '+919876543284', 'Kiosk Operator Vikas', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE')
         ON CONFLICT (id) DO NOTHING;
       `);
     } catch (err) {
@@ -192,6 +192,7 @@ test('DFarm Roadmap Phase 06 — Dairy Admin Core Operations Verification Suite'
     await t.test('8. Candidate self-registers creating PENDING_APPROVAL record', async () => {
       const res = await request(app)
         .post('/api/v1/customers/register')
+        .set('Authorization', `Bearer ${primaryDairyAdminTokenA}`)
         .send({
           fullName: 'Tukaram Dnyandeo Patil',
           mobileNumber: candidatePhoneA,
@@ -199,6 +200,7 @@ test('DFarm Roadmap Phase 06 — Dairy Admin Core Operations Verification Suite'
           centerId: testCenterA,
           village: 'Shirgaon Khurd',
           milkSupplyType: 'COW',
+          biometricConsent: true,
           bankDetails: {
             accountNumber: '998877665544',
             ifscCode: 'MAHB0000999',
@@ -221,6 +223,7 @@ test('DFarm Roadmap Phase 06 — Dairy Admin Core Operations Verification Suite'
     await t.test('9. Second candidate registers to test rejection workflow', async () => {
       const res = await request(app)
         .post('/api/v1/customers/register')
+        .set('Authorization', `Bearer ${primaryDairyAdminTokenA}`)
         .send({
           fullName: 'Sitaram Pandurang Jadhav',
           mobileNumber: candidatePhoneB,
@@ -525,6 +528,7 @@ test('DFarm Roadmap Phase 06 — Dairy Admin Core Operations Verification Suite'
       const phoneOther = `+9198${Math.floor(100000 + Math.random() * 900000)}`;
       const regRes = await request(app)
         .post('/api/v1/customers/register')
+        .set('Authorization', `Bearer ${primaryDairyAdminTokenA}`)
         .send({
           fullName: 'Babanrao Kadam',
           mobileNumber: phoneOther,

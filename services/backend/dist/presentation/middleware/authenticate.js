@@ -1,8 +1,63 @@
 import { HmacJwtTokenService } from '../../infrastructure/security/HmacJwtTokenService.js';
-import { UnauthorizedError, ForbiddenError } from '../../domain/errors/index.js';
+import { UnauthorizedError, ForbiddenError, DomainError } from '../../domain/errors/index.js';
 import { sseTicketService } from '../../infrastructure/security/SseTicketService.js';
 import { tokenRevocationService } from '../../infrastructure/security/TokenRevocationService.js';
+import { accountAuthorityService } from '../../infrastructure/security/AccountAuthorityService.js';
 const tokenService = new HmacJwtTokenService();
+async function resolveVerifiedPresentationUser(token) {
+    const claims = tokenService.verifyToken(token);
+    if (claims.tokenType === 'refresh') {
+        throw new UnauthorizedError('Refresh tokens cannot be used as access tokens', 'INVALID_TOKEN_TYPE');
+    }
+    if (await tokenRevocationService.isRevoked(token, claims.jti)) {
+        throw new UnauthorizedError('Authentication token has been revoked', 'TOKEN_REVOKED');
+    }
+    if (claims.actorType === 'STAFF') {
+        const staff = await accountAuthorityService.verifyStaff({
+            userId: claims.userId,
+            claimedOrganizationId: claims.organizationId,
+            loadCenterAssignments: true,
+        });
+        if (!staff) {
+            throw new UnauthorizedError('Staff account no longer exists', 'USER_NOT_FOUND');
+        }
+        const isPlatformStaff = staff.role === 'SUPER_ADMIN' || staff.role === 'PLATFORM_OPERATOR';
+        return {
+            ...claims,
+            userId: staff.userId,
+            organizationId: isPlatformStaff ? claims.organizationId : (staff.organizationId || claims.organizationId),
+            centerId: claims.centerId || staff.primaryCenterId,
+            centerIds: staff.centerIds,
+            role: staff.role,
+            actorType: 'STAFF',
+            fullName: staff.fullName || claims.fullName,
+            phoneNumber: staff.phoneNumber || claims.phoneNumber,
+        };
+    }
+    const customer = await accountAuthorityService.verifyCustomer({
+        userId: claims.userId,
+        claimedRole: claims.role,
+        organizationId: claims.organizationId,
+        globalCustomerId: claims.globalCustomerId,
+        allowGuestFarmer: true,
+        strictActiveOnly: false,
+    });
+    if (!customer) {
+        throw new UnauthorizedError('Customer account or identity no longer exists', 'USER_NOT_FOUND');
+    }
+    return {
+        ...claims,
+        userId: customer.userId,
+        organizationId: customer.organizationId || claims.organizationId,
+        centerId: customer.centerId || claims.centerId,
+        globalCustomerId: customer.globalCustomerId || claims.globalCustomerId,
+        role: customer.role,
+        actorType: 'CUSTOMER',
+        fullName: customer.fullName || claims.fullName,
+        phoneNumber: customer.phoneNumber || claims.phoneNumber,
+        registrationStatus: customer.registrationStatus,
+    };
+}
 export async function authenticate(req, _res, next) {
     try {
         // Never accept query token on standard API endpoints
@@ -11,14 +66,7 @@ export async function authenticate(req, _res, next) {
             throw new UnauthorizedError('Authorization token required');
         }
         const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
-        const claims = tokenService.verifyToken(token);
-        if (claims.tokenType === 'refresh') {
-            throw new UnauthorizedError('Refresh tokens cannot be used as access tokens', 'INVALID_TOKEN_TYPE');
-        }
-        if (await tokenRevocationService.isRevoked(token, claims.jti)) {
-            throw new UnauthorizedError('Authentication token has been revoked', 'TOKEN_REVOKED');
-        }
-        req.user = claims;
+        req.user = await resolveVerifiedPresentationUser(token);
         next();
     }
     catch (err) {
@@ -33,25 +81,22 @@ export async function optionalAuthenticate(req, _res, next) {
     }
     try {
         const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
-        const claims = tokenService.verifyToken(token);
-        if (claims.tokenType !== 'refresh' && !(await tokenRevocationService.isRevoked(token, claims.jti))) {
-            req.user = claims;
-        }
+        req.user = await resolveVerifiedPresentationUser(token);
     }
-    catch {
-        // Ignore invalid token in optional auth
+    catch (err) {
+        // Fail closed if the authoritative authentication DB is unavailable
+        if (err instanceof DomainError && err.statusCode === 503) {
+            return next(err);
+        }
+        // Ignore invalid/expired token in optional auth only
     }
     next();
 }
 /**
  * Dedicated authentication middleware for SSE streaming endpoints (/dairy-admin/events).
  * Rejects raw access tokens in URL query strings (400/401).
- * Accepts:
- *   Option A: Authorization: Bearer <JWT> header (streaming fetch)
- *   Option B: ?ticket=<short_lived_sse_ticket> query parameter (short-lived, single-use, purpose-scoped)
  */
 export async function authenticateSseStream(req, res, next) {
-    // 1. Explicitly reject normal long-lived tokens in query parameters
     if (req.query.token) {
         res.status(400).json({
             success: false,
@@ -65,18 +110,10 @@ export async function authenticateSseStream(req, res, next) {
     let user = null;
     try {
         if (authHeader) {
-            // Option A: Authorization header streaming
             const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
-            user = tokenService.verifyToken(token);
-            if (user.tokenType === 'refresh') {
-                throw new UnauthorizedError('Refresh tokens cannot be used for streaming access');
-            }
-            if (await tokenRevocationService.isRevoked(token, user.jti)) {
-                throw new UnauthorizedError('Authentication token has been revoked');
-            }
+            user = await resolveVerifiedPresentationUser(token);
         }
         else if (ticketQuery) {
-            // Option B: Purpose-specific, short-lived SSE ticket (distributed atomic single-use)
             user = await sseTicketService.verifyAndConsumeTicket(ticketQuery);
         }
         else {
@@ -84,14 +121,21 @@ export async function authenticateSseStream(req, res, next) {
         }
     }
     catch (err) {
-        if (err instanceof ForbiddenError) {
-            res.status(403).json({ success: false, errorCode: 'FORBIDDEN', error: err.message });
+        if (err instanceof DomainError && err.statusCode === 503) {
+            res.status(503).json({
+                success: false,
+                errorCode: err.code || 'AUTH_DB_UNAVAILABLE',
+                error: err.message,
+            });
             return;
         }
-        res.status(401).json({ success: false, errorCode: 'UNAUTHORIZED', error: err?.message || 'Unauthorized' });
+        if (err instanceof ForbiddenError) {
+            res.status(403).json({ success: false, errorCode: err.code || 'FORBIDDEN', error: err.message });
+            return;
+        }
+        res.status(401).json({ success: false, errorCode: err?.code || 'UNAUTHORIZED', error: err?.message || 'Unauthorized' });
         return;
     }
-    // 2. Validate authorized dairy admin role
     const allowedAdminRoles = [
         'PRIMARY_DAIRY_ADMIN',
         'DAIRY_ADMIN',

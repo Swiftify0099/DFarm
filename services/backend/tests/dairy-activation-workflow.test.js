@@ -16,6 +16,20 @@ describe('DFarm Dairy Admin Activation & Real Email Workflow Test Suite', () => 
   });
 
   it('setup backend test server', async () => {
+    const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+    const rootOrgId = '00000000-0000-0000-0000-000000000001';
+    await db.query(
+      `INSERT INTO organizations (id, name, code, status)
+       VALUES ($1, 'Platform Root', 'DF-PLATFORM', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [rootOrgId]
+    );
+    await db.query(
+      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+       VALUES ('11111111-1111-4111-a111-000000000099', $1, 'act_super_admin', 'Super Administrator', '+919800080099', 'SUPER_ADMIN', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [rootOrgId]
+    );
     const app = createApp();
     await new Promise((resolve) => {
       server = http.createServer(app);

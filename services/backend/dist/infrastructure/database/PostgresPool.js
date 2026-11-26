@@ -297,6 +297,7 @@ export class PostgresDatabase {
             '041_dairy_admin_realtime_and_station_monitoring.sql',
             '042_union_bank_farmer_payout_and_settlement_system.sql',
             '043_distributed_sse_tickets_and_retention.sql',
+            '044_revoked_tokens_durable_revocation.sql',
         ];
         const possibleDirs = [
             path.resolve(process.cwd(), 'supabase/migrations'),

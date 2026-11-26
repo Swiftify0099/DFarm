@@ -53,6 +53,25 @@ test('DFARM Multi-Dairy Customer Membership & Identity Verification Suite', asyn
       DELETE FROM customers WHERE normalized_mobile_number = '${testMobileE164}';
     `).catch(() => {});
 
+    // Seed organizations, centers & admin users into control-plane DB too
+    await controlDb.query(`
+      INSERT INTO organizations (id, name, code, status)
+      VALUES
+        ('${dairyAId}', 'Warna Sahakari Dudh Utpadak Sanstha', 'WARNA-01', 'ACTIVE'),
+        ('${dairyBId}', 'Krishna Valley Cooperative Dairy', 'KRISHNA-02', 'ACTIVE')
+      ON CONFLICT (id) DO NOTHING;
+      INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+      VALUES
+        ('${centerAId}', '${dairyAId}', 'C-W01', 'Warna Main Center', 'Main Road', 'Warnanagar', 'Kolhapur', 'Maharashtra', '416113', '+919876543210', 'ACTIVE'),
+        ('${centerBId}', '${dairyBId}', 'C-K01', 'Krishna North Center', 'River Road', 'Sangli Rural', 'Sangli', 'Maharashtra', '416416', '+919876543211', 'ACTIVE')
+      ON CONFLICT (id) DO NOTHING;
+      INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+      VALUES
+        ('00000000-0000-0000-0000-000000000088', '${dairyAId}', 'md_admin_a', 'Dairy Admin Warna', '+919876540088', 'DAIRY_ADMIN', 'ACTIVE'),
+        ('00000000-0000-0000-0000-000000000089', '${dairyBId}', 'md_admin_b', 'Dairy Admin Krishna', '+919876540089', 'DAIRY_ADMIN', 'ACTIVE')
+      ON CONFLICT (id) DO NOTHING;
+    `).catch(() => {});
+
     // Seed tenant databases with organizations and centers
     const tenantADb = await tenantDbManager.getTenantDb(dairyAId);
     await tenantADb.query(`
@@ -112,9 +131,10 @@ test('DFARM Multi-Dairy Customer Membership & Identity Verification Suite', asyn
   });
 
   await suite.test('2. Rule 2 & 3: Register in Dairy A (Success) & Duplicate within Dairy A (Rejected)', async () => {
-    // 2a. Register in Dairy A
+    // 2a. Register in Dairy A (authenticated with verified OTP customerToken)
     const regARes = await request(app)
       .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${customerToken}`)
       .send({
         fullName: 'Balasaheb Patil',
         mobileNumber: testMobile,
@@ -132,6 +152,7 @@ test('DFARM Multi-Dairy Customer Membership & Identity Verification Suite', asyn
     // 2b. Rule 3: Attempting duplicate registration in Dairy A must be strictly prohibited
     const dupARes = await request(app)
       .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${customerToken}`)
       .send({
         fullName: 'Balasaheb Patil Duplicate',
         mobileNumber: testMobile,
@@ -157,6 +178,7 @@ test('DFARM Multi-Dairy Customer Membership & Identity Verification Suite', asyn
     // 3a. Register in Dairy B with same mobile number
     const regBRes = await request(app)
       .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${customerToken}`)
       .send({
         fullName: 'Balasaheb Patil',
         mobileNumber: testMobile,
@@ -174,6 +196,7 @@ test('DFARM Multi-Dairy Customer Membership & Identity Verification Suite', asyn
     // 3b. Rule 3: Duplicate in Dairy B must also be rejected
     const dupBRes = await request(app)
       .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${customerToken}`)
       .send({
         fullName: 'Balasaheb Patil Duplicate B',
         mobileNumber: testMobile,

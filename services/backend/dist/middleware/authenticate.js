@@ -1,11 +1,11 @@
 import { UserRole } from '@dfarm/shared-types';
 import { getAdminSupabaseClient, createUserSupabaseClient } from '../config/supabase.js';
-import { AppError, UnauthorizedError, ForbiddenError } from '../shared/errors/app-error.js';
+import { UnauthorizedError, ForbiddenError } from '../shared/errors/app-error.js';
 import { verifyJwt } from '../jwt.js';
 import { pool } from '../config/db.js';
 import { hashToken, verifyDeviceToken } from '../security.js';
 import { tokenRevocationService } from '../infrastructure/security/TokenRevocationService.js';
-import { tenantDbManager } from '../infrastructure/database/TenantDatabaseManager.js';
+import { accountAuthorityService } from '../infrastructure/security/AccountAuthorityService.js';
 export async function authenticate(req, _res, next) {
     try {
         // 1. Read the Authorization header
@@ -29,12 +29,6 @@ export async function authenticate(req, _res, next) {
         try {
             const decoded = verifyJwt(token);
             decodedToken = decoded;
-            if (decodedToken['tokenType'] === 'refresh') {
-                throw new UnauthorizedError('Refresh tokens cannot be used as access tokens', 'INVALID_TOKEN_TYPE');
-            }
-            if (await tokenRevocationService.isRevoked(token, decodedToken['jti'])) {
-                throw new UnauthorizedError('Authentication token has been revoked', 'TOKEN_REVOKED');
-            }
             const idClaim = (decoded.sub || decoded['userId'] || decoded['id']);
             if (idClaim) {
                 authUser = {
@@ -44,11 +38,19 @@ export async function authenticate(req, _res, next) {
                 };
             }
         }
-        catch (err) {
-            if (err instanceof UnauthorizedError) {
-                throw err;
+        catch {
+            // Local JWT verification failed, fall back to Supabase Auth
+        }
+        if (decodedToken) {
+            if (decodedToken['tokenType'] === 'refresh') {
+                throw new UnauthorizedError('Refresh tokens cannot be used as access tokens', 'INVALID_TOKEN_TYPE');
             }
-            // Local verification failed, check Supabase Auth
+            if (await tokenRevocationService.isRevoked(token, decodedToken['jti'])) {
+                throw new UnauthorizedError('Authentication token has been revoked', 'TOKEN_REVOKED');
+            }
+        }
+        else if (await tokenRevocationService.isRevoked(token)) {
+            throw new UnauthorizedError('Authentication token has been revoked', 'TOKEN_REVOKED');
         }
         if (!authUser) {
             try {
@@ -71,43 +73,16 @@ export async function authenticate(req, _res, next) {
         if (!authUser) {
             throw new UnauthorizedError('Authentication token is invalid or has expired', 'INVALID_TOKEN');
         }
-        // 4. Resolve internal application identity from the database (fail closed on DB outage; never trust JWT claims without DB verification)
-        let staffUser = null;
-        try {
-            const staffRes = await pool.query(`SELECT u.id, u.organization_id, u.username, u.full_name, u.email, u.phone_number,
-                u.role, u.status, o.status AS org_status
-         FROM users u
-         LEFT JOIN organizations o ON o.id = u.organization_id
-         WHERE u.id::text = $1
-         LIMIT 1;`, [authUser.id]);
-            if (staffRes.rows.length > 0) {
-                staffUser = staffRes.rows[0];
-            }
-        }
-        catch {
-            throw new AppError('Authentication verification database is unavailable', 503, 'AUTH_DB_UNAVAILABLE');
-        }
-        if (staffUser) {
-            if (String(staffUser.status || '').toUpperCase() !== 'ACTIVE') {
-                throw new ForbiddenError(`Staff account status is ${staffUser.status}. Access denied.`, 'ACCOUNT_SUSPENDED');
-            }
-            const resolvedRole = String(staffUser.role || '').trim().toUpperCase();
-            const isPlatformStaff = resolvedRole === UserRole.SUPER_ADMIN || resolvedRole === 'PLATFORM_OPERATOR';
-            if (!isPlatformStaff && staffUser.org_status && String(staffUser.org_status).toUpperCase() !== 'ACTIVE') {
-                throw new ForbiddenError('Assigned dairy cooperative is currently inactive or suspended.', 'ORG_SUSPENDED');
-            }
-            // Fetch user's assigned centers
-            let assignments = [];
-            try {
-                const assignRes = await pool.query(`SELECT center_id, is_primary FROM user_center_assignments WHERE user_id::text = $1;`, [staffUser.id]);
-                assignments = assignRes.rows;
-            }
-            catch {
-                throw new AppError('Authentication verification database is unavailable', 503, 'AUTH_DB_UNAVAILABLE');
-            }
-            const centerIds = assignments.map((a) => String(a.center_id));
-            const primaryAssignment = assignments.find((a) => a.is_primary);
-            const primaryCenterId = primaryAssignment ? String(primaryAssignment.center_id) : centerIds[0];
+        // 4. Resolve internal application identity via shared AccountAuthorityService (fail closed on DB outage; never trust JWT claims without DB verification)
+        const claimedOrgId = typeof decodedToken?.['organizationId'] === 'string' && decodedToken['organizationId']
+            ? String(decodedToken['organizationId'])
+            : undefined;
+        const staffAuthority = await accountAuthorityService.verifyStaff({
+            userId: authUser.id,
+            claimedOrganizationId: claimedOrgId,
+            loadCenterAssignments: true,
+        });
+        if (staffAuthority) {
             req.auth = {
                 authUser: {
                     id: authUser.id,
@@ -115,55 +90,29 @@ export async function authenticate(req, _res, next) {
                     phone: authUser.phone,
                 },
                 actorType: 'STAFF',
-                userId: staffUser.id,
-                organizationId: staffUser.organization_id,
-                role: resolvedRole,
-                centerIds,
-                primaryCenterId,
-                centerId: primaryCenterId || centerIds[0],
+                userId: staffAuthority.userId,
+                organizationId: staffAuthority.organizationId,
+                role: staffAuthority.role,
+                centerIds: staffAuthority.centerIds,
+                primaryCenterId: staffAuthority.primaryCenterId,
+                centerId: staffAuthority.primaryCenterId || staffAuthority.centerIds[0],
                 token,
                 userSupabaseClient: createUserSupabaseClient(token),
             };
             return next();
         }
-        // Check 2: Customer Identity (customers table in central DB, then optional tenant DB)
-        let customerUser = null;
-        try {
-            const custRes = await pool.query(`SELECT c.id, c.organization_id, c.primary_center_id, c.farmer_code, c.full_name,
-                c.normalized_mobile_number, c.status, c.is_deleted, o.status AS org_status
-         FROM customers c
-         LEFT JOIN organizations o ON o.id = c.organization_id
-         WHERE c.id::text = $1
-         LIMIT 1;`, [authUser.id]);
-            if (custRes.rows.length > 0) {
-                customerUser = custRes.rows[0];
-            }
-            else if (typeof decodedToken?.['organizationId'] === 'string' && decodedToken['organizationId']) {
-                const tenantDb = await tenantDbManager.getTenantDb(decodedToken['organizationId']);
-                const tenantCustRes = await tenantDb.query(`SELECT id, organization_id, primary_center_id, farmer_code, full_name,
-                  normalized_mobile_number, status, is_deleted
-           FROM customers
-           WHERE id::text = $1
-           LIMIT 1;`, [authUser.id]);
-                if (tenantCustRes.rows.length > 0) {
-                    customerUser = tenantCustRes.rows[0];
-                }
-            }
-        }
-        catch {
-            throw new AppError('Authentication verification database is unavailable', 503, 'AUTH_DB_UNAVAILABLE');
-        }
-        if (customerUser) {
-            if (customerUser.is_deleted) {
-                throw new ForbiddenError('Customer account has been soft-deleted', 'ACCOUNT_DELETED');
-            }
-            const custStatus = String(customerUser.status || '').toUpperCase();
-            if (custStatus === 'SUSPENDED' || custStatus === 'INACTIVE' || custStatus === 'SOFT_DELETED') {
-                throw new ForbiddenError('Customer account is suspended', 'ACCOUNT_SUSPENDED');
-            }
-            if (customerUser.org_status && String(customerUser.org_status).toUpperCase() !== 'ACTIVE') {
-                throw new ForbiddenError('Customer dairy cooperative is inactive or suspended', 'ORG_SUSPENDED');
-            }
+        // Check 2: Customer Identity via shared AccountAuthorityService (strict ACTIVE required for modules/* routes)
+        const customerAuthority = await accountAuthorityService.verifyCustomer({
+            userId: authUser.id,
+            claimedRole: typeof decodedToken?.['role'] === 'string' ? decodedToken['role'] : undefined,
+            organizationId: claimedOrgId,
+            globalCustomerId: typeof decodedToken?.['globalCustomerId'] === 'string'
+                ? decodedToken['globalCustomerId']
+                : undefined,
+            allowGuestFarmer: false,
+            strictActiveOnly: true,
+        });
+        if (customerAuthority) {
             req.auth = {
                 authUser: {
                     id: authUser.id,
@@ -171,14 +120,14 @@ export async function authenticate(req, _res, next) {
                     phone: authUser.phone,
                 },
                 actorType: 'CUSTOMER',
-                userId: customerUser.id,
-                organizationId: customerUser.organization_id,
+                userId: customerAuthority.userId,
+                organizationId: customerAuthority.organizationId || '',
                 role: UserRole.FARMER_CUSTOMER,
-                centerIds: [customerUser.primary_center_id],
-                primaryCenterId: customerUser.primary_center_id,
+                centerIds: customerAuthority.centerId ? [customerAuthority.centerId] : [],
+                primaryCenterId: customerAuthority.centerId,
                 customerProfile: {
-                    customerId: customerUser.id,
-                    farmerCode: customerUser.farmer_code,
+                    customerId: customerAuthority.userId,
+                    farmerCode: customerAuthority.farmerCode || '',
                 },
                 token,
                 userSupabaseClient: createUserSupabaseClient(token),

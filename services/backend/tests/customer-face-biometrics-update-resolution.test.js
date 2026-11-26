@@ -94,11 +94,41 @@ test('Customer Face Biometrics Update 404 Resolution Suite', async (suite) => {
     assert.equal(res.body.success, true);
   });
 
-  await suite.test('4. Development self-healing for unseeded UUID in dev mode (no dead-end 404)', async () => {
+  await suite.test('4. Unmapped customer UUID rejected 401; centrally mapped membership self-heals tenant record', async () => {
+    const unmappedToken = tokenService.signToken({
+      userId: '77777777-8888-9999-aaaa-ffffffffffff',
+      organizationId: dairyId,
+      role: 'FARMER_CUSTOMER',
+      actorType: 'CUSTOMER',
+    });
+    const unmappedRes = await request(app)
+      .post('/api/v1/customers/77777777-8888-9999-aaaa-ffffffffffff/biometrics/update')
+      .set('Authorization', `Bearer ${unmappedToken}`)
+      .set('x-organization-id', dairyId)
+      .send({ embedding: faceEmbedding, modelVersion: 'sface_int8_2021dec', organizationId: dairyId });
+    assert.equal(unmappedRes.status, 401);
+
     const randomCustId = '77777777-8888-9999-aaaa-bbbbbbbbbbbb';
+    const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+    await db.query(
+      `INSERT INTO organizations (id, name, code, status) VALUES ($1, 'BioTest Dairy', 'BIO-389', 'ACTIVE') ON CONFLICT (id) DO NOTHING;`,
+      [dairyId]
+    );
+    await db.query(
+      `INSERT INTO global_customer_identities (id, normalized_mobile_number, phone_verified_at)
+       VALUES ('77777777-8888-9999-aaaa-bbbbbbbbbbb0', '+917755995699', NOW()) ON CONFLICT (normalized_mobile_number) DO NOTHING;`
+    );
+    await db.query(
+      `INSERT INTO customer_dairy_memberships (id, global_customer_id, organization_id, tenant_customer_id, farmer_code, customer_name, membership_status)
+       VALUES ('77777777-8888-9999-aaaa-bbbbbbbbbbb1', '77777777-8888-9999-aaaa-bbbbbbbbbbb0', $1, $2, 'F-HEAL1', 'Self Heal Farmer', 'APPROVED')
+       ON CONFLICT DO NOTHING;`,
+      [dairyId, randomCustId]
+    );
+
     const devToken = tokenService.signToken({
       userId: randomCustId,
       organizationId: dairyId,
+      globalCustomerId: '77777777-8888-9999-aaaa-bbbbbbbbbbb0',
       role: 'FARMER_CUSTOMER',
       actorType: 'CUSTOMER',
     });

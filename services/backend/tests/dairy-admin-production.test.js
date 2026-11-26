@@ -62,11 +62,11 @@ test('DFarm Dairy Admin Production Readiness & Operational Verification Suite', 
       `);
 
       await targetDb.query(`
-        INSERT INTO users (id, organization_id, username, phone_number, full_name, role, status)
+        INSERT INTO users (id, organization_id, username, phone_number, full_name, role, user_role, status)
         VALUES 
-          ('00000000-0000-0000-0000-000000000001', '${testDairyA}', 'admin_rajesh', '+919876543210', 'Rajesh Patil', 'DAIRY_ADMIN', 'ACTIVE'),
-          ('00000000-0000-0000-0000-000000000002', '${testDairyB}', 'admin_sunil', '+919876543211', 'Sunil Deshmukh', 'DAIRY_ADMIN', 'ACTIVE'),
-          ('00000000-0000-0000-0000-000000000003', '${testDairyA}', 'operator_vikas', '+919876543212', 'Kiosk Operator Vikas', 'COLLECTION_OPERATOR', 'ACTIVE')
+          ('00000000-0000-0000-0000-000000000001', '${testDairyA}', 'admin_rajesh', '+919876543210', 'Rajesh Patil', 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'ACTIVE'),
+          ('00000000-0000-0000-0000-000000000002', '${testDairyB}', 'admin_sunil', '+919876543211', 'Sunil Deshmukh', 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'ACTIVE'),
+          ('00000000-0000-0000-0000-000000000003', '${testDairyA}', 'operator_vikas', '+919876543212', 'Kiosk Operator Vikas', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE')
         ON CONFLICT (id) DO NOTHING;
       `);
 
@@ -141,6 +141,7 @@ test('DFarm Dairy Admin Production Readiness & Operational Verification Suite', 
     await t.test('4. Producer registration creates pending record with PENDING_APPROVAL status', async () => {
       const res = await request(app)
         .post('/api/v1/customers/register')
+        .set('Authorization', `Bearer ${dairyAdminTokenA}`)
         .send({
           fullName: 'Ananda Ganpatrao More',
           mobileNumber: candidatePhone,
@@ -148,6 +149,7 @@ test('DFarm Dairy Admin Production Readiness & Operational Verification Suite', 
           centerId: testCenterA,
           village: 'Shirgaon Khurd',
           milkSupplyType: 'COW',
+          biometricConsent: true,
           bankDetails: {
             accountNumber: '112233445566',
             ifscCode: 'MAHB0000123',

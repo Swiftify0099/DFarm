@@ -51,6 +51,10 @@ export const MIGRATION_MANIFEST = [
     { version: '038', filename: '038_platform_federation_database_mapping.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Register platform federation control plane database mapping' },
     { version: '039', filename: '039_milk_collections_organization_idempotency.sql', target: MigrationTarget.SHARED, description: 'Composite uniqueness constraint on organization_id and idempotency_key for concurrent idempotency' },
     { version: '040', filename: '040_device_auth_challenges.sql', target: MigrationTarget.SHARED, description: 'Distributed device authentication challenges, atomic single-use replay protection, and bounded failed attempt tracking' },
+    { version: '041', filename: '041_dairy_admin_realtime_and_station_monitoring.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Dairy admin realtime events outbox and station monitoring' },
+    { version: '042', filename: '042_union_bank_farmer_payout_and_settlement_system.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Union Bank farmer payout and settlement system tables' },
+    { version: '043', filename: '043_distributed_sse_tickets_and_retention.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Distributed SSE tickets and event retention' },
+    { version: '044', filename: '044_revoked_tokens_durable_revocation.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Durable token revocation table for distributed fail-closed JWT invalidation (RESTART-02.1)' },
 ];
 export const CONTROL_PLANE_MIGRATIONS = MIGRATION_MANIFEST.filter(m => m.target === MigrationTarget.CONTROL_PLANE || m.target === MigrationTarget.SHARED);
 export const TENANT_OPERATIONAL_MIGRATIONS = MIGRATION_MANIFEST.filter(m => m.target === MigrationTarget.TENANT_OPERATIONAL || m.target === MigrationTarget.SHARED);

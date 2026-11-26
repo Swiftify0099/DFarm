@@ -167,7 +167,22 @@ test('DFarm Multi-Tenant Isolation & Provisioning Test Suite', async (t) => {
     const dairyAId = 'a0000000-0000-0000-0000-000000000001';
     const dairyBId = 'b0000000-0000-0000-0000-000000000002';
     const { HmacJwtTokenService } = await import('../dist/infrastructure/security/HmacJwtTokenService.js');
+    const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
     const tokenService = new HmacJwtTokenService();
+    await db.query(
+      `INSERT INTO organizations (id, name, code, status)
+       VALUES ($1, 'Tenant A Isolation', 'ISO-A', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [dairyAId]
+    );
+    await db.query(
+      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+       VALUES
+         ('a0000000-0000-0000-0000-000000000099', $1, 'iso_admin_a', 'Iso Admin A', '+919800090099', 'DAIRY_ADMIN', 'ACTIVE'),
+         ('a0000000-0000-0000-0000-000000000098', $1, 'iso_super_admin', 'Iso Super Admin', '+919800090098', 'SUPER_ADMIN', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [dairyAId]
+    );
     const adminAToken = tokenService.signToken({
       userId: 'a0000000-0000-0000-0000-000000000099',
       organizationId: dairyAId,

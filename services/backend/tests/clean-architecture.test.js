@@ -417,12 +417,18 @@ test('DFarm Clean Architecture Implementation Test Suite', async (t) => {
     assert.ok(sessionRes.body.data.sessionCode);
     assert.strictEqual(sessionRes.body.data.status, 'OPEN');
 
-    // D. Customer Request OTP
+    // D. Customer Request & Verify OTP -> Guest Registration Token
     const custOtpRes = await request(app)
       .post('/api/v1/auth/request-otp')
-      .send({ mobileNumber: '9890011223' });
+      .send({ mobileNumber: '9823001122' });
     assert.strictEqual(custOtpRes.status, 200);
     assert.strictEqual(custOtpRes.body.success, true);
+    const custVerifyRes = await request(app)
+      .post('/api/v1/auth/verify-otp')
+      .send({ mobileNumber: '9823001122', otp: custOtpRes.body.previewOtp });
+    assert.strictEqual(custVerifyRes.status, 200);
+    const guestRegToken = custVerifyRes.body.accessToken;
+    assert.ok(guestRegToken);
 
     // E. Device Telemetry
     const telemetryRes = await request(app)
@@ -437,10 +443,11 @@ test('DFarm Clean Architecture Implementation Test Suite', async (t) => {
     assert.strictEqual(dairiesRes.status, 200);
     assert.strictEqual(dairiesRes.body.success, true);
 
-    // G. Customer Self-Registration with Face Biometrics
+    // G. Customer Self-Registration with Face Biometrics (using verified OTP registration token)
     const dummyEmbedding = Array.from({ length: 128 }, (_, i) => Math.sin(i * 0.1));
     const regRes = await request(app)
       .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${guestRegToken}`)
       .send({
         selectedDairyId: '00000000-0000-0000-0000-000000000001',
         fullName: 'Dattatraya Shinde',
@@ -469,6 +476,7 @@ test('DFarm Clean Architecture Implementation Test Suite', async (t) => {
     // I. Customer Retry / Resubmission (Idempotent update without 400)
     const retryRes = await request(app)
       .post('/api/v1/customers/register')
+      .set('Authorization', `Bearer ${guestRegToken}`)
       .send({
         selectedDairyId: '00000000-0000-0000-0000-000000000001',
         fullName: 'Dattatraya B. Shinde',

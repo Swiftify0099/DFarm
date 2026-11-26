@@ -1,7 +1,14 @@
 import { getAdminSupabaseClient } from '../../config/supabase.js';
 import { normalizeE164Phone } from '../../shared/utils/phone.js';
-import { NotFoundError, UnauthorizedError, AppError } from '../../shared/errors/app-error.js';
+import { NotFoundError, UnauthorizedError, ForbiddenError, AppError } from '../../shared/errors/app-error.js';
 import { query } from '../../config/db.js';
+const DAIRY_WIDE_CENTER_ROLES = new Set([
+    'PRIMARY_DAIRY_ADMIN',
+    'DAIRY_ADMIN',
+    'DAIRY_OWNER',
+    'BRANCH_MANAGER',
+    'CENTER_MANAGER',
+]);
 export class AuthService {
     static async getMe(context) {
         const officer = context.actorType === 'STAFF' ? {
@@ -30,25 +37,57 @@ export class AuthService {
             accountStatus: 'ACTIVE',
         };
     }
-    static async getCenters(context) {
-        let res = await query(`SELECT dc.id, dc.code, dc.name
-       FROM dairy_centers dc
-       JOIN user_center_assignments uca ON uca.center_id = dc.id
-       WHERE uca.user_id = $1 AND dc.status = 'ACTIVE'
-       ORDER BY dc.code ASC;`, [context.userId]);
-        if (res.rows.length === 0) {
-            res = await query(`SELECT id, code, name
-         FROM dairy_centers
-         WHERE organization_id = $1 AND status = 'ACTIVE'
-         ORDER BY code ASC;`, [context.organizationId]);
+    static async getCenters(context, requestedOrganizationId) {
+        const role = String(context.role || '').trim().toUpperCase();
+        const isPlatformAdmin = role === 'SUPER_ADMIN' || role === 'PLATFORM_OPERATOR';
+        const isDairyWideRole = DAIRY_WIDE_CENTER_ROLES.has(role);
+        if (requestedOrganizationId &&
+            !isPlatformAdmin &&
+            requestedOrganizationId.trim().toLowerCase() !== String(context.organizationId || '').toLowerCase()) {
+            throw new ForbiddenError('Cross-tenant center directory access is forbidden.', 'CROSS_TENANT_ACCESS_DENIED');
         }
-        if (res.rows.length === 0) {
-            return [
-                { id: '84997d76-5a80-4935-81d6-433119b5a882', code: 'C101', name: 'Tasgaon Intake Center' },
-                { id: '98a80860-0c1b-47c0-936c-528a262490bd', code: 'C102', name: 'Miraj Intake Center' },
-                { id: '96afbfae-2b1a-42ef-8bb0-779c70950fc5', code: 'C201', name: 'Karveer Intake Center' },
-                { id: '11111111-1111-4111-a111-111111111111', code: 'P11_C1', name: 'P11 Primary Center' },
-            ];
+        const effectiveOrgId = isPlatformAdmin
+            ? requestedOrganizationId?.trim() || context.organizationId || ''
+            : String(context.organizationId || '').trim();
+        if (isPlatformAdmin && !effectiveOrgId) {
+            return [];
+        }
+        let res;
+        try {
+            if (isPlatformAdmin) {
+                res = await query(`SELECT dc.id, dc.code, dc.name
+           FROM dairy_centers dc
+           JOIN organizations o ON o.id = dc.organization_id
+           WHERE dc.organization_id::text = $1
+             AND o.status = 'ACTIVE'
+             AND dc.status = 'ACTIVE'
+           ORDER BY dc.code ASC;`, [effectiveOrgId]);
+                return res.rows;
+            }
+            if (!effectiveOrgId) {
+                return [];
+            }
+            res = await query(`SELECT dc.id, dc.code, dc.name
+         FROM dairy_centers dc
+         JOIN user_center_assignments uca ON uca.center_id = dc.id
+         JOIN organizations o ON o.id = dc.organization_id
+         WHERE uca.user_id::text = $1
+           AND dc.organization_id::text = $2
+           AND o.status = 'ACTIVE'
+           AND dc.status = 'ACTIVE'
+         ORDER BY dc.code ASC;`, [context.userId, effectiveOrgId]);
+            if (res.rows.length === 0 && isDairyWideRole) {
+                res = await query(`SELECT dc.id, dc.code, dc.name
+           FROM dairy_centers dc
+           JOIN organizations o ON o.id = dc.organization_id
+           WHERE dc.organization_id::text = $1
+             AND o.status = 'ACTIVE'
+             AND dc.status = 'ACTIVE'
+           ORDER BY dc.code ASC;`, [effectiveOrgId]);
+            }
+        }
+        catch {
+            throw new AppError('Center lookup database is unavailable', 503, 'AUTH_DB_UNAVAILABLE');
         }
         return res.rows;
     }

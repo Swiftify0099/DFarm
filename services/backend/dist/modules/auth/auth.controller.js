@@ -2,16 +2,6 @@ import { AuthService } from './auth.service.js';
 import { ApiResponse } from '../../shared/response/api-response.js';
 import { UnauthorizedError } from '../../shared/errors/app-error.js';
 export class AuthController {
-    static async login(req, res, next) {
-        try {
-            const username = (req.body?.username || req.body?.email || req.body?.identifier);
-            const data = await AuthService.loginStaff(username);
-            return ApiResponse.success(res, data, 200);
-        }
-        catch (err) {
-            next(err);
-        }
-    }
     static async me(req, res, next) {
         try {
             if (!req.auth) {
@@ -29,7 +19,11 @@ export class AuthController {
             if (!req.auth) {
                 throw new UnauthorizedError('Authentication required', 'UNAUTHORIZED');
             }
-            const data = await AuthService.getCenters(req.auth);
+            const requestedOrgId = (typeof req.query['organizationId'] === 'string' && req.query['organizationId']) ||
+                (typeof req.headers['x-organization-id'] === 'string' && req.headers['x-organization-id']) ||
+                (typeof req.headers['x-dairy-tenant-id'] === 'string' && req.headers['x-dairy-tenant-id']) ||
+                undefined;
+            const data = await AuthService.getCenters(req.auth, requestedOrgId);
             return ApiResponse.success(res, data, 200);
         }
         catch (err) {

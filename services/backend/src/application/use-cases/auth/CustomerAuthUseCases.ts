@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
 import { IOtpService, ITokenService, ICustomerRepository, ICustomerMembershipRepository } from '../../ports/index.js';
 import { CustomerMembership } from '../../../domain/entities/CustomerMembership.js';
-import { DomainError, DomainValidationError, UnauthorizedError, ForbiddenError } from '../../../domain/errors/index.js';
+import { DomainValidationError, UnauthorizedError } from '../../../domain/errors/index.js';
 import { PhoneNumber } from '../../../domain/value-objects/index.js';
 import { PostgresCustomerMembershipRepository } from '../../../infrastructure/repositories/PostgresCustomerMembershipRepository.js';
 import { db } from '../../../infrastructure/database/PostgresPool.js';
 import { tokenRevocationService } from '../../../infrastructure/security/TokenRevocationService.js';
+import { accountAuthorityService } from '../../../infrastructure/security/AccountAuthorityService.js';
 
 export class RequestCustomerOtpUseCase {
   constructor(private readonly otpService: IOtpService) {}
@@ -261,115 +262,50 @@ export class RefreshTokenUseCase {
       throw new UnauthorizedError('Unregistered guest tokens cannot be refreshed', 'INVALID_REFRESH_ACTOR');
     }
 
-    if (await tokenRevocationService.isRevoked(cleanToken, claims.jti)) {
-      throw new UnauthorizedError('Refresh token has been revoked', 'TOKEN_REVOKED');
-    }
-
     let resolvedRole = claims.role;
     let resolvedOrgId = claims.organizationId;
     let resolvedCenterId = claims.centerId;
 
     if (claims.actorType === 'STAFF') {
-      let staffRes;
-      try {
-        staffRes = await db.query(
-          `SELECT u.id, u.organization_id, u.role, u.user_role, u.status AS user_status, o.status AS org_status
-           FROM users u
-           LEFT JOIN organizations o ON o.id = u.organization_id
-           WHERE u.id::text = $1
-           LIMIT 1;`,
-          [claims.userId]
-        );
-      } catch {
-        throw new DomainError('Authentication verification database is unavailable', 'AUTH_DB_UNAVAILABLE', 503);
-      }
-
-      if (staffRes.rows.length === 0) {
+      const staff = await accountAuthorityService.verifyStaff({
+        userId: claims.userId,
+        claimedOrganizationId: claims.organizationId,
+        loadCenterAssignments: false,
+      });
+      if (!staff) {
         throw new UnauthorizedError('Staff account no longer exists', 'USER_NOT_FOUND');
       }
-
-      const row = staffRes.rows[0];
-      if (String(row.user_status || '').toUpperCase() !== 'ACTIVE') {
-        throw new ForbiddenError('Staff account is suspended or inactive', 'ACCOUNT_SUSPENDED');
-      }
-
-      resolvedRole = String(row.user_role || row.role || claims.role).trim().toUpperCase();
-      resolvedOrgId = row.organization_id || resolvedOrgId;
-
-      const isPlatformStaff = resolvedRole === 'SUPER_ADMIN' || resolvedRole === 'PLATFORM_OPERATOR';
-      if (!isPlatformStaff && (!row.organization_id || String(row.org_status || '').toUpperCase() !== 'ACTIVE')) {
-        throw new ForbiddenError('Assigned dairy cooperative is inactive or suspended', 'ORG_INACTIVE');
-      }
+      resolvedRole = staff.role;
+      resolvedOrgId = staff.organizationId || resolvedOrgId;
     } else {
-      let verifiedCustomer = false;
-      try {
-        const custRes = await db.query(
-          `SELECT c.id, c.organization_id, c.primary_center_id, c.status, c.is_deleted, o.status AS org_status
-           FROM customers c
-           LEFT JOIN organizations o ON o.id = c.organization_id
-           WHERE c.id::text = $1
-           LIMIT 1;`,
-          [claims.userId]
-        );
-
-        if (custRes.rows.length > 0) {
-          const row = custRes.rows[0];
-          if (row.is_deleted) {
-            throw new ForbiddenError('Customer account has been deleted', 'ACCOUNT_DELETED');
-          }
-          const custStatus = String(row.status || '').toUpperCase();
-          if (custStatus === 'SUSPENDED' || custStatus === 'INACTIVE' || custStatus === 'SOFT_DELETED') {
-            throw new ForbiddenError('Customer account is suspended or inactive', 'ACCOUNT_SUSPENDED');
-          }
-          if (row.org_status && String(row.org_status).toUpperCase() !== 'ACTIVE') {
-            throw new ForbiddenError('Customer dairy cooperative is inactive or suspended', 'ORG_INACTIVE');
-          }
-          resolvedOrgId = row.organization_id || resolvedOrgId;
-          resolvedCenterId = row.primary_center_id || resolvedCenterId;
-          resolvedRole = 'FARMER_CUSTOMER';
-          verifiedCustomer = true;
-        } else {
-          const memRes = await db.query(
-            `SELECT m.tenant_customer_id, m.organization_id, m.center_id, m.membership_status, o.status AS org_status
-             FROM customer_dairy_memberships m
-             LEFT JOIN organizations o ON o.id = m.organization_id
-             WHERE m.tenant_customer_id::text = $1
-               AND ($2::text IS NULL OR m.organization_id::text = $2)
-             LIMIT 1;`,
-            [claims.userId, claims.organizationId || null]
-          );
-
-          if (memRes.rows.length > 0) {
-            const m = memRes.rows[0];
-            const mStatus = String(m.membership_status || '').toUpperCase();
-            if (mStatus === 'SUSPENDED' || mStatus === 'REJECTED') {
-              throw new ForbiddenError('Customer membership is suspended or rejected', 'ACCOUNT_SUSPENDED');
-            }
-            if (m.org_status && String(m.org_status).toUpperCase() !== 'ACTIVE') {
-              throw new ForbiddenError('Customer dairy cooperative is inactive or suspended', 'ORG_INACTIVE');
-            }
-            resolvedOrgId = m.organization_id || resolvedOrgId;
-            resolvedCenterId = m.center_id || resolvedCenterId;
-            resolvedRole = 'FARMER_CUSTOMER';
-            verifiedCustomer = true;
-          }
-        }
-      } catch (err) {
-        if (err instanceof DomainError) throw err;
-        throw new DomainError('Authentication verification database is unavailable', 'AUTH_DB_UNAVAILABLE', 503);
-      }
-
-      if (!verifiedCustomer) {
+      const customer = await accountAuthorityService.verifyCustomer({
+        userId: claims.userId,
+        claimedRole: claims.role,
+        organizationId: claims.organizationId,
+        globalCustomerId: claims.globalCustomerId,
+        allowGuestFarmer: false,
+        strictActiveOnly: true,
+      });
+      if (!customer) {
         throw new UnauthorizedError('Customer account or membership could not be verified', 'USER_NOT_FOUND');
       }
+      resolvedOrgId = customer.organizationId || resolvedOrgId;
+      resolvedCenterId = customer.centerId || resolvedCenterId;
+      resolvedRole = 'FARMER_CUSTOMER';
     }
 
-    // Rotate refresh token: revoke the consumed token before issuing a replacement pair
-    await tokenRevocationService.revokeAsync({
+    // Atomically consume the single-use refresh token across all backend instances.
+    // Concurrent simultaneous requests race on INSERT ... ON CONFLICT DO NOTHING RETURNING token_key;
+    // strictly one caller succeeds and all replays/concurrent siblings fail with 401 TOKEN_REVOKED.
+    const consumed = await tokenRevocationService.tryConsumeSingleUseToken({
       token: cleanToken,
       jti: claims.jti,
       expiresAtSeconds: claims.exp,
+      reason: 'REFRESH_ROTATED',
     });
+    if (!consumed) {
+      throw new UnauthorizedError('Refresh token has been revoked or already consumed', 'TOKEN_REVOKED');
+    }
 
     const accessTtl = claims.actorType === 'STAFF' ? 24 * 3600 : 86400;
     const accessToken = this.tokenService.signToken({

@@ -299,13 +299,20 @@ router.post('/logout', async (req, res) => {
     const authHeader = req.headers.authorization || req.headers['x-access-token'];
     const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader?.trim();
     const refreshToken = typeof req.body?.refreshToken === 'string' ? req.body.refreshToken.trim() : undefined;
+    const errors = [];
     if (accessToken) {
         try {
             const claims = tokenService.verifyToken(accessToken);
             await tokenRevocationService.revokeAsync({ token: accessToken, jti: claims.jti, expiresAtSeconds: claims.exp });
         }
-        catch {
-            await tokenRevocationService.revokeAsync({ token: accessToken });
+        catch (err) {
+            // If the token is already invalid/expired we don't need to revoke it —
+            // but if the DB write fails (503 REVOCATION_DB_UNAVAILABLE), surface that truthfully.
+            const code = err?.code;
+            if (code === 'REVOCATION_DB_UNAVAILABLE') {
+                errors.push('Access token revocation could not be persisted to the authorization database.');
+            }
+            // Invalid / expired tokens are silently accepted — user is logging out anyway.
         }
     }
     if (refreshToken) {
@@ -313,9 +320,22 @@ router.post('/logout', async (req, res) => {
             const claims = tokenService.verifyToken(refreshToken);
             await tokenRevocationService.revokeAsync({ token: refreshToken, jti: claims.jti, expiresAtSeconds: claims.exp });
         }
-        catch {
-            await tokenRevocationService.revokeAsync({ token: refreshToken });
+        catch (err) {
+            const code = err?.code;
+            if (code === 'REVOCATION_DB_UNAVAILABLE') {
+                errors.push('Refresh token revocation could not be persisted to the authorization database.');
+            }
         }
+    }
+    if (errors.length > 0) {
+        // Truthful failure — do NOT return "Logged out successfully" if revocation failed
+        res.status(503).json({
+            success: false,
+            code: 'REVOCATION_DB_UNAVAILABLE',
+            error: 'Logout could not be completed: token revocation database is unavailable. Please retry.',
+            details: errors,
+        });
+        return;
     }
     res.json({ success: true, message: 'Logged out successfully' });
 });
