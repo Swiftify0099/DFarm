@@ -199,29 +199,18 @@ export class VerifyOperatorOtpUseCase {
             let proofVerified = false;
             // Method 1: Challenge-Response Proof (Replay-Resistant Single-Use Nonce)
             if (deviceProofParams?.challenge && deviceProofParams?.deviceProof) {
-                if (!dev.device_token_hash && !deviceProofParams.deviceToken) {
+                if (!dev.device_token_hash) {
                     throw new UnauthorizedError(`Station '${cleanDeviceId}' has no provisioned credential in registry. Re-provisioning required.`);
                 }
-                // Determine verification key:
-                // Priority 1: dev.device_token_hash (stored verifier key = SHA-256(deviceToken))
-                // Priority 2: candidate raw token derived key or direct key (if client supplied test fixture token)
-                let verifierKey = dev.device_token_hash;
+                // Canonical verifier key is strictly the persisted device_token_hash (= SHA-256(deviceToken)).
+                // If the client also supplied a raw deviceToken, it must match the persisted hash.
                 if (deviceProofParams.deviceToken) {
                     const candidateDerived = DeviceChallengeService.deriveProofKey(deviceProofParams.deviceToken);
-                    if (dev.device_token_hash && candidateDerived === dev.device_token_hash) {
-                        verifierKey = candidateDerived;
-                    }
-                    else if (!dev.device_token_hash) {
-                        verifierKey = candidateDerived;
-                    }
-                    else {
-                        // Check direct token key fallback for legacy fixtures
-                        const directProof = DeviceChallengeService.computeProof(deviceProofParams.challenge, deviceProofParams.deviceToken, cleanDeviceId);
-                        if (deviceProofParams.deviceProof === directProof) {
-                            verifierKey = deviceProofParams.deviceToken;
-                        }
+                    if (candidateDerived !== dev.device_token_hash) {
+                        throw new UnauthorizedError(`Invalid device credential provided for station '${cleanDeviceId}'. Proof of possession rejected.`);
                     }
                 }
+                const verifierKey = dev.device_token_hash;
                 // Atomically verify bindings, row-lock, verify cryptographic proof, and consume
                 const verification = await deviceChallengeService.verifyAndConsumeProof({
                     challenge: deviceProofParams.challenge,

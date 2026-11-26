@@ -13,8 +13,13 @@ import { config } from '../../config/env.js';
  */
 export class CredentialEncryption {
   private static getKey(): Buffer {
-    const rawKey = config.TENANT_DB_ENCRYPTION_KEY || config.JWT_SECRET;
-    return crypto.createHash('sha256').update(rawKey).digest();
+    const isProduction = config.NODE_ENV === 'production' || process.env['NODE_ENV'] === 'production';
+    const rawKey = process.env['TENANT_DB_ENCRYPTION_KEY'] || config.TENANT_DB_ENCRYPTION_KEY;
+    if (isProduction && (!rawKey || rawKey === 'dfarm-super-secret-encryption-key-32chars!')) {
+      throw new Error('CRITICAL: Production TENANT_DB_ENCRYPTION_KEY must be explicitly configured.');
+    }
+    const effectiveKey = rawKey || config.JWT_SECRET;
+    return crypto.createHash('sha256').update(effectiveKey).digest();
   }
 
   public static encrypt(plainText: string): string {

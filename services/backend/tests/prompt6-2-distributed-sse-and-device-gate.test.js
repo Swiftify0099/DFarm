@@ -372,7 +372,7 @@ test('PROMPT 6.2: Multi-Instance, Distributed SSE Replay, Device Coverage & SHA-
     const publisher = RealtimeEventPublisher.getInstance();
 
     await db.withTransaction(async (client) => {
-      await publisher.publishOutboxEvent(client, {
+      await publisher.publishWithTransaction(client, {
         eventType: 'COLLECTION_ACCEPTED',
         organizationId: orgAlpha,
         centerId: centerAlpha1,
@@ -720,7 +720,10 @@ test('PROMPT 6.2: Multi-Instance, Distributed SSE Replay, Device Coverage & SHA-
     assert.ok(cacheKey.includes('cat:COW'), 'Cache key must encode milkCategory');
   });
 
-  // Teardown HTTP servers
+  // Teardown HTTP servers and resources
   server1.close();
   server2.close();
+  RealtimeEventPublisher.getInstance().destroy();
+  await db.close();
+  setTimeout(() => process.exit(0), 500).unref();
 });

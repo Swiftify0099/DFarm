@@ -120,7 +120,11 @@ export interface ITokenService {
 }
 
 export interface IOtpService {
-  sendOtp(mobileNumber: string, purpose: 'OPERATOR_LOGIN' | 'CUSTOMER_AUTH' | 'ADMIN_LOGIN'): Promise<{
+  sendOtp(
+    mobileNumber: string,
+    purpose: 'OPERATOR_LOGIN' | 'CUSTOMER_AUTH' | 'ADMIN_LOGIN',
+    ipAddress?: string
+  ): Promise<{
     success: boolean;
     message: string;
     cooldownSeconds?: number;

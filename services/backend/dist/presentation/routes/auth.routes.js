@@ -1,13 +1,30 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { RequestOperatorOtpUseCase, VerifyOperatorOtpUseCase, RequestCustomerOtpUseCase, VerifyCustomerOtpUseCase, RequestAdminOtpUseCase, VerifyAdminOtpUseCase, RefreshTokenUseCase, SelectDairyMembershipUseCase, } from '../../application/use-cases/index.js';
-import { doveOtpService } from '../../infrastructure/otp/DoveOtpService.js';
+import { DoveOtpService, doveOtpService, ALLOWED_ADMIN_ROLES, PLATFORM_ADMIN_ROLES } from '../../infrastructure/otp/DoveOtpService.js';
 import { HmacJwtTokenService } from '../../infrastructure/security/HmacJwtTokenService.js';
 import { PostgresCustomerRepository } from '../../infrastructure/repositories/PostgresCustomerRepository.js';
 import { PostgresCustomerMembershipRepository } from '../../infrastructure/repositories/PostgresCustomerMembershipRepository.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { deviceChallengeService } from '../../infrastructure/security/DeviceChallengeService.js';
+export function serializeOtpResponse(result) {
+    const allowTestPreview = DoveOtpService.isStrictTestMode();
+    const payload = {
+        success: Boolean(result.success),
+        message: result.message,
+    };
+    if (result.cooldownSeconds !== undefined) {
+        payload.cooldownSeconds = result.cooldownSeconds;
+    }
+    if (result.expiresAt !== undefined) {
+        payload.expiresAt = result.expiresAt;
+    }
+    if (allowTestPreview && typeof result.previewOtp === 'string') {
+        payload.previewOtp = result.previewOtp;
+    }
+    return payload;
+}
 const router = Router();
 const otpService = doveOtpService;
 const tokenService = new HmacJwtTokenService();
@@ -24,14 +41,14 @@ const refreshTokenUseCase = new RefreshTokenUseCase(tokenService);
 // IP-level rate limiting for OTP requests and verification to prevent brute-force / abuse
 const otpRequestLimiter = rateLimit({
     windowMs: 60 * 1000, // 1 minute
-    max: 10, // Max 10 OTP requests per minute per IP
+    max: () => (process.env['NODE_ENV'] === 'test' ? 200 : 10), // Max 10 OTP requests per minute per IP in production
     message: { success: false, error: 'Too many OTP requests from this IP. Please wait a minute.' },
     standardHeaders: true,
     legacyHeaders: false,
 });
 const otpVerifyLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 20, // Max 20 verification attempts per minute per IP
+    max: () => (process.env['NODE_ENV'] === 'test' ? 200 : 20), // Max 20 verification attempts per minute per IP
     message: { success: false, error: 'Too many verification attempts from this IP. Please wait a minute.' },
     standardHeaders: true,
     legacyHeaders: false,
@@ -74,7 +91,7 @@ router.post('/operator/otp/request', otpRequestLimiter, async (req, res, next) =
     try {
         const { mobileNumber, phone } = req.body;
         const result = await requestOperatorOtp.execute(mobileNumber || phone);
-        res.json(result);
+        res.json(serializeOtpResponse(result));
     }
     catch (err) {
         next(err);
@@ -104,7 +121,7 @@ const requestCustomerOtpHandler = async (req, res, next) => {
     try {
         const { mobileNumber, phone } = req.body;
         const result = await requestCustomerOtp.execute(mobileNumber || phone);
-        res.json(result);
+        res.json(serializeOtpResponse(result));
     }
     catch (err) {
         next(err);
@@ -155,7 +172,7 @@ router.post('/admin/otp/request', otpRequestLimiter, async (req, res, next) => {
         }
         const ip = req.ip || req.socket.remoteAddress;
         const result = await requestAdminOtp.execute(rawPhone, ip);
-        res.json(result);
+        res.json(serializeOtpResponse(result));
     }
     catch (err) {
         next(err);
@@ -184,14 +201,10 @@ router.post('/admin/otp/verify', otpVerifyLimiter, async (req, res, next) => {
 router.get('/admin/me', authenticate, async (req, res, next) => {
     try {
         const userId = req.user?.userId;
-        if (!userId) {
-            res.status(401).json({ success: false, error: 'Unauthorized: missing authentication context' });
+        if (!userId || req.user?.actorType !== 'STAFF') {
+            res.status(401).json({ success: false, error: 'Unauthorized: missing staff authentication context' });
             return;
         }
-        const cleanId = userId.replace('admin:', '');
-        const clean10 = cleanId.replace(/\D/g, '').slice(-10);
-        const has10 = clean10.length === 10;
-        const isPankaj = clean10 === '7755995615' || cleanId === '00000000-0000-0000-0000-000000000099' || req.user?.role === 'SUPER_ADMIN';
         let row = null;
         try {
             const queryRes = await db.query(`SELECT 
@@ -199,51 +212,52 @@ router.get('/admin/me', authenticate, async (req, res, next) => {
            u.full_name, 
            COALESCE(u.phone_number, u.mobile_number) AS mobile_number,
            u.organization_id, 
-           COALESCE(u.role, u.user_role) AS role, 
+           u.role AS base_role,
+           u.user_role AS secondary_role,
            u.status AS user_status, 
            o.name AS org_name, 
            o.code AS org_code, 
            o.status AS org_status
          FROM users u
          LEFT JOIN organizations o ON o.id = u.organization_id
-         WHERE u.id = $1 OR ($2::boolean = TRUE AND (u.phone_number LIKE $3 OR u.normalized_mobile_number LIKE $3))
-         LIMIT 1;`, [cleanId, has10, `%${clean10}`]);
+         WHERE u.id = $1
+         LIMIT 1;`, [userId]);
             if (queryRes.rows.length > 0) {
                 row = queryRes.rows[0];
             }
         }
         catch {
-            // Handled via fallback below
-        }
-        if (!row && isPankaj) {
-            row = {
-                id: '00000000-0000-0000-0000-000000000099',
-                full_name: 'Pankaj Popat Yewale',
-                mobile_number: '+917755995615',
-                organization_id: '00000000-0000-0000-0000-000000000001',
-                role: 'SUPER_ADMIN',
-                user_status: 'ACTIVE',
-                org_name: 'DFarm Platform Federation',
-                org_code: 'DF-PLATFORM',
-                org_status: 'ACTIVE',
-            };
+            res.status(503).json({ success: false, error: 'Unable to verify administrator session' });
+            return;
         }
         if (!row) {
             res.status(401).json({ success: false, error: 'Administrator user record not found' });
             return;
         }
-        if (row.user_status && row.user_status !== 'ACTIVE') {
+        if (String(row.user_status || '').toUpperCase() !== 'ACTIVE') {
             res.status(403).json({ success: false, error: 'Administrator account is suspended or inactive' });
             return;
         }
-        const isPlatformStaff = row.role === 'SUPER_ADMIN' || row.role === 'PLATFORM_OPERATOR' || isPankaj || (row.mobile_number && row.mobile_number.endsWith('7755995615'));
+        const roleCandidates = [row.secondary_role, row.base_role]
+            .filter((r) => typeof r === 'string' && r.trim().length > 0)
+            .map((r) => r.trim().toUpperCase());
+        const resolvedRole = roleCandidates.find((r) => ALLOWED_ADMIN_ROLES.has(r));
+        if (!resolvedRole) {
+            res.status(403).json({ success: false, error: 'Account role is not authorized for administrator access' });
+            return;
+        }
+        const isPlatformStaff = PLATFORM_ADMIN_ROLES.has(resolvedRole);
         if (!isPlatformStaff) {
             if (!row.organization_id || !row.org_name || !row.org_code) {
                 res.status(403).json({ success: false, error: 'No active dairy cooperative assigned to administrator account' });
                 return;
             }
-            if (row.org_status && row.org_status !== 'ACTIVE') {
-                res.status(403).json({ success: false, error: `Assigned dairy (${row.org_name}) is currently inactive or suspended` });
+            if (req.user?.organizationId && row.organization_id !== req.user.organizationId) {
+                res.status(403).json({ success: false, error: 'Organization mismatch for administrator session' });
+                return;
+            }
+            if (String(row.org_status || '').toUpperCase() !== 'ACTIVE') {
+                res.status(403).json({ success: false, error: 'Assigned dairy cooperative is currently inactive or suspended' });
                 return;
             }
         }
@@ -253,10 +267,10 @@ router.get('/admin/me', authenticate, async (req, res, next) => {
                 id: row.id,
                 fullName: row.full_name,
                 mobileNumber: row.mobile_number,
-                role: isPlatformStaff ? (row.role || 'SUPER_ADMIN') : (row.role || 'PRIMARY_DAIRY_ADMIN'),
-                dairyId: isPlatformStaff ? (row.organization_id || '00000000-0000-0000-0000-000000000001') : row.organization_id,
-                dairyName: isPlatformStaff ? (row.org_name || 'DFarm Platform Federation') : row.org_name,
-                dairyCode: isPlatformStaff ? (row.org_code || 'DF-PLATFORM') : row.org_code,
+                role: resolvedRole,
+                dairyId: row.organization_id || (isPlatformStaff ? '00000000-0000-0000-0000-000000000001' : undefined),
+                dairyName: row.org_name || (isPlatformStaff ? 'DFarm Platform Federation' : undefined),
+                dairyCode: row.org_code || (isPlatformStaff ? 'DF-PLATFORM' : undefined),
             },
         });
     }

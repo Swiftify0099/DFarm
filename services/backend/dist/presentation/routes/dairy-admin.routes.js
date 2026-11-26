@@ -4,6 +4,7 @@ import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseMan
 import { authenticate, authenticateSseStream } from '../middleware/authenticate.js';
 import { sseTicketService } from '../../infrastructure/security/SseTicketService.js';
 import { realtimePublisher } from '../../infrastructure/realtime/RealtimeEventPublisher.js';
+import { isOriginAllowed } from '../../config/cors.js';
 export const dairyAdminRoutes = Router();
 /**
  * Middleware to enforce strict tenant isolation and resolve the authorized dairy organization ID.
@@ -150,15 +151,28 @@ dairyAdminRoutes.get('/events', authenticateSseStream, async (req, res) => {
     const centerId = await resolveAndValidateCenterScoping(req, res, tenantDb, organizationId, requestedCenter);
     if (centerId === false)
         return;
+    const requestOrigin = req.headers.origin;
+    if (requestOrigin && !isOriginAllowed(requestOrigin)) {
+        res.status(403).json({
+            success: false,
+            errorCode: 'CORS_ORIGIN_FORBIDDEN',
+            error: 'Origin is not allowed by CORS policy',
+        });
+        return;
+    }
     // Set mandatory SSE headers
-    res.writeHead(200, {
+    const sseHeaders = {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
         'Connection': 'keep-alive',
         'X-Accel-Buffering': 'no',
-        'Access-Control-Allow-Origin': req.headers.origin || '*',
-        'Access-Control-Allow-Credentials': 'true',
-    });
+    };
+    if (requestOrigin) {
+        sseHeaders['Access-Control-Allow-Origin'] = requestOrigin;
+        sseHeaders['Access-Control-Allow-Credentials'] = 'true';
+        sseHeaders['Vary'] = 'Origin';
+    }
+    res.writeHead(200, sseHeaders);
     res.flushHeaders?.();
     const lastEventId = req.headers['last-event-id'] || req.query['lastEventId'];
     const { unregister } = realtimePublisher.registerClient({

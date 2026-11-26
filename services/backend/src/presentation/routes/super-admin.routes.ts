@@ -24,7 +24,7 @@ export function requirePlatformStaffRole(req: Request, res: Response, next: Next
   }
 
   const role = (req.user.role || '').toUpperCase();
-  if (role !== 'SUPER_ADMIN' && role !== 'PLATFORM_OPERATOR' && role !== 'ADMIN') {
+  if (req.user.actorType !== 'STAFF' || (role !== 'SUPER_ADMIN' && role !== 'PLATFORM_OPERATOR')) {
     res.status(403).json({
       success: false,
       error: 'Forbidden: Super Admin or Platform Operator privileges required',
@@ -47,7 +47,7 @@ export function requireSuperAdminRole(req: Request, res: Response, next: NextFun
   }
 
   const role = (req.user.role || '').toUpperCase();
-  if (role !== 'SUPER_ADMIN' && role !== 'ADMIN') {
+  if (req.user.actorType !== 'STAFF' || role !== 'SUPER_ADMIN') {
     res.status(403).json({
       success: false,
       error: 'Forbidden: Super Admin privileges required for this administrative operation',

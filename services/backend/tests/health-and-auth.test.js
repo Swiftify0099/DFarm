@@ -30,8 +30,10 @@ test('DFarm Health, Auth, CORS, and Security Middleware Integration Suite', asyn
   let testUserToken = '';
 
   await t.test('0. Setup test organization, center, and user', async () => {
-    const orgRes = await query("SELECT id FROM organizations LIMIT 1;");
-    assert.ok(orgRes.rows.length > 0, 'Organization must exist');
+    const orgRes = await query(
+      "SELECT o.id FROM organizations o JOIN dairy_centers dc ON dc.organization_id = o.id WHERE o.status = 'ACTIVE' LIMIT 1;"
+    );
+    assert.ok(orgRes.rows.length > 0, 'Organization with active center must exist');
     orgId = orgRes.rows[0].id;
 
     const centerRes = await query("SELECT id FROM dairy_centers WHERE organization_id = $1 LIMIT 1;", [orgId]);
@@ -75,7 +77,7 @@ test('DFarm Health, Auth, CORS, and Security Middleware Integration Suite', asyn
     assert.equal(res.body.data.status, 'READY');
     assert.equal(res.body.data.checks.env, 'OK');
     assert.equal(res.body.data.checks.supabase, 'OK');
-    assert.equal(res.body.data.checks.database, 'OK');
+    assert.equal(res.body.data.checks.postgres, 'OK');
     assert.ok(!res.body.data.credentials, 'Must never expose credentials or database strings');
   });
 

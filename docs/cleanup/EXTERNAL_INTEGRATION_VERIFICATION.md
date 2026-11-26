@@ -44,7 +44,7 @@
 ## 4. Maps & Geolocation
 
 - **Provider**: Google Maps JavaScript API (Vite) / Expo Location API (Customer App)
-- **API Key**: Real API key configured in `.env` (`AIzaSyCZw4DVNyJwP85ZeDG1y_x8DLQ7bF8J0EU`)
+- **API Key**: Real API key configured in `.env` (`[REDACTED — rotated/removed from docs; configure via local .env]`)
 - **Backend Distance Calculation**: Spherical Law of Cosines / Haversine formula implemented in SQL and TypeScript (`locationService.calculateDistanceKm`).
 - **Dairy Coordinates**: Verified real dairy coordinates stored in `organizations` (e.g. Kolhapur: $16.6644^\circ\text{ N}, 74.2588^\circ\text{ E}$; Sangli: $16.8801^\circ\text{ N}, 74.4576^\circ\text{ E}$).
 - **Production Status**: Production-Ready.

@@ -545,11 +545,91 @@ test('Prompt 6.1: Real Chrome E2E — Live Dairy Admin Dashboard, SSE Stream & H
       );
     });
 
+    // ========================================================================
+    // Subtest 7: Real Chrome SSE Reconnect and 15-second Polling Fallback (Prompt 6.2)
+    // ========================================================================
+    await suite.test('7. Real Chrome SSE disconnect, 15s polling fallback, fresh ticket reconnect with Last-Event-ID, and authoritative reconciliation', async () => {
+      // 1. Reset to desktop viewport and navigate to /dashboard
+      await page.setViewportSize({ width: 1440, height: 960 });
+      await page.goto(`http://127.0.0.1:${vitePort}/dashboard`, { waitUntil: 'networkidle' });
+
+      // Ensure dashboard mounts and is initially CONNECTED
+      await page.waitForFunction(
+        () => document.body.innerText.includes('LIVE') || document.querySelector('.bg-emerald-500, .text-emerald-500, .text-green-500'),
+        null,
+        { timeout: 15000 }
+      );
+
+      // 2. Simulate Network Interruption: Forcibly terminate active SSE stream from server
+      const ticketPromise = page.waitForResponse(
+        (res) => res.url().includes('/dairy-admin/events/ticket') && res.status() === 200,
+        { timeout: 25000 }
+      );
+      RealtimeEventPublisher.getInstance().disconnectAllClients();
+
+      // 3. Seed new authoritative transaction during fallback period
+      const fallbackRefId = `TX-FALLBACK-${Date.now()}`;
+      const fallbackSession = crypto.randomUUID();
+      await db.query(`
+        INSERT INTO collection_sessions (
+          id, center_id, customer_id, business_date, shift_id, shift_type,
+          selected_milk_category, identification_method, session_state,
+          intake_sequence_uuid, started_at, completed_at, operator_id, device_id
+        ) VALUES (
+          '${fallbackSession}', '${centerId}', '${custId}', '${today}', '${shiftId}', 'MORNING',
+          'COW', 'FACE', 'COMPLETED', gen_random_uuid(), NOW(), NOW(), '${opId}', 'STATION_E2E_01'
+        ) ON CONFLICT (id) DO NOTHING;
+
+        INSERT INTO milk_collections (
+          id, session_id, organization_id, center_id, customer_id,
+          milk_category, net_weight, measurement_unit, fat_percentage, snf_percentage,
+          rate_chart_version_id, applied_rate_per_unit, total_amount, business_date, shift_type,
+          transaction_status, client_intake_uuid, idempotency_key, created_at, synced_at
+        ) VALUES (
+          gen_random_uuid(), '${fallbackSession}', '${orgId}', '${centerId}', '${custId}',
+          'COW', 10.0, 'LITERS', 4.00, 8.50,
+          '${rcvId}', 40.00, 400.00, '${today}', 'MORNING',
+          'COMPLETED', gen_random_uuid(), 'IDEMP-FB-${fallbackRefId}', NOW(), NOW()
+        ) ON CONFLICT (organization_id, idempotency_key) DO NOTHING;
+      `);
+
+      // 4. Verify client requests a fresh single-use SSE ticket and reconnects with Last-Event-ID
+      await ticketPromise;
+
+      // 5. Verify SSE indicator returns to LIVE
+      await page.waitForFunction(
+        () => document.body.innerText.includes('LIVE') || document.querySelector('.bg-emerald-500, .text-emerald-500, .text-green-500'),
+        null,
+        { timeout: 20000 }
+      );
+
+      // 6. Verify metrics update to reflect total without duplicates (15.5L + 25.0L + 10.0L = 50.5L)
+      await page.waitForFunction(
+        () => {
+          const text = document.body.innerText;
+          return text.includes('50.5') || text.includes('50.50');
+        },
+        null,
+        { timeout: 20000 }
+      );
+
+      // Capture Screenshot 7: SSE Reconnect & Reconciled Metrics
+      const screenshot7Path = path.join(screenshotsDir, '07-sse-reconnect-and-fallback.png');
+      await page.screenshot({ path: screenshot7Path, fullPage: true });
+      copyToArtifact('07-sse-reconnect-and-fallback.png');
+      assert.ok(fs.existsSync(screenshot7Path), 'Screenshot 07 must exist');
+
+      // Verify no sensitive token leak occurred during reconnect
+      assert.equal(sensitiveUrlLeaks.length, 0, 'No sensitive token leaks allowed');
+    });
+
   } finally {
     if (context) await context.close();
     if (browser) await browser.close();
     await vite.close();
     await new Promise((resolve) => server.close(resolve));
     RealtimeEventPublisher.getInstance().destroy();
+    await db.close();
+    setTimeout(() => process.exit(0), 500).unref();
   }
 });

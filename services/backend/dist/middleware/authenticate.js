@@ -190,7 +190,9 @@ export async function authenticateDevice(req, _res, next) {
         else if (typeof req.headers['x-device-token'] === 'string') {
             token = req.headers['x-device-token'].trim();
         }
-        let deviceId = req.headers['x-device-id'] || req.body?.deviceId;
+        let deviceId = req.headers['x-device-id'] ||
+            req.body?.deviceId ||
+            req.query?.['deviceId'];
         if (token) {
             try {
                 const decoded = verifyDeviceToken(token);
@@ -199,14 +201,24 @@ export async function authenticateDevice(req, _res, next) {
                 }
             }
             catch {
-                // Not a signed JWT, check if token hash exists in DB
-                const tokenHash = hashToken(token);
-                const devRes = await pool.query('SELECT id, status FROM devices WHERE device_token_hash = $1;', [tokenHash]);
-                if (devRes.rows.length > 0) {
-                    deviceId = devRes.rows[0].id;
+                try {
+                    const decoded = verifyJwt(token);
+                    if (decoded?.deviceId) {
+                        deviceId = decoded.deviceId;
+                    }
                 }
-                else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
-                    deviceId = token;
+                catch {
+                    // Token is neither a device JWT nor an app JWT
+                }
+                if (!deviceId) {
+                    const tokenHash = hashToken(token);
+                    const devRes = await pool.query('SELECT id, status FROM devices WHERE device_token_hash = $1;', [tokenHash]);
+                    if (devRes.rows.length > 0) {
+                        deviceId = devRes.rows[0].id;
+                    }
+                    else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
+                        deviceId = token;
+                    }
                 }
             }
         }

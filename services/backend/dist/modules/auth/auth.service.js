@@ -71,71 +71,7 @@ export class AuthService {
             user = userRes.rows[0];
         }
         catch {
-            // Database connection may be offline or timing out; proceed to check built-in staff users
-        }
-        // Default system users if not present in DB or DB is offline
-        if (!user) {
-            if (cleanUsername === 'officer.kolhapur@dfarm.local' ||
-                cleanUsername === 'officer_kolhapur' ||
-                cleanUsername === 'officer@dfarm.local') {
-                user = {
-                    id: '9cb510a5-29e6-4a23-b06a-b54dbd4a1e90',
-                    organization_id: 'bf7dd18c-b4b0-42d9-8385-d5720671b784',
-                    organization_name: 'Kolhapur District Co-operative Milk Union',
-                    organization_code: 'KOLHAPUR_UNION',
-                    username: 'officer_kolhapur',
-                    full_name: 'Kolhapur Field Registration Officer',
-                    email: 'officer.kolhapur@dfarm.local',
-                    phone_number: '+919822000005',
-                    role: 'REGISTRATION_OFFICER',
-                    status: 'ACTIVE',
-                };
-            }
-            else if (cleanUsername === 'operator_tasgaon' ||
-                cleanUsername === 'operator_tasgaon@test.dfarm.com') {
-                user = {
-                    id: '216abab3-5202-4d3a-b9dd-acec6abbad9e',
-                    organization_id: '456a8c36-6e65-4347-b97b-13340a3d8737',
-                    organization_name: 'Sangli District Co-operative Milk Union',
-                    organization_code: 'SANGLI_UNION',
-                    username: 'operator_tasgaon',
-                    full_name: 'Tasgaon Intake Operator',
-                    email: 'operator_tasgaon@test.dfarm.com',
-                    phone_number: '+919822000002',
-                    role: 'COLLECTION_OPERATOR',
-                    status: 'ACTIVE',
-                };
-            }
-            else if (cleanUsername === 'owner_kolhapur' ||
-                cleanUsername === 'owner.kolhapur@dfarm.local') {
-                user = {
-                    id: '97c47652-e606-4142-aab6-2f880e01fe1f',
-                    organization_id: 'bf7dd18c-b4b0-42d9-8385-d5720671b784',
-                    organization_name: 'Kolhapur District Co-operative Milk Union',
-                    organization_code: 'KOLHAPUR_UNION',
-                    username: 'owner_kolhapur',
-                    full_name: 'Kolhapur Owner',
-                    email: 'owner.kolhapur@dfarm.local',
-                    phone_number: '+919822000003',
-                    role: 'DAIRY_OWNER',
-                    status: 'ACTIVE',
-                };
-            }
-            else if (cleanUsername === 'owner_sangli' ||
-                cleanUsername === 'owner.sangli@dfarm.local') {
-                user = {
-                    id: '9cb510a5-29e6-4a23-b06a-b54dbd4a1e9c',
-                    organization_id: '456a8c36-6e65-4347-b97b-13340a3d8737',
-                    organization_name: 'Sangli District Co-operative Milk Union',
-                    organization_code: 'SANGLI_UNION',
-                    username: 'owner_sangli',
-                    full_name: 'Sangli Owner',
-                    email: 'owner.sangli@dfarm.local',
-                    phone_number: '+919822000001',
-                    role: 'DAIRY_OWNER',
-                    status: 'ACTIVE',
-                };
-            }
+            throw new UnauthorizedError('Unable to verify credentials', 'INVALID_CREDENTIALS');
         }
         if (!user) {
             throw new UnauthorizedError('Invalid credentials', 'INVALID_CREDENTIALS');

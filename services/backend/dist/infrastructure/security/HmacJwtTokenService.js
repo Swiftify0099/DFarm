@@ -3,10 +3,14 @@ import { UnauthorizedError } from '../../domain/errors/index.js';
 export class HmacJwtTokenService {
     secret;
     constructor(secret) {
-        this.secret =
-            secret ||
-                process.env['JWT_SECRET'] ||
-                'super-secret-jwt-token-with-at-least-32-characters-long';
+        const resolved = secret ||
+            process.env['JWT_SECRET'] ||
+            'super-secret-jwt-token-with-at-least-32-characters-long';
+        if (process.env['NODE_ENV'] === 'production' &&
+            (!secret && (!process.env['JWT_SECRET'] || resolved === 'super-secret-jwt-token-with-at-least-32-characters-long'))) {
+            throw new Error('CRITICAL: Production JWT_SECRET must be explicitly configured.');
+        }
+        this.secret = resolved;
     }
     signToken(payload, expiresInSeconds = 86400) {
         const now = Math.floor(Date.now() / 1000);

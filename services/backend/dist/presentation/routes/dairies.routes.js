@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import { GetNearbyDairiesUseCase } from '../../application/use-cases/index.js';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
+import { authorizeRoles } from '../middleware/authorize.js';
+import { serializeOtpResponse } from './auth.routes.js';
 import { emailService } from '../../infrastructure/email/EmailService.js';
 import { doveOtpService } from '../../infrastructure/otp/DoveOtpService.js';
 import { config } from '../../config/env.js';
@@ -98,31 +100,6 @@ async function findInvitation(tokenOrCode, dairyCode) {
     catch {
         // Database lookup failed or table missing
     }
-    // 5. Fallback for previously generated frontend invitations (e.g. DF-SAN-5103 / DF-SAN-2813 / any DF-* code)
-    if (dCode && dCode.startsWith('DF-')) {
-        const fallbackMobile = (config.ADMIN_PHONE_NUMBER || '+917755995615').replace(/\D/g, '').slice(-10);
-        const dynInv = {
-            id: `inv_dyn_${dCode}`,
-            dairyId: `org_${dCode.toLowerCase()}`,
-            dairyName: `${dCode} Cooperative Dairy`,
-            dairyCode: dCode,
-            adminId: `admin_${dCode.toLowerCase()}`,
-            adminName: (fallbackMobile === '7755995615' || dCode === 'DF-SAN-2813') ? 'Pankaj Popat Yewale' : 'Primary Dairy Admin',
-            adminMobile: fallbackMobile,
-            email: 'admin@dfarm.in',
-            rawToken: token || dCode,
-            tokenHash: tokenHash || crypto.createHash('sha256').update(dCode).digest('hex'),
-            status: 'PENDING',
-            createdAt: new Date().toISOString(),
-            expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-        };
-        if (tokenHash)
-            inMemoryInvitationsByHash.set(tokenHash, dynInv);
-        inMemoryInvitationsByHash.set(dynInv.tokenHash, dynInv);
-        inMemoryInvitationsById.set(dynInv.id, dynInv);
-        doveOtpService.registerAuthorizedAdminPhone(fallbackMobile);
-        return dynInv;
-    }
     return null;
 }
 // ============================================================================
@@ -216,10 +193,8 @@ router.post('/invitations/otp/request', async (req, res, next) => {
             res.status(400).json({ success: false, error: 'Cannot dispatch OTP for an invalid or inactive invitation.' });
             return;
         }
-        // Whitelist this mobile so DoveOtpService permits admin OTP dispatch
-        doveOtpService.registerAuthorizedAdminPhone(invitation.adminMobile);
-        const otpResult = await doveOtpService.sendOtp(invitation.adminMobile, 'ADMIN_LOGIN', req.ip || req.socket.remoteAddress);
-        res.json(otpResult);
+        const otpResult = await doveOtpService.sendOtp(invitation.adminMobile, 'ADMIN_LOGIN', req.ip || req.socket.remoteAddress, { verifiedInvitationId: invitation.id });
+        res.json(serializeOtpResponse(otpResult));
     }
     catch (err) {
         next(err);
@@ -1616,10 +1591,7 @@ const deprovisionDairyHandler = async (req, res, next) => {
             res.status(400).json({ success: false, error: 'dairyId is required.' });
             return;
         }
-        const isSuperAdmin = req.user?.role === 'SUPER_ADMIN' ||
-            req.user?.role === 'PLATFORM_SUPER_ADMIN' ||
-            req.user?.role === 'DEVELOPER_OVERRIDE' ||
-            req.user?.role === 'SUPER_ADMIN';
+        const isSuperAdmin = req.user?.role === 'SUPER_ADMIN';
         if (!isSuperAdmin) {
             res.status(403).json({
                 success: false,
@@ -1655,7 +1627,7 @@ const deprovisionDairyHandler = async (req, res, next) => {
 };
 router.delete('/:id/deprovision', authenticate, deprovisionDairyHandler);
 router.delete('/:id', authenticate, deprovisionDairyHandler);
-// Tenant Database Management & Dynamic Catalog Explorer
-router.use('/:dairyId/database', tenantDatabaseRoutes);
+// Tenant Database Management & Dynamic Catalog Explorer (Super Admin / Platform Operator only)
+router.use('/:dairyId/database', authenticate, authorizeRoles('SUPER_ADMIN', 'PLATFORM_OPERATOR'), tenantDatabaseRoutes);
 export const dairiesRoutes = router;
 //# sourceMappingURL=dairies.routes.js.map

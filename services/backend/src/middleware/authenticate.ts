@@ -254,7 +254,10 @@ export async function authenticateDevice(req: Request, _res: Response, next: Nex
       token = req.headers['x-device-token'].trim();
     }
 
-    let deviceId = (req.headers['x-device-id'] as string) || (req.body?.deviceId as string);
+    let deviceId =
+      (req.headers['x-device-id'] as string) ||
+      (req.body?.deviceId as string) ||
+      (req.query?.['deviceId'] as string);
 
     if (token) {
       try {
@@ -263,13 +266,23 @@ export async function authenticateDevice(req: Request, _res: Response, next: Nex
           deviceId = decoded.sub;
         }
       } catch {
-        // Not a signed JWT, check if token hash exists in DB
-        const tokenHash = hashToken(token);
-        const devRes = await pool.query('SELECT id, status FROM devices WHERE device_token_hash = $1;', [tokenHash]);
-        if (devRes.rows.length > 0) {
-          deviceId = devRes.rows[0].id;
-        } else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
-          deviceId = token;
+        try {
+          const decoded: any = verifyJwt(token);
+          if (decoded?.deviceId) {
+            deviceId = decoded.deviceId;
+          }
+        } catch {
+          // Token is neither a device JWT nor an app JWT
+        }
+
+        if (!deviceId) {
+          const tokenHash = hashToken(token);
+          const devRes = await pool.query('SELECT id, status FROM devices WHERE device_token_hash = $1;', [tokenHash]);
+          if (devRes.rows.length > 0) {
+            deviceId = devRes.rows[0].id;
+          } else if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
+            deviceId = token;
+          }
         }
       }
     }

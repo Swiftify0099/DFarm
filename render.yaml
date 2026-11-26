@@ -16,7 +16,7 @@ services:
       - key: PORT
         value: 10000
       - key: CORS_ALLOWED_ORIGINS
-        value: "*"
+        value: "https://collection.dfarm.in,https://dairy.dfarm.in,https://admin.dfarm.in,https://dfarm-collection.pages.dev,https://dfarm-dairy-admin.pages.dev,https://dfarm-super-admin.pages.dev"
       # Supabase & Database Configuration
       - key: SUPABASE_URL
         sync: false
@@ -41,13 +41,11 @@ services:
         generateValue: true
       - key: OFFLINE_LEASE_ACTIVE_KEY_ID
         value: "k1"
-      # Admin Configuration
-      - key: ADMIN_PHONE_NUMBER
-        value: "+917755995615,7755995615"
+      # Phone & OTP Configuration
       - key: DEFAULT_PHONE_REGION
         value: "IN"
       - key: ALLOW_TEST_PREVIEW_OTP
-        value: "true"
+        value: "false"
       # Dove SMS Gateway Configuration (Mobicomm)
       - key: DOVE_SMS_API_URL
         value: "https://mobicomm.dove-sms.com/submitsms.jsp"

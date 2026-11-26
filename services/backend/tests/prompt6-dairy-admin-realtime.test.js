@@ -198,7 +198,12 @@ test('PROMPT 6: Dairy Admin Realtime Dashboard & Live Station Monitoring Suite',
       ) VALUES 
         ($1, $3, $4, $5, $6, 'COW', 15.5, 'LITERS', 4.2, 8.5, $7, 42.00, 651.00, $8, 'MORNING', 'COMPLETED', gen_random_uuid(), 'IDEMP-601', NOW() - INTERVAL '1 hour', NOW()),
         ($2, $9, $4, $5, $6, 'BUFFALO', 10.0, 'LITERS', 7.0, 9.0, $7, 60.00, 600.00, $8, 'MORNING', 'COMPLETED', gen_random_uuid(), 'IDEMP-602', NOW() - INTERVAL '30 minutes', NOW())
-      ON CONFLICT (organization_id, idempotency_key) DO NOTHING;
+      ON CONFLICT (organization_id, idempotency_key) DO UPDATE SET 
+        business_date = EXCLUDED.business_date, 
+        session_id = EXCLUDED.session_id, 
+        customer_id = EXCLUDED.customer_id, 
+        center_id = EXCLUDED.center_id, 
+        created_at = NOW();
     `, [coll1Id, coll2Id, intakeSession1, orgAlpha, centerAlpha1, customerAlpha, rcvId, today, intakeSession2]);
   };
 

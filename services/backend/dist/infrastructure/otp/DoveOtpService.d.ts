@@ -1,4 +1,7 @@
 import { IOtpService } from '../../application/ports/index.js';
+import { DoveSmsService } from '../sms/DoveSmsService.js';
+export declare const ALLOWED_ADMIN_ROLES: Set<string>;
+export declare const PLATFORM_ADMIN_ROLES: Set<string>;
 export interface OtpChallengeRecord {
     id: string;
     phone: string;
@@ -10,30 +13,37 @@ export interface OtpChallengeRecord {
     lastRequestedAt: number;
     ipAddress?: string;
 }
+export interface SendOtpOptions {
+    verifiedInvitationId?: string;
+}
 export declare class DoveOtpService implements IOtpService {
+    private readonly smsService;
     private static readonly OTP_TTL_MS;
     private static readonly RESEND_COOLDOWN_MS;
     private static readonly MAX_ATTEMPTS;
     private readonly memoryStorage;
-    private readonly authorizedAdminPhones;
-    registerAuthorizedAdminPhone(phone: string): void;
+    constructor(smsService?: Pick<DoveSmsService, 'sendLoginOtpSms'>);
+    static isProductionRuntime(): boolean;
+    static isStrictTestMode(): boolean;
+    registerAuthorizedAdminPhone(_phone: string): void;
     unregisterAuthorizedAdminPhone(phone: string): void;
     resetCooldown(phone: string): void;
     private getStorageKey;
+    private maskPhone;
     private getHmacSecret;
     /**
-     * Validates if a phone number is whitelisted for administrative login.
-     * Supports both config-whitelisted Super Admins and dynamically activated Dairy Admins.
+     * Deprecated synchronous check: always returns false so callers must use DB-backed async verification.
      */
-    isAdminPhoneWhitelisted(phone: string): boolean;
+    isAdminPhoneWhitelisted(_phone: string): boolean;
     /**
-     * Asynchronously verifies if a phone is registered in DB as an active admin user.
+     * Authoritatively verifies if a phone belongs to an active administrator in the persisted database.
+     * Fails closed on any database error or inactive/non-admin record.
      */
     ensureAdminWhitelisted(phone: string): Promise<boolean>;
     /**
      * Dispatches a real OTP via Dove SMS Gateway with cryptographic generation and HMAC hashing.
      */
-    sendOtp(mobileNumber: string, purpose: 'OPERATOR_LOGIN' | 'CUSTOMER_AUTH' | 'ADMIN_LOGIN', ipAddress?: string): Promise<{
+    sendOtp(mobileNumber: string, purpose: 'OPERATOR_LOGIN' | 'CUSTOMER_AUTH' | 'ADMIN_LOGIN', ipAddress?: string, options?: SendOtpOptions): Promise<{
         success: boolean;
         message: string;
         cooldownSeconds?: number;

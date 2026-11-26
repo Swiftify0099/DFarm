@@ -48,7 +48,7 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
     deviceIdentifier: string,
     organizationId?: string
   ): Promise<KioskShiftSession | null> {
-    const sql = `
+    const baseSelect = `
       SELECT 
         s.*,
         dc.timezone AS center_timezone,
@@ -58,18 +58,31 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
       LEFT JOIN dairy_centers dc ON dc.id = s.center_id
       LEFT JOIN users u_open ON u_open.id = s.opening_operator_id
       LEFT JOIN users u_close ON u_close.id = s.closing_operator_id
-      WHERE s.center_id = $1 AND s.device_identifier = $2 AND s.status = 'OPEN'
-      ORDER BY s.opened_at DESC
-      LIMIT 1;
     `;
 
     if (organizationId) {
+      const orgSql = `${baseSelect}
+        WHERE s.center_id = $1 AND s.device_identifier = $2 AND s.organization_id = $3 AND s.status = 'OPEN'
+        ORDER BY s.opened_at DESC
+        LIMIT 1;`;
       try {
         const client = await this.getDb(organizationId);
-        const result = await client.query(sql, [centerId, deviceIdentifier]);
+        const result = await client.query(orgSql, [centerId, deviceIdentifier, organizationId]);
         if (result.rows.length > 0) return this.mapRowToSession(result.rows[0]);
       } catch {}
+
+      try {
+        const result = await db.query(orgSql, [centerId, deviceIdentifier, organizationId]);
+        if (result.rows.length > 0) return this.mapRowToSession(result.rows[0]);
+      } catch {}
+
+      return null;
     }
+
+    const sql = `${baseSelect}
+      WHERE s.center_id = $1 AND s.device_identifier = $2 AND s.status = 'OPEN'
+      ORDER BY s.opened_at DESC
+      LIMIT 1;`;
 
     // Check across tenant databases
     for (const tenantDb of tenantDbManager.getAllTenantDbs()) {
@@ -89,7 +102,7 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
   }
 
   public async findByCode(sessionCode: string, organizationId?: string): Promise<KioskShiftSession | null> {
-    const sql = `
+    const baseSelect = `
       SELECT 
         s.*,
         dc.timezone AS center_timezone,
@@ -99,17 +112,29 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
       LEFT JOIN dairy_centers dc ON dc.id = s.center_id
       LEFT JOIN users u_open ON u_open.id = s.opening_operator_id
       LEFT JOIN users u_close ON u_close.id = s.closing_operator_id
-      WHERE s.session_code = $1
-      LIMIT 1;
     `;
 
     if (organizationId) {
+      const orgSql = `${baseSelect}
+        WHERE s.session_code = $1 AND s.organization_id = $2
+        LIMIT 1;`;
       try {
         const client = await this.getDb(organizationId);
-        const result = await client.query(sql, [sessionCode]);
+        const result = await client.query(orgSql, [sessionCode, organizationId]);
         if (result.rows.length > 0) return this.mapRowToSession(result.rows[0]);
       } catch {}
+
+      try {
+        const result = await db.query(orgSql, [sessionCode, organizationId]);
+        if (result.rows.length > 0) return this.mapRowToSession(result.rows[0]);
+      } catch {}
+
+      return null;
     }
+
+    const sql = `${baseSelect}
+      WHERE s.session_code = $1
+      LIMIT 1;`;
 
     // Check across tenant databases
     for (const tenantDb of tenantDbManager.getAllTenantDbs()) {
@@ -129,7 +154,7 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
   }
 
   public async findById(sessionId: string, organizationId?: string): Promise<KioskShiftSession | null> {
-    const sql = `
+    const baseSelect = `
       SELECT 
         s.*,
         dc.timezone AS center_timezone,
@@ -139,17 +164,29 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
       LEFT JOIN dairy_centers dc ON dc.id = s.center_id
       LEFT JOIN users u_open ON u_open.id = s.opening_operator_id
       LEFT JOIN users u_close ON u_close.id = s.closing_operator_id
-      WHERE s.id = $1
-      LIMIT 1;
     `;
 
     if (organizationId) {
+      const orgSql = `${baseSelect}
+        WHERE s.id = $1 AND s.organization_id = $2
+        LIMIT 1;`;
       try {
         const client = await this.getDb(organizationId);
-        const result = await client.query(sql, [sessionId]);
+        const result = await client.query(orgSql, [sessionId, organizationId]);
         if (result.rows.length > 0) return this.mapRowToSession(result.rows[0]);
       } catch {}
+
+      try {
+        const result = await db.query(orgSql, [sessionId, organizationId]);
+        if (result.rows.length > 0) return this.mapRowToSession(result.rows[0]);
+      } catch {}
+
+      return null;
     }
+
+    const sql = `${baseSelect}
+      WHERE s.id = $1
+      LIMIT 1;`;
 
     // Check across tenant databases
     for (const tenantDb of tenantDbManager.getAllTenantDbs()) {

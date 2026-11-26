@@ -41,6 +41,18 @@ function autoLoadDotEnv() {
     }
 }
 autoLoadDotEnv();
+const parseStrictBoolean = (val) => {
+    if (typeof val === 'boolean')
+        return val;
+    if (typeof val === 'string') {
+        const normalized = val.trim().toLowerCase();
+        if (normalized === 'true' || normalized === '1')
+            return true;
+        if (normalized === 'false' || normalized === '0' || normalized === '')
+            return false;
+    }
+    return val;
+};
 const envSchema = z.object({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     PORT: z.coerce.number().int().positive().default(4000),
@@ -68,7 +80,7 @@ const envSchema = z.object({
     OFFLINE_LEASE_PREVIOUS_KEYS: z.string().optional(),
     OFFLINE_LEASE_RETIRED_KEYS: z.string().optional(),
     // WhatsApp Business Cloud API Configuration
-    WHATSAPP_ENABLED: z.coerce.boolean().default(false),
+    WHATSAPP_ENABLED: z.preprocess(parseStrictBoolean, z.boolean()).default(false),
     WHATSAPP_API_URL: z.string().url().default('https://graph.facebook.com/v21.0'),
     WHATSAPP_ACCESS_TOKEN: z.string().optional(),
     WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
@@ -83,9 +95,9 @@ const envSchema = z.object({
     DOVE_SMS_ACCUSAGE: z.string().default('1'),
     DOVE_SMS_TEMPLATE: z.string().default('Your Verification Code for login is {OTP}. - Expertskill Technology.'),
     // Hardened Admin OTP Configuration
-    ADMIN_PHONE_NUMBER: z.string().default('+917755995615,+919876543210,7755995615'),
+    ADMIN_PHONE_NUMBER: z.string().default(''),
     ADMIN_OTP_SECRET: z.string().default('dfarm-super-secure-admin-otp-secret-key-32chars!'),
-    ALLOW_TEST_PREVIEW_OTP: z.coerce.boolean().default(false),
+    ALLOW_TEST_PREVIEW_OTP: z.preprocess(parseStrictBoolean, z.boolean()).default(false),
     // Firebase Cloud Messaging Configuration
     FCM_PROJECT_ID: z.string().optional(),
     FCM_CLIENT_EMAIL: z.string().optional(),
@@ -104,9 +116,25 @@ const envSchema = z.object({
     PUBLIC_WEB_URL: z.string().url().default('http://localhost:5173'),
     PUBLIC_ACTIVATION_URL: z.string().url().default('http://localhost:5173/activate'),
 });
+const KNOWN_INSECURE_SECRETS = new Set([
+    'super-secret-jwt-token-with-at-least-32-characters-long',
+    'dfarm-super-secure-admin-otp-secret-key-32chars!',
+    'dfarm-super-secret-encryption-key-32chars!',
+    'dev-offline-lease-signing-key-32chars!',
+    'placeholder_minimum_32_character_random_jwt_secret',
+    'placeholder_minimum_32_character_tenant_db_encryption_key',
+]);
 export function validateKeyEntropyAndByteLength(key, keyName = 'OFFLINE_LEASE_SIGNING_KEY') {
-    if (!key || typeof key !== 'string') {
-        throw new Error(`CRITICAL: ${keyName} is required and must be a string.`);
+    if (!key || typeof key !== 'string' || key.trim().length === 0) {
+        throw new Error(`CRITICAL: ${keyName} is required and must be a non-empty string.`);
+    }
+    const lower = key.toLowerCase();
+    if (KNOWN_INSECURE_SECRETS.has(key) ||
+        lower.includes('placeholder') ||
+        lower.includes('changeme') ||
+        lower.includes('super-secret') ||
+        lower.includes('super-secure')) {
+        throw new Error(`CRITICAL: ${keyName} fails security validation: default or placeholder secret values are strictly prohibited.`);
     }
     // 1. Verify Minimum 256-Bit (32 Byte) Cryptographic Length
     const isHex = /^[0-9a-fA-F]+$/.test(key);
@@ -126,9 +154,11 @@ export function validateKeyEntropyAndByteLength(key, keyName = 'OFFLINE_LEASE_SI
     if (uniqueChars < 8) {
         throw new Error(`CRITICAL: ${keyName} fails entropy verification: key exhibits insufficient randomness (only ${uniqueChars} unique characters). Use a cryptographically secure 256-bit generator (e.g. crypto.randomBytes(32)).`);
     }
-    // Check for trivial repeated substring patterns (e.g. repeated 2, 3, 4, 8 character chunks)
+    // Check for trivial repeated substring patterns (e.g. repeated 2, 3, 4, 8, 16 character chunks)
     if (key.length >= 32) {
-        for (const chunkLen of [2, 3, 4, 8]) {
+        for (const chunkLen of [2, 3, 4, 8, 16]) {
+            if (key.length < chunkLen * 2)
+                continue;
             const chunk = key.slice(0, chunkLen);
             const repeated = chunk.repeat(Math.floor(key.length / chunkLen));
             if (key.startsWith(repeated)) {
@@ -144,12 +174,41 @@ export function loadEnv(customEnv) {
         const errorDetails = result.error.issues.map((e) => `[${Array.isArray(e.path) ? e.path.join('.') : e.path}]: ${e.message}`).join(', ');
         throw new Error(`CRITICAL: Environment validation failed: ${errorDetails}`);
     }
-    // Strict Production Enforcement: Dedicated OFFLINE_LEASE_SIGNING_KEY is strictly mandatory in production
+    // Strict Production Enforcement
     if (result.data.NODE_ENV === 'production') {
-        if (!result.data.OFFLINE_LEASE_SIGNING_KEY) {
+        if (result.data.ALLOW_TEST_PREVIEW_OTP) {
+            throw new Error('CRITICAL: Production startup failed: ALLOW_TEST_PREVIEW_OTP must be false in production.');
+        }
+        const corsOrigins = result.data.CORS_ALLOWED_ORIGINS
+            .split(',')
+            .map((o) => o.trim())
+            .filter(Boolean);
+        if (corsOrigins.includes('*')) {
+            throw new Error('CRITICAL: Production startup failed: CORS_ALLOWED_ORIGINS must not contain wildcard "*" in production.');
+        }
+        const rawOfflineLeaseKey = source['OFFLINE_LEASE_SIGNING_KEY'];
+        if (!rawOfflineLeaseKey || rawOfflineLeaseKey.trim().length === 0) {
             throw new Error('CRITICAL: Production startup failed: Dedicated OFFLINE_LEASE_SIGNING_KEY must be configured with at least 32 cryptographically random bytes (256 bits). Fallback to JWT_SECRET in production is strictly prohibited.');
         }
-        validateKeyEntropyAndByteLength(result.data.OFFLINE_LEASE_SIGNING_KEY, 'OFFLINE_LEASE_SIGNING_KEY');
+        validateKeyEntropyAndByteLength(rawOfflineLeaseKey, 'OFFLINE_LEASE_SIGNING_KEY');
+        const rawJwtSecret = source['JWT_SECRET'];
+        if (!rawJwtSecret || rawJwtSecret.trim().length === 0) {
+            throw new Error('CRITICAL: Production startup failed: JWT_SECRET must be explicitly configured with at least 32 cryptographically random bytes (256 bits).');
+        }
+        validateKeyEntropyAndByteLength(rawJwtSecret, 'JWT_SECRET');
+        const rawAdminOtpSecret = source['ADMIN_OTP_SECRET'];
+        if (!rawAdminOtpSecret || rawAdminOtpSecret.trim().length === 0) {
+            throw new Error('CRITICAL: Production startup failed: ADMIN_OTP_SECRET must be explicitly configured with at least 32 cryptographically random bytes (256 bits).');
+        }
+        validateKeyEntropyAndByteLength(rawAdminOtpSecret, 'ADMIN_OTP_SECRET');
+        const rawTenantEncKey = source['TENANT_DB_ENCRYPTION_KEY'];
+        if (!rawTenantEncKey || rawTenantEncKey.trim().length === 0) {
+            throw new Error('CRITICAL: Production startup failed: TENANT_DB_ENCRYPTION_KEY must be explicitly configured with at least 32 cryptographically random bytes (256 bits).');
+        }
+        validateKeyEntropyAndByteLength(rawTenantEncKey, 'TENANT_DB_ENCRYPTION_KEY');
+        if (rawOfflineLeaseKey === rawJwtSecret) {
+            throw new Error('CRITICAL: Production startup failed: OFFLINE_LEASE_SIGNING_KEY must be cryptographically isolated from JWT_SECRET.');
+        }
     }
     return result.data;
 }

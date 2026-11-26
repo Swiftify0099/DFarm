@@ -938,6 +938,11 @@ export class TenantDatabaseManager {
       '029_dairy_admin_activation_tokens.sql',
       '035_customer_lifecycle_and_registration_hardening.sql',
       '037_multi_dairy_customer_identity_and_membership.sql',
+      '039_milk_collections_organization_idempotency.sql',
+      '040_device_auth_challenges.sql',
+      '041_dairy_admin_realtime_and_station_monitoring.sql',
+      '042_union_bank_farmer_payout_and_settlement_system.sql',
+      '043_distributed_sse_tickets_and_retention.sql',
     ];
 
     const possibleDirs = [

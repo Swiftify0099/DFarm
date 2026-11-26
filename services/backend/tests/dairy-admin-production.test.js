@@ -69,6 +69,13 @@ test('DFarm Dairy Admin Production Readiness & Operational Verification Suite', 
           ('00000000-0000-0000-0000-000000000003', '${testDairyA}', 'operator_vikas', '+919876543212', 'Kiosk Operator Vikas', 'COLLECTION_OPERATOR', 'ACTIVE')
         ON CONFLICT (id) DO NOTHING;
       `);
+
+      await targetDb.query(`
+        INSERT INTO devices (id, organization_id, center_id, device_identifier, device_type, status, last_seen_at)
+        VALUES
+          ('00000000-0000-0000-0000-000000000015', '${testDairyA}', '${testCenterA}', 'dev-kiosk-01', 'COUNTER_TERMINAL', 'ACTIVE', NOW())
+        ON CONFLICT (id) DO NOTHING;
+      `);
     } catch (err) {
       console.error('Seed DB error:', err);
     }
@@ -522,5 +529,10 @@ test('DFarm Dairy Admin Production Readiness & Operational Verification Suite', 
       assert.ok(hasCredit, 'Ledger must have milk credit entry');
       assert.ok(hasDebit, 'Ledger must have payout debit entry');
     });
+  });
+
+  suite.after(async () => {
+    await tenantDbManager.closeAllPools().catch(() => {});
+    await db.close().catch(() => {});
   });
 });

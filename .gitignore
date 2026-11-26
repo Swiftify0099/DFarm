@@ -134,3 +134,35 @@ test-results/
 logs/
 *.log
 
+# ------------------------------------------------------------------------------
+# 9. Temporary Directories, Chrome Profiles & Browser Automation Session Data
+# ------------------------------------------------------------------------------
+.temp/
+**/.temp/
+.temp/chrome-cdp/
+chrome-cdp/
+**/chrome-cdp/
+chrome-profile/
+**/chrome-profile/
+.chrome-profile/
+**/.chrome-profile/
+*chrome-user-data*/
+**/*chrome-user-data*/
+.playwright/
+playwright/.auth/
+**/Default/Network/Cookies*
+**/Default/Login Data*
+**/Default/Web Data*
+**/Default/Account Web Data*
+**/Default/History*
+**/Default/Local Storage/
+**/Default/Session Storage/
+**/Default/IndexedDB/
+**/Default/Sessions/
+**/Default/Sessions_Encrypted/
+**/Default/GCM Store/
+**/Default/Sync Data/
+**/Default/Secure Preferences
+**/Crashpad/
+
+

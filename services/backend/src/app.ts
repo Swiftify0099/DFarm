@@ -65,7 +65,8 @@ export function createApp(): Express {
   // 1. Clean Architecture Primary API Router (All consolidated API v1 endpoints)
   app.use('/api/v1', cleanApiRouter);
 
-  // 2. Compatibility & Auth Aliases
+  // 2. Canonical v1 & Compatibility Auth Mounts (/login, /me, /centers, /otp/send, /otp/verify)
+  app.use('/api/v1/auth', authRoutes);
   app.use('/api/users/auth', authRoutes);
   app.use('/api/auth', authRoutes);
 

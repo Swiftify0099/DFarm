@@ -1,0 +1,15 @@
+title = "DFarm Gitleaks Configuration"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist verified non-secret local-dev demo tokens and explicit placeholder documentation strings only"
+regexes = [
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6(ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9\.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0|InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0\.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU)''',
+  '''ba9dcdcdfcXX''',
+  '''AIzaSyYourActual[A-Za-z0-9_]+''',
+  '''placeholder_[a-z0-9_]+''',
+  '''your-(project-ref|password|admin-password|email@gmail\.com|app-password)''',
+]
+

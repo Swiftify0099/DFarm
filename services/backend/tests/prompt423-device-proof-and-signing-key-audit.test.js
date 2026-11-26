@@ -264,11 +264,12 @@ test('DFARM PROMPT 4.2.3: Device Proof-of-Possession & Production Signing Key Au
 
   await suite.test('2a. Challenge-Response: Valid single-use challenge and HMAC proof succeeds', async () => {
     // 1. Server generates short-lived challenge
-    const { challenge } = deviceChallengeService.createChallenge(stationA_Name, orgAlpha, 60000);
+    const { challenge } = await deviceChallengeService.createChallenge(stationA_Name, orgAlpha, 60000);
     assert.ok(challenge);
 
-    // 2. Client computes expected proof HMAC using its device token
-    const proof = DeviceChallengeService.computeProof(challenge, stationA_Token, stationA_Name);
+    // 2. Client derives K_proof = SHA-256(deviceToken) and computes HMAC proof
+    const proofKey = DeviceChallengeService.deriveProofKey(stationA_Token);
+    const proof = DeviceChallengeService.computeProof(challenge, proofKey, stationA_Name);
 
     // 3. Submit OTP verification with challenge & proof
     const loginResult = await verifyOperatorUseCase.execute(
@@ -288,8 +289,9 @@ test('DFARM PROMPT 4.2.3: Device Proof-of-Possession & Production Signing Key Au
 
   await suite.test('2b. Challenge-Response Replay Attack: Replaying already-consumed challenge is REJECTED', async () => {
     // 1. Generate challenge
-    const { challenge } = deviceChallengeService.createChallenge(stationA_Name, orgAlpha, 60000);
-    const proof = DeviceChallengeService.computeProof(challenge, stationA_Token, stationA_Name);
+    const { challenge } = await deviceChallengeService.createChallenge(stationA_Name, orgAlpha, 60000);
+    const proofKey = DeviceChallengeService.deriveProofKey(stationA_Token);
+    const proof = DeviceChallengeService.computeProof(challenge, proofKey, stationA_Name);
 
     // 2. First login succeeds and atomically consumes the challenge
     const firstAttempt = await verifyOperatorUseCase.execute(
@@ -324,8 +326,9 @@ test('DFARM PROMPT 4.2.3: Device Proof-of-Possession & Production Signing Key Au
 
   await suite.test('2c. Challenge-Response: Expired challenge is REJECTED', async () => {
     // Generate challenge with negative / zero TTL (already expired)
-    const { challenge } = deviceChallengeService.createChallenge(stationA_Name, orgAlpha, -1000);
-    const proof = DeviceChallengeService.computeProof(challenge, stationA_Token, stationA_Name);
+    const { challenge } = await deviceChallengeService.createChallenge(stationA_Name, orgAlpha, -1000);
+    const proofKey = DeviceChallengeService.deriveProofKey(stationA_Token);
+    const proof = DeviceChallengeService.computeProof(challenge, proofKey, stationA_Name);
 
     await assert.rejects(
       async () => {
@@ -345,8 +348,9 @@ test('DFARM PROMPT 4.2.3: Device Proof-of-Possession & Production Signing Key Au
   });
 
   await suite.test('2d. Challenge-Response: Challenge issued for Station A cannot be used for Station B', async () => {
-    const { challenge } = deviceChallengeService.createChallenge(stationA_Name, orgAlpha, 60000);
-    const proof = DeviceChallengeService.computeProof(challenge, stationB_Token, stationB_Name);
+    const { challenge } = await deviceChallengeService.createChallenge(stationA_Name, orgAlpha, 60000);
+    const proofKeyB = DeviceChallengeService.deriveProofKey(stationB_Token);
+    const proof = DeviceChallengeService.computeProof(challenge, proofKeyB, stationB_Name);
 
     await assert.rejects(
       async () => {
@@ -363,6 +367,33 @@ test('DFARM PROMPT 4.2.3: Device Proof-of-Possession & Production Signing Key Au
       },
       /Challenge was issued for device 'STATION_A', not 'STATION_B'/
     );
+  });
+
+  await suite.test('2e. Challenge-Response: Attacker-supplied token + self-signed proof CANNOT bypass persisted device_token_hash', async () => {
+    const { challenge } = await deviceChallengeService.createChallenge(stationA_Name, orgAlpha, 60000);
+    const rogueToken = 'attacker-forged-token-attempt';
+    const rogueProof = DeviceChallengeService.computeProof(challenge, rogueToken, stationA_Name);
+
+    await assert.rejects(
+      async () => {
+        await verifyOperatorUseCase.execute(
+          '+919822992203',
+          '123456',
+          stationA_Name,
+          {
+            deviceToken: rogueToken,
+            challenge,
+            deviceProof: rogueProof,
+          }
+        );
+      },
+      /Invalid device credential provided for station 'STATION_A'/
+    );
+  });
+
+  suite.after(async () => {
+    await tenantDbManager.closeAllPools().catch(() => {});
+    await db.close().catch(() => {});
   });
 
   // ==========================================================================
@@ -549,6 +580,9 @@ test('DFARM PROMPT 4.2.3: Device Proof-of-Possession & Production Signing Key Au
         SUPABASE_URL: 'https://demo.supabase.co',
         SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy',
         SUPABASE_SERVICE_ROLE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy',
+        JWT_SECRET: crypto.randomBytes(32).toString('hex'),
+        ADMIN_OTP_SECRET: crypto.randomBytes(32).toString('hex'),
+        TENANT_DB_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'),
         OFFLINE_LEASE_SIGNING_KEY: csprngHexKey,
       });
     });

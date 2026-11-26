@@ -1,27 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
-import { createApp } from '../dist/app.js';
-import {
+
+// Ensure strict isolated test mode BEFORE importing env/app/db (prevents live SMS/prod DB & enables test-only previewOtp)
+process.env.NODE_ENV = 'test';
+process.env.DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
+process.env.CENTRAL_DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
+process.env.DATABASE_PROVISIONER_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
+process.env.DIRECT_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
+process.env.SUPABASE_URL = 'http://127.0.0.1:59998';
+process.env.TENANT_POOL_CONNECTION_TIMEOUT_MS = '500';
+
+const { createApp } = await import('../dist/app.js');
+const {
   Money,
   FatPercentage,
   SnfPercentage,
   MilkWeight,
   RfidUid,
   PhoneNumber,
-} from '../dist/domain/value-objects/index.js';
-import {
+} = await import('../dist/domain/value-objects/index.js');
+const {
   CustomerSuspendedError,
   CategoryNotAuthorizedError,
   DomainValidationError,
-} from '../dist/domain/errors/index.js';
-import { RateChart } from '../dist/domain/entities/RateChart.js';
-import { CustomerLedgerAccount } from '../dist/domain/entities/CustomerLedgerAccount.js';
-import { Customer } from '../dist/domain/entities/Customer.js';
-import { Aes256GcmBiometricEncryptor } from '../dist/infrastructure/security/Aes256GcmBiometricEncryptor.js';
-import { HmacJwtTokenService } from '../dist/infrastructure/security/HmacJwtTokenService.js';
-import { MemoryOrDevOtpService } from '../dist/infrastructure/otp/MemoryOrDevOtpService.js';
-import { db } from '../dist/infrastructure/database/PostgresPool.js';
+} = await import('../dist/domain/errors/index.js');
+const { RateChart } = await import('../dist/domain/entities/RateChart.js');
+const { CustomerLedgerAccount } = await import('../dist/domain/entities/CustomerLedgerAccount.js');
+const { Customer } = await import('../dist/domain/entities/Customer.js');
+const { Aes256GcmBiometricEncryptor } = await import('../dist/infrastructure/security/Aes256GcmBiometricEncryptor.js');
+const { HmacJwtTokenService } = await import('../dist/infrastructure/security/HmacJwtTokenService.js');
+const { MemoryOrDevOtpService } = await import('../dist/infrastructure/otp/MemoryOrDevOtpService.js');
+const { DoveOtpService } = await import('../dist/infrastructure/otp/DoveOtpService.js');
+const { serializeOtpResponse } = await import('../dist/presentation/routes/auth.routes.js');
+const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
 
 // Setup resilient DB query fallback for environments where local PostgreSQL container is not started
 const originalQuery = db.query.bind(db);
@@ -122,6 +134,9 @@ db.query = async (text, params) => {
 
 test('DFarm Clean Architecture Implementation Test Suite', async (t) => {
   const app = createApp();
+  t.after(async () => {
+    await db.close();
+  });
 
   await t.test('1. Domain Value Objects Validation', () => {
     // Money Half-Even Banker's Rounding
@@ -358,6 +373,21 @@ test('DFarm Clean Architecture Implementation Test Suite', async (t) => {
     // Replay verified OTP fails (single use)
     const replay = await otpService.verifyOtp(phone, sendRes.previewOtp, 'OPERATOR_LOGIN');
     assert.strictEqual(replay, false);
+
+    // Production contract: previewOtp must NEVER be serialized or permitted when NODE_ENV === 'production'
+    const prevNodeEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'production';
+      assert.strictEqual(DoveOtpService.isStrictTestMode(), false);
+      const prodSerialized = serializeOtpResponse({
+        success: true,
+        message: 'Verification code sent',
+        previewOtp: '123456',
+      });
+      assert.strictEqual('previewOtp' in prodSerialized, false);
+    } finally {
+      process.env.NODE_ENV = prevNodeEnv;
+    }
   });
 
   await t.test('8. HTTP Endpoints Contract Verification', async () => {

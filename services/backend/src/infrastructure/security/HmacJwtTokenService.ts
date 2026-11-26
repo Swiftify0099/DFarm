@@ -20,10 +20,17 @@ export class HmacJwtTokenService implements ITokenService {
   private readonly secret: string;
 
   constructor(secret?: string) {
-    this.secret =
+    const resolved =
       secret ||
       process.env['JWT_SECRET'] ||
       'super-secret-jwt-token-with-at-least-32-characters-long';
+    if (
+      process.env['NODE_ENV'] === 'production' &&
+      (!secret && (!process.env['JWT_SECRET'] || resolved === 'super-secret-jwt-token-with-at-least-32-characters-long'))
+    ) {
+      throw new Error('CRITICAL: Production JWT_SECRET must be explicitly configured.');
+    }
+    this.secret = resolved;
   }
 
   public signToken(

@@ -91,6 +91,18 @@ export class RealtimeEventPublisher {
         return { clientId, unregister };
     }
     /**
+     * Forcibly closes all active client SSE sockets (used for connection drop simulation & teardown)
+     */
+    disconnectAllClients() {
+        for (const [, client] of this.clients.entries()) {
+            try {
+                client.res.destroy();
+            }
+            catch { }
+        }
+        this.clients.clear();
+    }
+    /**
      * Publishes an event transactionally within a PostgreSQL transaction.
      * Inserts the outbox record inside the caller's active transaction client.
      * The Outbox Worker or post-commit broadcast picks it up for delivery.

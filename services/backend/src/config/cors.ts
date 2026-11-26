@@ -1,39 +1,63 @@
 import type { CorsOptions } from 'cors';
 import { config } from './env.js';
 
-const allowedOrigins = config.CORS_ALLOWED_ORIGINS
-  .split(',')
-  .map(origin => origin.trim())
-  .filter(origin => origin.length > 0);
+export const PRODUCTION_ALLOWED_ORIGINS = [
+  'https://collection.dfarm.in',
+  'https://dairy.dfarm.in',
+  'https://admin.dfarm.in',
+  'https://dfarm-collection.pages.dev',
+  'https://dfarm-dairy-admin.pages.dev',
+  'https://dfarm-super-admin.pages.dev',
+] as const;
+
+const LOCALHOST_ORIGIN_REGEX = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+
+export function getAllowedCorsOrigins(): string[] {
+  const isProduction = config.NODE_ENV === 'production' || process.env['NODE_ENV'] === 'production';
+  const rawOrigins = process.env['CORS_ALLOWED_ORIGINS'] ?? config.CORS_ALLOWED_ORIGINS;
+  const parsed = rawOrigins
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0 && origin !== '*');
+
+  if (!isProduction) {
+    return parsed;
+  }
+
+  // In production, strip any localhost/loopback or non-HTTPS origins and fall back to explicit production domains
+  const prodConfigured = parsed.filter(
+    (origin) => origin.startsWith('https://') && !LOCALHOST_ORIGIN_REGEX.test(origin)
+  );
+  return prodConfigured.length > 0 ? prodConfigured : [...PRODUCTION_ALLOWED_ORIGINS];
+}
+
+export function isOriginAllowed(requestOrigin: string | undefined): boolean {
+  // Allow non-browser tools (curl, postman, server-to-server, mobile native, tests) with no origin header
+  if (!requestOrigin) {
+    return true;
+  }
+
+  const isProduction = config.NODE_ENV === 'production' || process.env['NODE_ENV'] === 'production';
+  const allowedOrigins = getAllowedCorsOrigins();
+
+  if (allowedOrigins.includes(requestOrigin)) {
+    return true;
+  }
+
+  // Restrict localhost / development origins strictly to non-production environments
+  if (!isProduction) {
+    return true;
+  }
+
+  return false;
+}
 
 export const corsOptions: CorsOptions = {
   origin: (requestOrigin, callback) => {
-    // Allow non-browser tools (curl, postman, server-to-server, tests) with no origin header
-    if (!requestOrigin) {
+    if (isOriginAllowed(requestOrigin)) {
       return callback(null, true);
     }
-
-    if (allowedOrigins.includes('*') || allowedOrigins.includes(requestOrigin)) {
-      return callback(null, true);
-    }
-
-    // In non-production environments, dynamically permit any localhost or 127.0.0.1 port
-    if (
-      config.NODE_ENV !== 'production' ||
-      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestOrigin)
-    ) {
-      return callback(null, true);
-    }
-
-    // Permit Cloudflare Pages, Workers, and DFarm custom domains
-    if (
-      /^https:\/\/([a-zA-Z0-9_-]+\.)*(pages|workers)\.dev$/.test(requestOrigin) ||
-      /^https:\/\/([a-zA-Z0-9_-]+\.)*dfarm\.in$/.test(requestOrigin)
-    ) {
-      return callback(null, true);
-    }
-
-    return callback(new Error(`Origin ${requestOrigin} is not allowed by CORS policy`), false);
+    return callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

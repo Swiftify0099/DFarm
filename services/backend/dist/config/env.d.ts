@@ -40,7 +40,7 @@ declare const envSchema: z.ZodObject<{
     OFFLINE_LEASE_ACTIVE_KEY_ID: z.ZodDefault<z.ZodString>;
     OFFLINE_LEASE_PREVIOUS_KEYS: z.ZodOptional<z.ZodString>;
     OFFLINE_LEASE_RETIRED_KEYS: z.ZodOptional<z.ZodString>;
-    WHATSAPP_ENABLED: z.ZodDefault<z.ZodCoercedBoolean<unknown>>;
+    WHATSAPP_ENABLED: z.ZodDefault<z.ZodPreprocess<z.ZodBoolean, unknown>>;
     WHATSAPP_API_URL: z.ZodDefault<z.ZodString>;
     WHATSAPP_ACCESS_TOKEN: z.ZodOptional<z.ZodString>;
     WHATSAPP_PHONE_NUMBER_ID: z.ZodOptional<z.ZodString>;
@@ -55,7 +55,7 @@ declare const envSchema: z.ZodObject<{
     DOVE_SMS_TEMPLATE: z.ZodDefault<z.ZodString>;
     ADMIN_PHONE_NUMBER: z.ZodDefault<z.ZodString>;
     ADMIN_OTP_SECRET: z.ZodDefault<z.ZodString>;
-    ALLOW_TEST_PREVIEW_OTP: z.ZodDefault<z.ZodCoercedBoolean<unknown>>;
+    ALLOW_TEST_PREVIEW_OTP: z.ZodDefault<z.ZodPreprocess<z.ZodBoolean, unknown>>;
     FCM_PROJECT_ID: z.ZodOptional<z.ZodString>;
     FCM_CLIENT_EMAIL: z.ZodOptional<z.ZodString>;
     FCM_PRIVATE_KEY: z.ZodOptional<z.ZodString>;

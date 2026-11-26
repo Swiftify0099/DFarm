@@ -1,11 +1,22 @@
 import crypto from 'node:crypto';
 import { IOtpService } from '../../application/ports/index.js';
-import { DomainValidationError, UnauthorizedError } from '../../domain/errors/index.js';
+import { DomainError, DomainValidationError, UnauthorizedError } from '../../domain/errors/index.js';
 import { config } from '../../config/env.js';
 import { logger } from '../../shared/logger/index.js';
-import { doveSmsService } from '../sms/DoveSmsService.js';
+import { doveSmsService, DoveSmsService } from '../sms/DoveSmsService.js';
 import { generateCryptographicOtp, hashOtp, timingSafeOtpEqual } from '../../shared/utils/crypto.js';
 import { db } from '../database/PostgresPool.js';
+
+export const ALLOWED_ADMIN_ROLES = new Set([
+  'SUPER_ADMIN',
+  'PLATFORM_OPERATOR',
+  'PRIMARY_DAIRY_ADMIN',
+  'DAIRY_ADMIN',
+  'DAIRY_OWNER',
+  'CENTER_MANAGER',
+]);
+
+export const PLATFORM_ADMIN_ROLES = new Set(['SUPER_ADMIN', 'PLATFORM_OPERATOR']);
 
 export interface OtpChallengeRecord {
   id: string;
@@ -19,6 +30,10 @@ export interface OtpChallengeRecord {
   ipAddress?: string;
 }
 
+export interface SendOtpOptions {
+  verifiedInvitationId?: string;
+}
+
 export class DoveOtpService implements IOtpService {
   private static readonly OTP_TTL_MS = 5 * 60 * 1000; // 5 minutes validity
   private static readonly RESEND_COOLDOWN_MS = 60 * 1000; // 60 seconds cooldown
@@ -26,18 +41,25 @@ export class DoveOtpService implements IOtpService {
 
   // In-memory fail-safe storage fallback
   private readonly memoryStorage = new Map<string, OtpChallengeRecord>();
-  private readonly authorizedAdminPhones = new Set<string>(['7755995615', '7507495615', '9834388787']);
 
-  public registerAuthorizedAdminPhone(phone: string): void {
-    const cleanDigits = phone.replace(/\D/g, '').slice(-10);
-    if (cleanDigits.length === 10) {
-      this.authorizedAdminPhones.add(cleanDigits);
-    }
+  constructor(
+    private readonly smsService: Pick<DoveSmsService, 'sendLoginOtpSms'> = doveSmsService
+  ) {}
+
+  public static isProductionRuntime(): boolean {
+    return config.NODE_ENV === 'production' || process.env['NODE_ENV'] === 'production';
+  }
+
+  public static isStrictTestMode(): boolean {
+    return !DoveOtpService.isProductionRuntime() && process.env['NODE_ENV'] === 'test';
+  }
+
+  public registerAuthorizedAdminPhone(_phone: string): void {
+    // Deprecated no-op: Administrator authorization is strictly resolved via persisted database records.
   }
 
   public unregisterAuthorizedAdminPhone(phone: string): void {
     const cleanDigits = phone.replace(/\D/g, '').slice(-10);
-    this.authorizedAdminPhones.delete(cleanDigits);
     this.memoryStorage.delete(`ADMIN_LOGIN:+91${cleanDigits}`);
     this.memoryStorage.delete(`ADMIN_LOGIN:${cleanDigits}`);
     this.memoryStorage.delete(`OPERATOR_LOGIN:+91${cleanDigits}`);
@@ -57,76 +79,101 @@ export class DoveOtpService implements IOtpService {
     return `${purpose}:${phone}`;
   }
 
+  private maskPhone(phone: string): string {
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 4) return '****';
+    return digits.slice(-4).padStart(digits.length, '*');
+  }
+
   private getHmacSecret(purpose: string): string {
+    const isProduction = DoveOtpService.isProductionRuntime();
     if (purpose === 'ADMIN_LOGIN') {
-      return config.ADMIN_OTP_SECRET || config.JWT_SECRET;
+      const secret = process.env['ADMIN_OTP_SECRET'] || config.ADMIN_OTP_SECRET;
+      if (isProduction && (!secret || secret === 'dfarm-super-secure-admin-otp-secret-key-32chars!')) {
+        throw new Error('CRITICAL: Production ADMIN_OTP_SECRET is missing or insecure.');
+      }
+      return secret || config.JWT_SECRET;
     }
-    return config.JWT_SECRET || config.ADMIN_OTP_SECRET;
+    const secret = process.env['JWT_SECRET'] || config.JWT_SECRET;
+    if (isProduction && (!secret || secret === 'super-secret-jwt-token-with-at-least-32-characters-long')) {
+      throw new Error('CRITICAL: Production JWT_SECRET is missing or insecure.');
+    }
+    return secret;
   }
 
   /**
-   * Validates if a phone number is whitelisted for administrative login.
-   * Supports both config-whitelisted Super Admins and dynamically activated Dairy Admins.
+   * Deprecated synchronous check: always returns false so callers must use DB-backed async verification.
    */
-  public isAdminPhoneWhitelisted(phone: string): boolean {
-    const cleanInput = phone.replace(/\D/g, '');
-    const last10 = cleanInput.slice(-10);
-
-    if (this.authorizedAdminPhones.has(last10)) {
-      return true;
-    }
-
-    const rawWhitelisted = config.ADMIN_PHONE_NUMBER;
-    if (!rawWhitelisted) return false;
-
-    const whitelistedNumbers = rawWhitelisted.split(',').map((p) => p.replace(/\D/g, '').trim());
-
-    return whitelistedNumbers.some((allowed) => {
-      if (allowed === cleanInput) return true;
-      if (allowed.slice(-10) === last10) return true;
-      return false;
-    });
+  public isAdminPhoneWhitelisted(_phone: string): boolean {
+    return false;
   }
 
   /**
-   * Asynchronously verifies if a phone is registered in DB as an active admin user.
+   * Authoritatively verifies if a phone belongs to an active administrator in the persisted database.
+   * Fails closed on any database error or inactive/non-admin record.
    */
   public async ensureAdminWhitelisted(phone: string): Promise<boolean> {
-    if (this.isAdminPhoneWhitelisted(phone)) return true;
     const cleanDigits = phone.replace(/\D/g, '').slice(-10);
     if (!cleanDigits || cleanDigits.length < 10) return false;
-
-    if (config.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production') {
-      if (cleanDigits === '7755995615' || cleanDigits === '7507495615' || cleanDigits === '9834388787') {
-        this.registerAuthorizedAdminPhone(cleanDigits);
-        return true;
-      }
-    }
+    const e164 = `+91${cleanDigits}`;
 
     try {
       const res = await db.query(
-        `SELECT id, role FROM users 
-         WHERE (phone_number LIKE $1 OR mobile_number LIKE $1 OR normalized_mobile_number LIKE $1)
-           AND UPPER(COALESCE(status, '')) = 'ACTIVE' 
-           AND (role IN ('SUPER_ADMIN', 'DAIRY_OWNER', 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'CENTER_MANAGER')
-                OR user_role IN ('SUPER_ADMIN', 'DAIRY_OWNER', 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'CENTER_MANAGER'))
+        `SELECT
+           u.id,
+           u.organization_id,
+           u.role AS base_role,
+           u.user_role AS secondary_role,
+           u.status AS user_status,
+           o.status AS org_status
+         FROM users u
+         LEFT JOIN organizations o ON o.id = u.organization_id
+         WHERE (u.normalized_mobile_number = $1
+             OR u.phone_number = $1
+             OR u.mobile_number = $1
+             OR u.normalized_mobile_number LIKE $2
+             OR u.phone_number LIKE $2
+             OR u.mobile_number LIKE $2)
+         ORDER BY
+           (CASE WHEN UPPER(COALESCE(u.status, '')) = 'ACTIVE' THEN 1 ELSE 2 END),
+           (CASE
+              WHEN UPPER(COALESCE(u.user_role, u.role, '')) = 'SUPER_ADMIN' THEN 1
+              WHEN UPPER(COALESCE(u.user_role, u.role, '')) IN ('PRIMARY_DAIRY_ADMIN', 'DAIRY_OWNER', 'DAIRY_ADMIN') THEN 2
+              ELSE 3
+            END)
          LIMIT 1;`,
-        [`%${cleanDigits}`]
+        [e164, `%${cleanDigits}`]
       );
-      if (res.rows.length > 0) {
-        this.registerAuthorizedAdminPhone(cleanDigits);
-        return true;
+
+      if (res.rows.length === 0) {
+        return false;
       }
-    } catch {
-      // ignore
-    }
 
-    if (config.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production') {
-      this.registerAuthorizedAdminPhone(cleanDigits);
+      const row = res.rows[0];
+      if (String(row.user_status || '').toUpperCase() !== 'ACTIVE') {
+        return false;
+      }
+
+      const candidates = [row.secondary_role, row.base_role]
+        .filter((r): r is string => typeof r === 'string' && r.trim().length > 0)
+        .map((r) => r.trim().toUpperCase());
+
+      const resolvedRole = candidates.find((r) => ALLOWED_ADMIN_ROLES.has(r));
+      if (!resolvedRole) {
+        return false;
+      }
+
+      if (!PLATFORM_ADMIN_ROLES.has(resolvedRole)) {
+        if (!row.organization_id || String(row.org_status || '').toUpperCase() !== 'ACTIVE') {
+          return false;
+        }
+      }
+
       return true;
+    } catch (err: any) {
+      logger.error({ mobile: this.maskPhone(phone), error: err?.message }, 'Admin DB authorization lookup failed');
+      return false;
     }
-
-    return false;
   }
 
   /**
@@ -135,18 +182,26 @@ export class DoveOtpService implements IOtpService {
   public async sendOtp(
     mobileNumber: string,
     purpose: 'OPERATOR_LOGIN' | 'CUSTOMER_AUTH' | 'ADMIN_LOGIN',
-    ipAddress?: string
+    ipAddress?: string,
+    options?: SendOtpOptions
   ): Promise<{ success: boolean; message: string; cooldownSeconds?: number; expiresAt?: string; previewOtp?: string }> {
     const cleanDigits = mobileNumber.replace(/\D/g, '');
     if (cleanDigits.length < 10) {
       throw new DomainValidationError('Invalid mobile number format. Must contain at least 10 digits.');
     }
 
-    // 1. Admin phone whitelisting check
+    const maskedPhone = this.maskPhone(mobileNumber);
+
+    // 1. Admin authorization check strictly against persisted records
     if (purpose === 'ADMIN_LOGIN') {
-      const isAllowed = this.isAdminPhoneWhitelisted(mobileNumber);
+      let isAllowed = false;
+      if (options?.verifiedInvitationId) {
+        isAllowed = true;
+      } else {
+        isAllowed = await this.ensureAdminWhitelisted(mobileNumber);
+      }
       if (!isAllowed) {
-        logger.warn({ mobileNumber }, 'Unauthorized attempt to request Admin OTP');
+        logger.warn({ mobile: maskedPhone }, 'Unauthorized attempt to request Admin OTP');
         throw new UnauthorizedError('This mobile number is not authorized for Admin access.');
       }
     }
@@ -212,8 +267,8 @@ export class DoveOtpService implements IOtpService {
     };
 
     // 4. Primary storage: Try database persistence (admin_otp_challenges / customer_otp_challenges)
+    const tableName = purpose === 'ADMIN_LOGIN' ? 'admin_otp_challenges' : 'customer_otp_challenges';
     try {
-      const tableName = purpose === 'ADMIN_LOGIN' ? 'admin_otp_challenges' : 'customer_otp_challenges';
       await db.query(
         `INSERT INTO ${tableName} (id, phone, otp_hash, expires_at, attempts, is_used, ip_address, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
@@ -227,26 +282,59 @@ export class DoveOtpService implements IOtpService {
     // 5. Always keep in in-memory Map for high-speed & fail-safe verification
     this.memoryStorage.set(key, record);
 
-    // 6. Real SMS Dispatch via Dove SMS Gateway (Mobicomm API)
-    const isDevMode = config.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production';
-    const isTestMode = process.env['NODE_ENV'] === 'test' || config.ALLOW_TEST_PREVIEW_OTP || isDevMode;
-    const smsResult = await doveSmsService.sendLoginOtpSms(mobileNumber, rawOtp);
-    if (!smsResult.success && !isTestMode) {
-      logger.error({ mobile: mobileNumber, response: smsResult.response }, 'Dove SMS gateway returned failure');
-      throw new DomainValidationError(`SMS dispatch failed: ${smsResult.response}`);
+    // 6. Real SMS Dispatch via Dove SMS Gateway (skipped only in isolated NODE_ENV === 'test' when using default gateway)
+    const isProduction = DoveOtpService.isProductionRuntime();
+    const isStrictTest = DoveOtpService.isStrictTestMode();
+
+    if (isProduction && config.ALLOW_TEST_PREVIEW_OTP) {
+      logger.warn('ALLOW_TEST_PREVIEW_OTP flag ignored and overridden in production mode.');
     }
 
-    // 7. Preview OTP: Allowed in automated test suites and development environments
-    const previewOtp = isTestMode ? rawOtp : undefined;
+    const shouldDispatchSms = isProduction || !isStrictTest || this.smsService !== doveSmsService;
+    if (shouldDispatchSms) {
+      const smsResult = await this.smsService.sendLoginOtpSms(mobileNumber, rawOtp);
+      if (!smsResult.success) {
+        // Do not leave a live challenge or cooldown lock when SMS delivery failed
+        this.memoryStorage.delete(key);
+        try {
+          await db.query(`DELETE FROM ${tableName} WHERE id = $1;`, [challengeId]);
+        } catch {
+          // ignore cleanup failure
+        }
+        try {
+          await db.query(`DELETE FROM otp_rate_limits WHERE phone = $1;`, [mobileNumber]);
+        } catch {
+          // ignore cleanup failure
+        }
 
-    const maskedPhone = cleanDigits.slice(-4).padStart(cleanDigits.length, '*');
-    return {
+        logger.error({ mobile: maskedPhone }, 'Dove SMS gateway returned failure during OTP dispatch');
+        throw new DomainError(
+          'Failed to deliver verification code via SMS gateway. Please try again later.',
+          'SMS_DISPATCH_FAILED',
+          502
+        );
+      }
+    }
+
+    // 7. Preview OTP: Strictly isolated to NODE_ENV === 'test' (never returned in production or development)
+    const response: {
+      success: boolean;
+      message: string;
+      cooldownSeconds?: number;
+      expiresAt?: string;
+      previewOtp?: string;
+    } = {
       success: true,
       message: `Verification code sent successfully to ${maskedPhone}`,
       cooldownSeconds: 60,
       expiresAt: new Date(expiresAt).toISOString(),
-      previewOtp,
     };
+
+    if (isStrictTest) {
+      response.previewOtp = rawOtp;
+    }
+
+    return response;
   }
 
   /**
@@ -264,11 +352,11 @@ export class DoveOtpService implements IOtpService {
     const key = this.getStorageKey(mobileNumber, purpose);
     let record = this.memoryStorage.get(key);
     const now = Date.now();
+    const tableName = purpose === 'ADMIN_LOGIN' ? 'admin_otp_challenges' : 'customer_otp_challenges';
 
     // If not found in memory, attempt DB fetch if available
     if (!record) {
       try {
-        const tableName = purpose === 'ADMIN_LOGIN' ? 'admin_otp_challenges' : 'customer_otp_challenges';
         const res = await db.query(
           `SELECT id, phone, otp_hash, expires_at, attempts, is_used, ip_address
            FROM ${tableName}
@@ -296,31 +384,19 @@ export class DoveOtpService implements IOtpService {
       }
     }
 
-    const isDevMode = config.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production';
-    const isMasterOtp = otp.trim() === '123456' || otp.trim() === '999999';
-
     if (!record || record.isUsed) {
-      if (isDevMode && isMasterOtp) {
-        return true;
-      }
       return false;
     }
 
     // Expiry check (5 minutes)
     if (now > record.expiresAt) {
       this.memoryStorage.delete(key);
-      if (isDevMode && isMasterOtp) {
-        return true;
-      }
       return false;
     }
 
     // Max attempts check (5 attempts)
     if (record.attempts >= DoveOtpService.MAX_ATTEMPTS) {
       this.memoryStorage.delete(key);
-      if (isDevMode && isMasterOtp) {
-        return true;
-      }
       throw new DomainValidationError('Maximum OTP verification attempts exceeded. Please request a new OTP.');
     }
 
@@ -328,27 +404,26 @@ export class DoveOtpService implements IOtpService {
 
     // Timing-Safe HMAC-SHA256 comparison
     const secret = this.getHmacSecret(purpose);
-    let isValid = timingSafeOtpEqual(otp.trim(), record.otpHash, secret);
-
-    if (!isValid && isDevMode && isMasterOtp) {
-      isValid = true;
-    }
+    const isValid = timingSafeOtpEqual(otp.trim(), record.otpHash, secret);
 
     if (isValid) {
       record.isUsed = true;
-      if (!isDevMode) {
-        this.memoryStorage.delete(key);
-      }
+      this.memoryStorage.delete(key);
 
       // Mark used in DB if possible
       try {
-        const tableName = purpose === 'ADMIN_LOGIN' ? 'admin_otp_challenges' : 'customer_otp_challenges';
         await db.query(`UPDATE ${tableName} SET is_used = TRUE WHERE id = $1;`, [record.id]);
       } catch {
         // DB offline fallback
       }
 
       return true;
+    }
+
+    try {
+      await db.query(`UPDATE ${tableName} SET attempts = attempts + 1 WHERE id = $1;`, [record.id]);
+    } catch {
+      // DB offline fallback
     }
 
     return false;
