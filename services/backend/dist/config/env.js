@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 const __filename = fileURLToPath(import.meta.url);
@@ -74,6 +75,11 @@ const envSchema = z.object({
     TENANT_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
     DATABASE_TLS_MODE: z.enum(['disable', 'require', 'prefer']).default('prefer'),
     JWT_SECRET: z.string().default('super-secret-jwt-token-with-at-least-32-characters-long'),
+    JWT_ISSUER: z.string().optional(),
+    JWT_AUDIENCE: z.string().optional(),
+    // Dedicated AES-256-GCM Data & Biometric Encryption Key (64-hex = 32 bytes)
+    DATA_ENCRYPTION_KEY_HEX: z.string().optional(),
+    DATA_ENCRYPTION_PREVIOUS_KEYS_HEX: z.string().optional(),
     // Dedicated Offline Session Authorization Lease Key (Cryptographically Isolated from JWT_SECRET)
     OFFLINE_LEASE_SIGNING_KEY: z.string().optional(),
     OFFLINE_LEASE_ACTIVE_KEY_ID: z.string().default('k1'),
@@ -123,6 +129,10 @@ const KNOWN_INSECURE_SECRETS = new Set([
     'dev-offline-lease-signing-key-32chars!',
     'placeholder_minimum_32_character_random_jwt_secret',
     'placeholder_minimum_32_character_tenant_db_encryption_key',
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    'ba9dcdcdfcxx',
+    'dfarm_whatsapp_verify_token_default',
+    'dfarm_whatsapp_app_secret_placeholder',
 ]);
 export function validateKeyEntropyAndByteLength(key, keyName = 'OFFLINE_LEASE_SIGNING_KEY') {
     if (!key || typeof key !== 'string' || key.trim().length === 0) {
@@ -130,6 +140,7 @@ export function validateKeyEntropyAndByteLength(key, keyName = 'OFFLINE_LEASE_SI
     }
     const lower = key.toLowerCase();
     if (KNOWN_INSECURE_SECRETS.has(key) ||
+        KNOWN_INSECURE_SECRETS.has(lower) ||
         lower.includes('placeholder') ||
         lower.includes('changeme') ||
         lower.includes('super-secret') ||
@@ -209,8 +220,46 @@ export function loadEnv(customEnv) {
         if (rawOfflineLeaseKey === rawJwtSecret) {
             throw new Error('CRITICAL: Production startup failed: OFFLINE_LEASE_SIGNING_KEY must be cryptographically isolated from JWT_SECRET.');
         }
+        const rawDataEncKey = source['DATA_ENCRYPTION_KEY_HEX'];
+        if (!rawDataEncKey || rawDataEncKey.trim().length === 0) {
+            throw new Error('CRITICAL: Production startup failed: DATA_ENCRYPTION_KEY_HEX must be explicitly configured as a 64-character hex string (32 bytes / 256 bits).');
+        }
+        if (!/^[0-9a-fA-F]{64}$/.test(rawDataEncKey.trim())) {
+            throw new Error('CRITICAL: Production startup failed: DATA_ENCRYPTION_KEY_HEX must be exactly 64 valid hexadecimal characters (32 bytes / 256 bits).');
+        }
+        validateKeyEntropyAndByteLength(rawDataEncKey.trim(), 'DATA_ENCRYPTION_KEY_HEX');
+        if (rawDataEncKey.trim() === rawJwtSecret) {
+            throw new Error('CRITICAL: Production startup failed: DATA_ENCRYPTION_KEY_HEX must be cryptographically isolated from JWT_SECRET.');
+        }
+        const rawDoveKey = source['DOVE_SMS_AUTHKEY'];
+        if (!rawDoveKey ||
+            rawDoveKey.trim().length === 0 ||
+            rawDoveKey.trim().toLowerCase() === 'ba9dcdcdfcxx' ||
+            rawDoveKey.toLowerCase().includes('placeholder')) {
+            throw new Error('CRITICAL: Production startup failed: DOVE_SMS_AUTHKEY must be explicitly configured with a real SMS provider key.');
+        }
+        const rawWaVerify = source['WHATSAPP_WEBHOOK_VERIFY_TOKEN'];
+        const rawWaSecret = source['WHATSAPP_APP_SECRET'];
+        if (result.data.WHATSAPP_ENABLED) {
+            if (!rawWaVerify ||
+                rawWaVerify.trim().length < 8 ||
+                rawWaVerify.trim() === 'dfarm_whatsapp_verify_token_default' ||
+                rawWaVerify.toLowerCase().includes('placeholder')) {
+                throw new Error('CRITICAL: Production startup failed: WHATSAPP_WEBHOOK_VERIFY_TOKEN must be explicitly configured when WhatsApp is enabled.');
+            }
+            if (!rawWaSecret ||
+                rawWaSecret.trim().length < 16 ||
+                rawWaSecret.trim() === 'dfarm_whatsapp_app_secret_placeholder' ||
+                rawWaSecret.toLowerCase().includes('placeholder')) {
+                throw new Error('CRITICAL: Production startup failed: WHATSAPP_APP_SECRET must be explicitly configured when WhatsApp is enabled.');
+            }
+        }
     }
     return result.data;
+}
+// Ephemeral test-only defaults (never applied in production or development)
+if (process.env['NODE_ENV'] === 'test' && !process.env['DATA_ENCRYPTION_KEY_HEX']) {
+    process.env['DATA_ENCRYPTION_KEY_HEX'] = crypto.randomBytes(32).toString('hex');
 }
 // Fallback for test or local development defaults if not in .env
 if (!process.env['SUPABASE_URL'] && (process.env['NODE_ENV'] === 'test' || !process.env['NODE_ENV'])) {

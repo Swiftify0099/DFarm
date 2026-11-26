@@ -1,10 +1,13 @@
 import crypto from 'node:crypto';
-import { config } from './config/env.js';
+import { config, validateKeyEntropyAndByteLength } from './config/env.js';
 function getJwtSecret() {
     const secret = process.env['JWT_SECRET'] || config.JWT_SECRET;
     const isProd = config.NODE_ENV === 'production' || process.env['NODE_ENV'] === 'production';
-    if (isProd && (!secret || secret === 'super-secret-jwt-token-with-at-least-32-characters-long')) {
-        throw new Error('CRITICAL: Production JWT_SECRET is missing or insecure.');
+    if (isProd) {
+        if (!secret || secret === 'super-secret-jwt-token-with-at-least-32-characters-long') {
+            throw new Error('CRITICAL: Production JWT_SECRET is missing or insecure.');
+        }
+        validateKeyEntropyAndByteLength(secret, 'JWT_SECRET');
     }
     return secret || 'super-secret-jwt-token-with-at-least-32-characters-long';
 }
@@ -48,6 +51,16 @@ export function verifyJwt(token) {
     const [headerB64, payloadB64, signature] = parts;
     if (!headerB64 || !payloadB64 || !signature) {
         throw new Error('Invalid JWT format');
+    }
+    let header;
+    try {
+        header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
+    }
+    catch {
+        throw new Error('Invalid JWT header encoding');
+    }
+    if (!header || header.alg !== 'HS256' || (header.typ && header.typ !== 'JWT')) {
+        throw new Error('Unsupported JWT algorithm');
     }
     const expectedSignature = crypto
         .createHmac('sha256', secret)

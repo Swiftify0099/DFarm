@@ -11,7 +11,7 @@ export class DoveSmsService {
     constructor() {
         this.apiUrl = config.DOVE_SMS_API_URL || 'https://mobicomm.dove-sms.com/submitsms.jsp';
         this.username = config.DOVE_SMS_USERNAME || 'Experts';
-        this.authKey = config.DOVE_SMS_AUTHKEY || 'ba9dcdcdfcXX';
+        this.authKey = process.env['DOVE_SMS_AUTHKEY'] || config.DOVE_SMS_AUTHKEY;
         this.senderId = config.DOVE_SMS_SENDER_ID || 'EXTSKL';
         this.accusage = config.DOVE_SMS_ACCUSAGE || '1';
         this.template = config.DOVE_SMS_TEMPLATE || 'Your Verification Code for login is {OTP}. - Expertskill Technology.';
@@ -36,11 +36,23 @@ export class DoveSmsService {
      * DLT Approved Template: "Your Verification Code for login is {OTP}. - Expertskill Technology."
      */
     async sendLoginOtpSms(mobile, otp) {
+        const isProduction = config.NODE_ENV === 'production' || process.env['NODE_ENV'] === 'production';
+        const effectiveKey = process.env['DOVE_SMS_AUTHKEY'] || this.authKey;
+        if (isProduction &&
+            (!effectiveKey ||
+                effectiveKey.trim().toLowerCase() === 'ba9dcdcdfcxx' ||
+                effectiveKey.toLowerCase().includes('placeholder'))) {
+            logger.error('Production SMS dispatch aborted: DOVE_SMS_AUTHKEY is unconfigured or placeholder');
+            return {
+                success: false,
+                response: 'SMS gateway is not configured for production',
+            };
+        }
         const normalizedMobile = this.normalizeMobile(mobile);
         const textMessage = this.template.replace('{OTP}', otp);
         const queryParams = new URLSearchParams({
             user: this.username,
-            key: this.authKey,
+            key: effectiveKey,
             mobile: normalizedMobile,
             message: textMessage,
             accusage: this.accusage,

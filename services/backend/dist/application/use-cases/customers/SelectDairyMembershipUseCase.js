@@ -45,6 +45,7 @@ export class SelectDairyMembershipUseCase {
             globalCustomerId: membership.globalCustomerId,
             role: 'FARMER_CUSTOMER',
             actorType: 'CUSTOMER',
+            tokenType: 'access',
         }, 86400);
         const refreshToken = this.tokenService.signToken({
             userId: membership.tenantCustomerId,
@@ -53,6 +54,7 @@ export class SelectDairyMembershipUseCase {
             globalCustomerId: membership.globalCustomerId,
             role: 'FARMER_CUSTOMER',
             actorType: 'CUSTOMER',
+            tokenType: 'refresh',
         }, 30 * 86400);
         let resolvedCustomerName = membership.customerName;
         if (!resolvedCustomerName && this.customerRepo) {

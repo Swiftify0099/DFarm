@@ -2,7 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { GetNearbyDairiesUseCase } from '../../application/use-cases/index.js';
 import { db } from '../../infrastructure/database/PostgresPool.js';
-import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
 import { authorizeRoles } from '../middleware/authorize.js';
 import { serializeOtpResponse } from './auth.routes.js';
 import { emailService } from '../../infrastructure/email/EmailService.js';
@@ -33,30 +33,22 @@ function maskPhone(phone) {
         return '+91 **********';
     return `+91 ${'*'.repeat(6)}${digits.slice(-4)}`;
 }
-async function findInvitation(tokenOrCode, dairyCode) {
-    const token = (tokenOrCode || '').trim();
-    const dCode = (dairyCode || '').trim();
-    if (!token && !dCode)
+async function findInvitation(rawToken) {
+    const token = (rawToken || '').trim();
+    if (!token)
         return null;
-    const tokenHash = token ? crypto.createHash('sha256').update(token).digest('hex') : '';
-    // 1. By token hash in memory
-    if (tokenHash && inMemoryInvitationsByHash.has(tokenHash)) {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    // 1. By cryptographic token hash in memory
+    if (inMemoryInvitationsByHash.has(tokenHash)) {
         return inMemoryInvitationsByHash.get(tokenHash);
     }
-    // 2. By ID or token in memory
-    if (token && inMemoryInvitationsById.has(token)) {
-        return inMemoryInvitationsById.get(token);
-    }
-    // 3. Scan in-memory invitations
+    // 2. Scan in-memory invitations strictly by tokenHash match (never dairyCode)
     for (const inv of inMemoryInvitationsByHash.values()) {
-        if (token && (inv.tokenHash === token || inv.id === token || inv.token === token || inv.rawToken === token)) {
-            return inv;
-        }
-        if ((dCode && inv.dairyCode === dCode) || (token && inv.dairyCode === token)) {
+        if (inv.tokenHash === tokenHash || inv.rawToken === token) {
             return inv;
         }
     }
-    // 4. Look up in PostgreSQL
+    // 3. Look up in PostgreSQL strictly by token_hash (never by public dairyCode)
     try {
         const sql = `
       SELECT 
@@ -68,10 +60,10 @@ async function findInvitation(tokenOrCode, dairyCode) {
       FROM dairy_admin_invitations i
       JOIN organizations o ON o.id = i.dairy_id
       JOIN users u ON u.id = i.admin_id
-      WHERE i.token_hash = $1 OR o.code = $2 OR o.code = $3 OR i.id = $4
+      WHERE i.token_hash = $1
       ORDER BY i.created_at DESC LIMIT 1;
     `;
-        const result = await db.query(sql, [tokenHash || token, dCode || token, token, token]);
+        const result = await db.query(sql, [tokenHash]);
         if (result.rows.length > 0) {
             const row = result.rows[0];
             const invitation = {
@@ -91,8 +83,7 @@ async function findInvitation(tokenOrCode, dairyCode) {
                 consumedAt: row.consumed_at?.toISOString?.() || row.consumed_at,
                 revokedAt: row.revoked_at?.toISOString?.() || row.revoked_at,
             };
-            if (tokenHash)
-                inMemoryInvitationsByHash.set(tokenHash, invitation);
+            inMemoryInvitationsByHash.set(tokenHash, invitation);
             inMemoryInvitationsById.set(invitation.id, invitation);
             return invitation;
         }
@@ -108,17 +99,16 @@ async function findInvitation(tokenOrCode, dairyCode) {
 // Validate Invitation Token
 router.get('/invitations/validate', async (req, res, next) => {
     try {
-        const rawToken = (req.query['token'] || req.query['code'] || req.query['dairyCode']);
-        const dairyCode = req.query['dairyCode'];
-        if (!rawToken && !dairyCode) {
+        const rawToken = (req.query['token'] || req.query['code']);
+        if (!rawToken || !rawToken.trim()) {
             res.status(400).json({
                 success: false,
                 code: 'MISSING_TOKEN',
-                error: 'Activation token is missing from the request URL.',
+                error: 'Activation token is required. Lookup by dairy code is not permitted.',
             });
             return;
         }
-        const invitation = await findInvitation(rawToken, dairyCode);
+        const invitation = await findInvitation(rawToken);
         if (!invitation) {
             res.status(404).json({
                 success: false,
@@ -182,13 +172,13 @@ router.get('/invitations/validate', async (req, res, next) => {
 // Request Mobile OTP for Activation
 router.post('/invitations/otp/request', async (req, res, next) => {
     try {
-        const { token, code, dairyCode } = req.body;
-        const effectiveToken = (token || code || dairyCode);
-        if (!effectiveToken && !dairyCode) {
-            res.status(400).json({ success: false, error: 'Activation token is required.' });
+        const { token, code } = req.body;
+        const effectiveToken = (token || code);
+        if (!effectiveToken || !String(effectiveToken).trim()) {
+            res.status(400).json({ success: false, error: 'Activation token is required. Lookup by dairy code is not permitted.' });
             return;
         }
-        const invitation = await findInvitation(effectiveToken, dairyCode);
+        const invitation = await findInvitation(effectiveToken);
         if (!invitation || invitation.status !== 'PENDING') {
             res.status(400).json({ success: false, error: 'Cannot dispatch OTP for an invalid or inactive invitation.' });
             return;
@@ -203,17 +193,17 @@ router.post('/invitations/otp/request', async (req, res, next) => {
 // Complete Account Activation Atomically
 router.post('/invitations/activate', async (req, res, next) => {
     try {
-        const { token, code, dairyCode, otp } = req.body;
-        const effectiveToken = (token || code || dairyCode);
-        if (!effectiveToken && !dairyCode) {
-            res.status(400).json({ success: false, error: 'Activation token is required.' });
+        const { token, code, otp } = req.body;
+        const effectiveToken = (token || code);
+        if (!effectiveToken || !String(effectiveToken).trim()) {
+            res.status(400).json({ success: false, error: 'Activation token is required. Lookup by dairy code is not permitted.' });
             return;
         }
         if (!otp || typeof otp !== 'string' || otp.trim().length !== 6) {
             res.status(400).json({ success: false, error: 'A valid 6-digit verification code is required.' });
             return;
         }
-        const invitation = await findInvitation(effectiveToken, dairyCode);
+        const invitation = await findInvitation(effectiveToken);
         if (!invitation) {
             res.status(404).json({ success: false, error: 'This activation link is invalid or unavailable.' });
             return;
@@ -256,9 +246,7 @@ router.post('/invitations/activate', async (req, res, next) => {
             cachedAdmin.verificationStatus = 'verified';
             cachedAdmin.activatedAt = activatedAt;
         }
-        // Register phone for future Admin logins
-        doveOtpService.registerAuthorizedAdminPhone(invitation.adminMobile);
-        // 2. Transactional database update
+        // 2. Transactional database update (must succeed in production)
         try {
             await db.withTransaction(async (client) => {
                 // Mark invitation consumed
@@ -276,6 +264,10 @@ router.post('/invitations/activate', async (req, res, next) => {
             });
         }
         catch (err) {
+            if (config.NODE_ENV === 'production') {
+                res.status(503).json({ success: false, error: 'Database transaction failed during activation.' });
+                return;
+            }
             logger.warn({ error: err.message }, 'Database transaction for activation failed; in-memory activation completed');
         }
         logger.info({ dairyId: invitation.dairyId, adminId: invitation.adminId }, 'Primary Dairy Admin account activated successfully');
@@ -301,8 +293,8 @@ router.post('/invitations/activate', async (req, res, next) => {
         next(err);
     }
 });
-// Resend Activation Invitation
-router.post('/invitations/resend', async (req, res, next) => {
+// Resend Activation Invitation (Super Admin only)
+router.post('/invitations/resend', authenticate, authorizeRoles('SUPER_ADMIN'), async (req, res, next) => {
     try {
         const { adminId, dairyId } = req.body;
         if (!adminId && !dairyId) {
@@ -577,8 +569,8 @@ router.get('/nearby', async (req, res, next) => {
         next(err);
     }
 });
-// 2. List all Dairies (Super Admin & System Directory)
-router.get('/', optionalAuthenticate, async (req, res, next) => {
+// 2. List all Dairies (Super Admin & Platform System Directory)
+router.get('/', authenticate, authorizeRoles('SUPER_ADMIN', 'PLATFORM_OPERATOR'), async (req, res, next) => {
     try {
         const search = typeof req.query['search'] === 'string' ? req.query['search'].trim().toLowerCase() : '';
         const statusFilter = typeof req.query['status'] === 'string' ? req.query['status'].trim().toLowerCase() : 'all';
@@ -727,8 +719,8 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
         next(err);
     }
 });
-// 2b. Audit Tenant Database Resources (Multi-Database Provisioning Status)
-router.get('/tenant-databases', optionalAuthenticate, async (_req, res, next) => {
+// 2b. Audit Tenant Database Resources (Multi-Database Provisioning Status - Platform Staff Only)
+router.get('/tenant-databases', authenticate, authorizeRoles('SUPER_ADMIN', 'PLATFORM_OPERATOR'), async (_req, res, next) => {
     try {
         const mappings = tenantDbManager.getAllMappings();
         res.json({
@@ -741,11 +733,22 @@ router.get('/tenant-databases', optionalAuthenticate, async (_req, res, next) =>
         next(err);
     }
 });
-// 3. Get Dairy by ID
-router.get('/:id', optionalAuthenticate, async (req, res, next) => {
+// 3. Get Dairy by ID (Platform Staff or own Dairy Staff)
+router.get('/:id', authenticate, async (req, res, next) => {
     try {
         const id = req.params.id;
         const dairyId = (Array.isArray(id) ? id[0] : id) || '';
+        const userRole = String(req.user?.role || '').trim().toUpperCase();
+        const isPlatformStaff = userRole === 'SUPER_ADMIN' || userRole === 'PLATFORM_OPERATOR';
+        if (!isPlatformStaff) {
+            if (req.user?.actorType !== 'STAFF' || req.user?.organizationId !== dairyId) {
+                res.status(403).json({
+                    success: false,
+                    error: 'Forbidden: Cross-tenant dairy lifecycle inspection is not permitted.',
+                });
+                return;
+            }
+        }
         try {
             const sql = `
         SELECT 
@@ -873,8 +876,8 @@ router.get('/:id', optionalAuthenticate, async (req, res, next) => {
         next(err);
     }
 });
-// 3b. Retry Failed Tenant Database Provisioning
-router.post('/:id/retry-provisioning', optionalAuthenticate, async (req, res, next) => {
+// 3b. Retry Failed Tenant Database Provisioning (Super Admin Only)
+router.post('/:id/retry-provisioning', authenticate, authorizeRoles('SUPER_ADMIN'), async (req, res, next) => {
     try {
         const id = req.params.id;
         const dairyId = (Array.isArray(id) ? id[0] : id) || '';
@@ -910,8 +913,8 @@ router.post('/:id/retry-provisioning', optionalAuthenticate, async (req, res, ne
         next(err);
     }
 });
-// 4. Create New Dairy with Real Coordinates & Address
-router.post('/', async (req, res, next) => {
+// 4. Create New Dairy with Real Coordinates & Address (Super Admin Only)
+router.post('/', authenticate, authorizeRoles('SUPER_ADMIN'), async (req, res, next) => {
     try {
         const { name, businessPhone, businessEmail, addressLine1, district, state, pincode, latitude, longitude, formattedAddress, placeId, villageLocality, city, primaryAdminName, primaryAdminMobile, bankDetails, } = req.body;
         if (!name || typeof name !== 'string' || name.trim().length < 3) {
@@ -1191,6 +1194,10 @@ router.post('/', async (req, res, next) => {
             });
         }
         catch (err) {
+            if (config.NODE_ENV === 'production') {
+                res.status(503).json({ success: false, error: 'Database transaction failed during dairy creation.' });
+                return;
+            }
             logger.warn({ error: err.message }, 'Database transaction for dairy creation failed; fail-safe memory store retained');
         }
         // 5. Provision isolated tenant database for this newly created dairy
@@ -1220,9 +1227,9 @@ router.post('/', async (req, res, next) => {
         // 7. Record Immutable Platform Audit Log
         try {
             await superAdminRepo.logAudit({
-                actorId: req.user?.userId || '00000000-0000-0000-0000-000000000099',
-                actorRole: req.user?.role || 'SUPER_ADMIN',
-                actorName: req.user?.fullName || 'Super Administrator',
+                actorId: req.user.userId,
+                actorRole: req.user.role,
+                actorName: req.user.fullName || 'Super Administrator',
                 action: 'DAIRY_CREATED',
                 entityType: 'ORGANIZATION',
                 entityId: orgId,
@@ -1261,11 +1268,19 @@ router.post('/', async (req, res, next) => {
         next(err);
     }
 });
-// 5. Update Dairy Location Coordinates & Address
-router.patch('/:id/location', async (req, res, next) => {
+// 5. Update Dairy Location Coordinates & Address (Super Admin or owning Dairy Admin)
+router.patch('/:id/location', authenticate, authorizeRoles('SUPER_ADMIN', 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'DAIRY_OWNER'), async (req, res, next) => {
     try {
         const id = req.params.id;
         const dairyId = (Array.isArray(id) ? id[0] : id) || '';
+        const callerRole = String(req.user?.role || '').trim().toUpperCase();
+        if (callerRole !== 'SUPER_ADMIN' && req.user?.organizationId !== dairyId) {
+            res.status(403).json({
+                success: false,
+                error: 'Forbidden: Cross-tenant dairy location modification is not permitted.',
+            });
+            return;
+        }
         const { latitude, longitude, formattedAddress, placeId, addressLine1, district, state, pincode, villageLocality } = req.body;
         const cached = inMemoryDairies.get(dairyId);
         if (cached) {
@@ -1367,13 +1382,13 @@ router.patch('/:id/location', async (req, res, next) => {
         next(err);
     }
 });
-// 5a. Suspend Dairy Tenant
-router.post('/:id/suspend', async (req, res, next) => {
+// 5a. Suspend Dairy Tenant (Super Admin Only)
+router.post('/:id/suspend', authenticate, authorizeRoles('SUPER_ADMIN'), async (req, res, next) => {
     try {
         const id = req.params.id;
         const dairyId = (Array.isArray(id) ? id[0] : id) || '';
         const { reason } = req.body;
-        logger.info({ dairyId, reason }, 'Suspending dairy tenant');
+        logger.info({ dairyId, reason, actorId: req.user.userId }, 'Suspending dairy tenant');
         // 1. Update in-memory cache
         const memDairy = inMemoryDairies.get(dairyId);
         if (memDairy) {
@@ -1388,14 +1403,18 @@ router.post('/:id/suspend', async (req, res, next) => {
          WHERE id = $1;`, [dairyId]);
         }
         catch (err) {
+            if (config.NODE_ENV === 'production') {
+                res.status(503).json({ success: false, error: 'Database update failed while suspending dairy tenant.' });
+                return;
+            }
             logger.warn({ dairyId, error: err.message }, 'Failed to update organization status in DB on suspend');
         }
         // 3. Platform Audit Log
         try {
             await superAdminRepo.logAudit({
-                actorId: req.user?.userId || '00000000-0000-0000-0000-000000000099',
-                actorRole: req.user?.role || 'SUPER_ADMIN',
-                actorName: req.user?.fullName || 'Super Administrator',
+                actorId: req.user.userId,
+                actorRole: req.user.role,
+                actorName: req.user.fullName || 'Super Administrator',
                 action: 'DAIRY_SUSPENDED',
                 entityType: 'ORGANIZATION',
                 entityId: dairyId,
@@ -1414,13 +1433,13 @@ router.post('/:id/suspend', async (req, res, next) => {
         next(err);
     }
 });
-// 5b. Reactivate Dairy Tenant
-router.post('/:id/reactivate', async (req, res, next) => {
+// 5b. Reactivate Dairy Tenant (Super Admin Only)
+router.post('/:id/reactivate', authenticate, authorizeRoles('SUPER_ADMIN'), async (req, res, next) => {
     try {
         const id = req.params.id;
         const dairyId = (Array.isArray(id) ? id[0] : id) || '';
         const { reason } = req.body;
-        logger.info({ dairyId, reason }, 'Reactivating dairy tenant');
+        logger.info({ dairyId, reason, actorId: req.user.userId }, 'Reactivating dairy tenant');
         // 1. Update in-memory cache
         const memDairy = inMemoryDairies.get(dairyId);
         if (memDairy) {
@@ -1435,14 +1454,18 @@ router.post('/:id/reactivate', async (req, res, next) => {
          WHERE id = $1;`, [dairyId]);
         }
         catch (err) {
+            if (config.NODE_ENV === 'production') {
+                res.status(503).json({ success: false, error: 'Database update failed while reactivating dairy tenant.' });
+                return;
+            }
             logger.warn({ dairyId, error: err.message }, 'Failed to update organization status in DB on reactivate');
         }
         // 3. Platform Audit Log
         try {
             await superAdminRepo.logAudit({
-                actorId: req.user?.userId || '00000000-0000-0000-0000-000000000099',
-                actorRole: req.user?.role || 'SUPER_ADMIN',
-                actorName: req.user?.fullName || 'Super Administrator',
+                actorId: req.user.userId,
+                actorRole: req.user.role,
+                actorName: req.user.fullName || 'Super Administrator',
                 action: 'DAIRY_REACTIVATED',
                 entityType: 'ORGANIZATION',
                 entityId: dairyId,
@@ -1576,8 +1599,27 @@ const purgeAdminByPhoneHandler = async (req, res, next) => {
         next(err);
     }
 };
-router.delete('/admin/by-phone/:phone', purgeAdminByPhoneHandler);
-router.delete('/purge/phone/:phone', purgeAdminByPhoneHandler);
+const guardPurgeEndpoint = (req, res, next) => {
+    if (process.env.NODE_ENV !== 'test') {
+        res.status(403).json({
+            success: false,
+            error: 'Forbidden: Administrative purge endpoint is permanently disabled in production',
+        });
+        return;
+    }
+    authenticate(req, res, (authErr) => {
+        if (authErr)
+            return next(authErr);
+        try {
+            authorizeRoles('SUPER_ADMIN')(req, res, next);
+        }
+        catch (roleErr) {
+            next(roleErr);
+        }
+    });
+};
+router.delete('/admin/by-phone/:phone', guardPurgeEndpoint, purgeAdminByPhoneHandler);
+router.delete('/purge/phone/:phone', guardPurgeEndpoint, purgeAdminByPhoneHandler);
 /**
  * Permanent Dairy Deletion & Deprovisioning (Super Admin Only)
  * Permanently deletes a dairy, deprovisions its physical PostgreSQL tenant database,
@@ -1625,8 +1667,8 @@ const deprovisionDairyHandler = async (req, res, next) => {
         next(err);
     }
 };
-router.delete('/:id/deprovision', authenticate, deprovisionDairyHandler);
-router.delete('/:id', authenticate, deprovisionDairyHandler);
+router.delete('/:id/deprovision', authenticate, authorizeRoles('SUPER_ADMIN'), deprovisionDairyHandler);
+router.delete('/:id', authenticate, authorizeRoles('SUPER_ADMIN'), deprovisionDairyHandler);
 // Tenant Database Management & Dynamic Catalog Explorer (Super Admin / Platform Operator only)
 router.use('/:dairyId/database', authenticate, authorizeRoles('SUPER_ADMIN', 'PLATFORM_OPERATOR'), tenantDatabaseRoutes);
 export const dairiesRoutes = router;

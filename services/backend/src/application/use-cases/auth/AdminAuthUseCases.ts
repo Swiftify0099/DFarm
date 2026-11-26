@@ -154,6 +154,7 @@ export class VerifyAdminOtpUseCase {
       organizationId: dairyId,
       role: admin.role,
       actorType: 'STAFF',
+      tokenType: 'access',
     }, 24 * 3600); // 24 hours
 
     const refreshToken = this.tokenService.signToken({
@@ -161,6 +162,7 @@ export class VerifyAdminOtpUseCase {
       organizationId: dairyId,
       role: admin.role,
       actorType: 'STAFF',
+      tokenType: 'refresh',
     }, 30 * 86400); // 30 days
 
     return {

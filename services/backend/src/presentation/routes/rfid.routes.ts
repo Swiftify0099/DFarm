@@ -4,7 +4,7 @@ import { LookupRfidCustomerUseCase } from '../../application/use-cases/index.js'
 import { PostgresCustomerRepository } from '../../infrastructure/index.js';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
 import { authorizePermission } from '../middleware/authorize.js';
 
 const router = Router();
@@ -18,32 +18,32 @@ const rfidLookupLimiter = rateLimit({
 });
 
 // 1. List all RFID Cards for the authorized dairy tenant
-router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    let organizationId = req.user?.organizationId;
-    const queryOrgId = req.query['organizationId'] as string;
-    const headerOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
+router.get(
+  '/',
+  authenticate,
+  authorizePermission('customers:read', 'rfid:manage', 'customers:identify_rfid'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const queryOrgId = req.query['organizationId'] as string;
+      const headerOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
+      const requestedOrgId = queryOrgId || headerOrgId;
 
-    if (organizationId) {
-      if (queryOrgId && queryOrgId !== organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
         res.status(403).json({
           success: false,
           error: 'Cross-dairy query blocked: Cannot access RFID cards of another dairy.',
         });
         return;
       }
-    } else {
-      organizationId = queryOrgId || headerOrgId;
-    }
 
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
-      return;
-    }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrgId || req.user?.organizationId)
+        : req.user?.organizationId;
 
-    if (req.user) {
-      authorizePermission('customers:read', 'rfid:manage')(req, res, () => {});
-    }
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+        return;
+      }
 
     const client = await tenantDbManager.getTenantDb(organizationId).catch(() => db);
 
@@ -89,27 +89,26 @@ router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: 
 });
 
 // 2. Assign RFID Card to Customer (With Duplicate Assignment Check & Replacement Auditing)
-router.post('/assign', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    if (req.user) {
-      authorizePermission('rfid:manage', 'customers:update')(req, res, () => {});
-    }
+router.post(
+  '/assign',
+  authenticate,
+  authorizePermission('rfid:manage', 'customers:update'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { cardUid, customerId, operatorName } = req.body;
+      const bodyOrgId = (req.body.organizationId as string) || (req.body.dairyId as string);
+      const headerOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
+      const requestedOrg = bodyOrgId || headerOrgId;
 
-    const { cardUid, customerId, operatorName } = req.body;
-    let organizationId = req.user?.organizationId;
-    const bodyOrgId = (req.body.organizationId as string) || (req.body.dairyId as string);
-    const headerOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
-
-    if (organizationId) {
-      if (bodyOrgId && bodyOrgId !== organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
         res.status(403).json({ success: false, error: 'Cross-dairy assignment blocked.' });
         return;
       }
-    } else {
-      organizationId = bodyOrgId || headerOrgId;
-    }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrg || req.user?.organizationId)
+        : req.user?.organizationId;
 
-    if (!cardUid || !customerId || !organizationId) {
+      if (!cardUid || !customerId || !organizationId) {
       res.status(400).json({ success: false, error: 'cardUid, customerId, and dairy context are required' });
       return;
     }
@@ -165,8 +164,12 @@ router.post('/assign', optionalAuthenticate, async (req: Request, res: Response,
       `SELECT id FROM dairy_centers WHERE organization_id = $1 LIMIT 1;`,
       [organizationId]
     );
-    const centerId = centerRes.rows[0]?.id || customer.centerId || '00000000-0000-0000-0000-000000000002';
-    const assignedBy = req.user?.userId || '00000000-0000-0000-0000-000000000003';
+    const centerId = centerRes.rows[0]?.id || customer.centerId || req.user?.centerId;
+    const assignedBy = req.user!.userId;
+    if (!centerId) {
+      res.status(400).json({ success: false, error: 'Collection center context could not be resolved' });
+      return;
+    }
 
     // Insert new active assignment
     await client.query(
@@ -203,14 +206,21 @@ router.post('/assign', optionalAuthenticate, async (req: Request, res: Response,
 });
 
 // 3. Mark RFID Card as Lost / Revoked
-router.post('/mark-lost', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    if (req.user) {
-      authorizePermission('rfid:manage', 'customers:update')(req, res, () => {});
-    }
-
-    const { cardUid, reason } = req.body;
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-id'] as string) || (req.body.dairyId as string);
+router.post(
+  '/mark-lost',
+  authenticate,
+  authorizePermission('rfid:manage', 'customers:update'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { cardUid, reason } = req.body;
+      const requestedOrg = (req.headers['x-dairy-id'] as string) || (req.body.dairyId as string);
+      if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy card revocation blocked.' });
+        return;
+      }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrg || req.user?.organizationId)
+        : req.user?.organizationId;
 
     if (!cardUid || !organizationId) {
       res.status(400).json({ success: false, error: 'cardUid and dairy context are required' });
@@ -243,14 +253,21 @@ router.post('/mark-lost', optionalAuthenticate, async (req: Request, res: Respon
 });
 
 // 4. Unassign RFID Card from Customer (Without Marking as Lost)
-router.post('/unassign', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    if (req.user) {
-      authorizePermission('rfid:manage', 'customers:update')(req, res, () => {});
-    }
-
-    const { cardUid, customerId } = req.body;
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-id'] as string) || (req.body.dairyId as string);
+router.post(
+  '/unassign',
+  authenticate,
+  authorizePermission('rfid:manage', 'customers:update'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { cardUid, customerId } = req.body;
+      const requestedOrg = (req.headers['x-dairy-id'] as string) || (req.body.dairyId as string);
+      if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy card unassignment blocked.' });
+        return;
+      }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrg || req.user?.organizationId)
+        : req.user?.organizationId;
 
     if ((!cardUid && !customerId) || !organizationId) {
       res.status(400).json({ success: false, error: 'cardUid or customerId, and dairy context are required' });

@@ -1,7 +1,6 @@
 import { getAdminSupabaseClient } from '../../config/supabase.js';
 import { normalizeE164Phone } from '../../shared/utils/phone.js';
-import { NotFoundError, UnauthorizedError, AppError, ValidationError } from '../../shared/errors/app-error.js';
-import { signJwt } from '../../jwt.js';
+import { NotFoundError, UnauthorizedError, AppError } from '../../shared/errors/app-error.js';
 import { query } from '../../config/db.js';
 export class AuthService {
     static async getMe(context) {
@@ -54,87 +53,11 @@ export class AuthService {
         return res.rows;
     }
     /**
-     * Internal staff login by username for administration / field officer onboarding.
+     * Passwordless staff login is permanently disabled (DF-001).
+     * Staff must authenticate via verified OTP + device/admin checks.
      */
-    static async loginStaff(username) {
-        if (!username || typeof username !== 'string') {
-            throw new ValidationError('Username is required for staff login');
-        }
-        const cleanUsername = username.trim().toLowerCase();
-        let user = null;
-        try {
-            const userRes = await query(`SELECT u.id, u.organization_id, u.username, u.full_name, u.email, u.phone_number, u.role, u.status,
-                o.name as organization_name, o.code as organization_code
-         FROM users u
-         JOIN organizations o ON o.id = u.organization_id
-         WHERE LOWER(u.username) = LOWER($1) OR LOWER(u.email) = LOWER($1) LIMIT 1;`, [cleanUsername]);
-            user = userRes.rows[0];
-        }
-        catch {
-            throw new UnauthorizedError('Unable to verify credentials', 'INVALID_CREDENTIALS');
-        }
-        if (!user) {
-            throw new UnauthorizedError('Invalid credentials', 'INVALID_CREDENTIALS');
-        }
-        if (user.status !== 'ACTIVE') {
-            throw new UnauthorizedError(`Account is not active (status: ${user.status})`, 'ACCOUNT_SUSPENDED');
-        }
-        // Fetch center assignments
-        let assignedCenters = [];
-        try {
-            const assignRes = await query(`SELECT uca.center_id, uca.is_primary, dc.name as center_name, dc.code as center_code
-         FROM user_center_assignments uca
-         JOIN dairy_centers dc ON uca.center_id = dc.id
-         WHERE uca.user_id = $1;`, [user.id]);
-            assignedCenters = assignRes.rows.map(a => ({
-                id: a.center_id,
-                code: (a.center_code || ''),
-                name: (a.center_name || ''),
-                isPrimary: Boolean(a.is_primary),
-            }));
-        }
-        catch {
-            // Proceed with defaults if query fails
-        }
-        if (assignedCenters.length === 0) {
-            if (user.role === 'REGISTRATION_OFFICER') {
-                assignedCenters = [
-                    { id: '96afbfae-2b1a-42ef-8bb0-779c70950fc5', code: 'C201', name: 'Karveer Intake Center', isPrimary: true },
-                    { id: '84997d76-5a80-4935-81d6-433119b5a882', code: 'C101', name: 'Tasgaon Intake Center', isPrimary: false },
-                    { id: '98a80860-0c1b-47c0-936c-528a262490bd', code: 'C102', name: 'Miraj Intake Center', isPrimary: false },
-                ];
-            }
-            else {
-                assignedCenters = [
-                    { id: '84997d76-5a80-4935-81d6-433119b5a882', code: 'C101', name: 'Tasgaon Intake Center', isPrimary: true },
-                    { id: '98a80860-0c1b-47c0-936c-528a262490bd', code: 'C102', name: 'Miraj Intake Center', isPrimary: false },
-                ];
-            }
-        }
-        const primaryAssignment = assignedCenters.find(a => a.isPrimary) || assignedCenters[0];
-        const primaryCenterId = primaryAssignment ? primaryAssignment.id : null;
-        const token = signJwt({
-            sub: user.id,
-            organizationId: user.organization_id,
-            role: user.role,
-            primaryCenterId,
-            email: user.email || undefined,
-            phone: user.phone_number,
-        });
-        return {
-            token,
-            user: {
-                id: user.id,
-                organizationId: user.organization_id,
-                role: user.role,
-                primaryCenterId,
-                fullName: user.full_name,
-                username: user.username,
-                email: user.email,
-                phoneNumber: user.phone_number,
-                assignedCenters,
-            },
-        };
+    static async loginStaff(_username) {
+        throw new UnauthorizedError('Passwordless staff login is permanently disabled. Please authenticate using verified OTP.', 'AUTH_METHOD_DISABLED');
     }
     /**
      * Request an OTP for a registered customer mobile number using official Supabase Auth.

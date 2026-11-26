@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { GetDeviceTelemetryUseCase } from '../../application/use-cases/index.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 import { realtimePublisher } from '../../infrastructure/realtime/RealtimeEventPublisher.js';
 const router = Router();
 const getTelemetryUseCase = new GetDeviceTelemetryUseCase();
@@ -199,9 +200,16 @@ router.post('/heartbeat', authenticate, async (req, res, next) => {
     }
 });
 // 1. Get Devices List for Dairy (Cross-referenced with Central Hardware Inventory)
-router.get('/', optionalAuthenticate, async (req, res, next) => {
+router.get('/', authenticate, authorizePermission('devices:manage', 'hardware:read', 'hardware:kiosk_read'), async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const requestedOrg = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ success: false, error: 'Cross-dairy device inventory query blocked.' });
+            return;
+        }
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (requestedOrg || req.user?.organizationId)
+            : req.user?.organizationId;
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;
@@ -362,10 +370,17 @@ async function verifyDeviceAccess(params) {
     }
     return dev;
 }
-router.post('/:id/sync', optionalAuthenticate, async (req, res, next) => {
+router.post('/:id/sync', authenticate, authorizePermission('devices:manage', 'hardware:kiosk_read', 'collections:intake'), async (req, res, next) => {
     try {
         const id = String(req.params.id || '');
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
+        const requestedOrg = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
+        if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ success: false, error: 'Cross-dairy device sync blocked.' });
+            return;
+        }
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (requestedOrg || req.user?.organizationId)
+            : req.user?.organizationId;
         if (!organizationId) {
             res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
             return;
@@ -390,11 +405,18 @@ router.post('/:id/sync', optionalAuthenticate, async (req, res, next) => {
     }
 });
 // 2. Operational Center & Counter Mapping for Allocated Device
-router.post('/:id/mapping', optionalAuthenticate, async (req, res, next) => {
+router.post('/:id/mapping', authenticate, authorizePermission('devices:manage', 'dairy:manage_config'), async (req, res, next) => {
     try {
         const id = String(req.params.id || '');
         const { centerId, counterLabel, locationAssigned } = req.body;
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
+        const requestedOrg = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
+        if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ success: false, error: 'Cross-dairy device mapping blocked.' });
+            return;
+        }
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (requestedOrg || req.user?.organizationId)
+            : req.user?.organizationId;
         if (!organizationId) {
             res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
             return;
@@ -432,11 +454,18 @@ router.post('/:id/mapping', optionalAuthenticate, async (req, res, next) => {
     }
 });
 // 3. Record Device Calibration / Verification Metadata
-router.post('/:id/calibration', optionalAuthenticate, async (req, res, next) => {
+router.post('/:id/calibration', authenticate, authorizePermission('devices:manage', 'dairy:manage_config'), async (req, res, next) => {
     try {
         const id = String(req.params.id || '');
         const { calibrationDate, calibratedBy, verificationStatus = 'VERIFIED', serviceProvider, notes, nextReviewDate } = req.body;
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
+        const requestedOrg = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
+        if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ success: false, error: 'Cross-dairy device calibration write blocked.' });
+            return;
+        }
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (requestedOrg || req.user?.organizationId)
+            : req.user?.organizationId;
         if (!organizationId) {
             res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
             return;
@@ -480,10 +509,17 @@ router.post('/:id/calibration', optionalAuthenticate, async (req, res, next) => 
     }
 });
 // 4. Get Calibration History for Device
-router.get('/:id/calibration', optionalAuthenticate, async (req, res, next) => {
+router.get('/:id/calibration', authenticate, authorizePermission('devices:manage', 'hardware:read', 'hardware:kiosk_read'), async (req, res, next) => {
     try {
         const id = String(req.params.id || '');
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
+        const requestedOrg = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
+        if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ success: false, error: 'Cross-dairy device calibration lookup blocked.' });
+            return;
+        }
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (requestedOrg || req.user?.organizationId)
+            : req.user?.organizationId;
         if (!organizationId) {
             res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
             return;
@@ -518,7 +554,7 @@ router.get('/:id/calibration', optionalAuthenticate, async (req, res, next) => {
         next(err);
     }
 });
-router.get('/telemetry', async (req, res, next) => {
+router.get('/telemetry', authenticate, authorizePermission('devices:manage', 'hardware:read', 'hardware:kiosk_read'), async (req, res, next) => {
     try {
         const deviceId = req.query['deviceId'] || 'KIOSK_MAIN';
         const data = await getTelemetryUseCase.execute(deviceId);

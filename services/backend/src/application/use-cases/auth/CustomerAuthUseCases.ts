@@ -1,10 +1,11 @@
 import crypto from 'node:crypto';
 import { IOtpService, ITokenService, ICustomerRepository, ICustomerMembershipRepository } from '../../ports/index.js';
 import { CustomerMembership } from '../../../domain/entities/CustomerMembership.js';
-import { DomainValidationError } from '../../../domain/errors/index.js';
+import { DomainError, DomainValidationError, UnauthorizedError, ForbiddenError } from '../../../domain/errors/index.js';
 import { PhoneNumber } from '../../../domain/value-objects/index.js';
 import { PostgresCustomerMembershipRepository } from '../../../infrastructure/repositories/PostgresCustomerMembershipRepository.js';
 import { db } from '../../../infrastructure/database/PostgresPool.js';
+import { tokenRevocationService } from '../../../infrastructure/security/TokenRevocationService.js';
 
 export class RequestCustomerOtpUseCase {
   constructor(private readonly otpService: IOtpService) {}
@@ -136,6 +137,7 @@ export class VerifyCustomerOtpUseCase {
         globalCustomerId: globalIdentity.id,
         role: 'GUEST_FARMER',
         actorType: 'CUSTOMER',
+        tokenType: 'access',
       }, 3600); // 1 hour registration window
 
       return {
@@ -183,6 +185,7 @@ export class VerifyCustomerOtpUseCase {
       globalCustomerId: globalIdentity.id,
       role: 'FARMER_CUSTOMER',
       actorType: 'CUSTOMER',
+      tokenType: 'access',
     });
 
     const refreshToken = this.tokenService.signToken({
@@ -192,6 +195,7 @@ export class VerifyCustomerOtpUseCase {
       globalCustomerId: globalIdentity.id,
       role: 'FARMER_CUSTOMER',
       actorType: 'CUSTOMER',
+      tokenType: 'refresh',
     }, 30 * 86400); // 30 days
 
     const statusMapping: 'UNREGISTERED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'SUSPENDED' =
@@ -236,15 +240,165 @@ export class VerifyCustomerOtpUseCase {
 export class RefreshTokenUseCase {
   constructor(private readonly tokenService: ITokenService) {}
 
-  public execute(oldToken: string): { token: string } {
-    const claims = this.tokenService.verifyToken(oldToken);
-    const newToken = this.tokenService.signToken({
-      userId: claims.userId,
-      organizationId: claims.organizationId,
-      centerId: claims.centerId,
-      role: claims.role,
-      actorType: claims.actorType,
+  public async execute(oldToken: string): Promise<{
+    token: string;
+    accessToken: string;
+    refreshToken: string;
+    expiresIn: number;
+  }> {
+    if (!oldToken || typeof oldToken !== 'string' || !oldToken.trim()) {
+      throw new UnauthorizedError('Refresh token is required', 'MISSING_REFRESH_TOKEN');
+    }
+
+    const cleanToken = oldToken.startsWith('Bearer ') ? oldToken.slice(7).trim() : oldToken.trim();
+    const claims = this.tokenService.verifyToken(cleanToken);
+
+    if (claims.tokenType !== 'refresh') {
+      throw new UnauthorizedError('Invalid token type: refresh token required', 'INVALID_TOKEN_TYPE');
+    }
+
+    if (claims.role === 'GUEST_FARMER' || String(claims.userId || '').startsWith('unregistered:')) {
+      throw new UnauthorizedError('Unregistered guest tokens cannot be refreshed', 'INVALID_REFRESH_ACTOR');
+    }
+
+    if (await tokenRevocationService.isRevoked(cleanToken, claims.jti)) {
+      throw new UnauthorizedError('Refresh token has been revoked', 'TOKEN_REVOKED');
+    }
+
+    let resolvedRole = claims.role;
+    let resolvedOrgId = claims.organizationId;
+    let resolvedCenterId = claims.centerId;
+
+    if (claims.actorType === 'STAFF') {
+      let staffRes;
+      try {
+        staffRes = await db.query(
+          `SELECT u.id, u.organization_id, u.role, u.user_role, u.status AS user_status, o.status AS org_status
+           FROM users u
+           LEFT JOIN organizations o ON o.id = u.organization_id
+           WHERE u.id::text = $1
+           LIMIT 1;`,
+          [claims.userId]
+        );
+      } catch {
+        throw new DomainError('Authentication verification database is unavailable', 'AUTH_DB_UNAVAILABLE', 503);
+      }
+
+      if (staffRes.rows.length === 0) {
+        throw new UnauthorizedError('Staff account no longer exists', 'USER_NOT_FOUND');
+      }
+
+      const row = staffRes.rows[0];
+      if (String(row.user_status || '').toUpperCase() !== 'ACTIVE') {
+        throw new ForbiddenError('Staff account is suspended or inactive', 'ACCOUNT_SUSPENDED');
+      }
+
+      resolvedRole = String(row.user_role || row.role || claims.role).trim().toUpperCase();
+      resolvedOrgId = row.organization_id || resolvedOrgId;
+
+      const isPlatformStaff = resolvedRole === 'SUPER_ADMIN' || resolvedRole === 'PLATFORM_OPERATOR';
+      if (!isPlatformStaff && (!row.organization_id || String(row.org_status || '').toUpperCase() !== 'ACTIVE')) {
+        throw new ForbiddenError('Assigned dairy cooperative is inactive or suspended', 'ORG_INACTIVE');
+      }
+    } else {
+      let verifiedCustomer = false;
+      try {
+        const custRes = await db.query(
+          `SELECT c.id, c.organization_id, c.primary_center_id, c.status, c.is_deleted, o.status AS org_status
+           FROM customers c
+           LEFT JOIN organizations o ON o.id = c.organization_id
+           WHERE c.id::text = $1
+           LIMIT 1;`,
+          [claims.userId]
+        );
+
+        if (custRes.rows.length > 0) {
+          const row = custRes.rows[0];
+          if (row.is_deleted) {
+            throw new ForbiddenError('Customer account has been deleted', 'ACCOUNT_DELETED');
+          }
+          const custStatus = String(row.status || '').toUpperCase();
+          if (custStatus === 'SUSPENDED' || custStatus === 'INACTIVE' || custStatus === 'SOFT_DELETED') {
+            throw new ForbiddenError('Customer account is suspended or inactive', 'ACCOUNT_SUSPENDED');
+          }
+          if (row.org_status && String(row.org_status).toUpperCase() !== 'ACTIVE') {
+            throw new ForbiddenError('Customer dairy cooperative is inactive or suspended', 'ORG_INACTIVE');
+          }
+          resolvedOrgId = row.organization_id || resolvedOrgId;
+          resolvedCenterId = row.primary_center_id || resolvedCenterId;
+          resolvedRole = 'FARMER_CUSTOMER';
+          verifiedCustomer = true;
+        } else {
+          const memRes = await db.query(
+            `SELECT m.tenant_customer_id, m.organization_id, m.center_id, m.membership_status, o.status AS org_status
+             FROM customer_dairy_memberships m
+             LEFT JOIN organizations o ON o.id = m.organization_id
+             WHERE m.tenant_customer_id::text = $1
+               AND ($2::text IS NULL OR m.organization_id::text = $2)
+             LIMIT 1;`,
+            [claims.userId, claims.organizationId || null]
+          );
+
+          if (memRes.rows.length > 0) {
+            const m = memRes.rows[0];
+            const mStatus = String(m.membership_status || '').toUpperCase();
+            if (mStatus === 'SUSPENDED' || mStatus === 'REJECTED') {
+              throw new ForbiddenError('Customer membership is suspended or rejected', 'ACCOUNT_SUSPENDED');
+            }
+            if (m.org_status && String(m.org_status).toUpperCase() !== 'ACTIVE') {
+              throw new ForbiddenError('Customer dairy cooperative is inactive or suspended', 'ORG_INACTIVE');
+            }
+            resolvedOrgId = m.organization_id || resolvedOrgId;
+            resolvedCenterId = m.center_id || resolvedCenterId;
+            resolvedRole = 'FARMER_CUSTOMER';
+            verifiedCustomer = true;
+          }
+        }
+      } catch (err) {
+        if (err instanceof DomainError) throw err;
+        throw new DomainError('Authentication verification database is unavailable', 'AUTH_DB_UNAVAILABLE', 503);
+      }
+
+      if (!verifiedCustomer) {
+        throw new UnauthorizedError('Customer account or membership could not be verified', 'USER_NOT_FOUND');
+      }
+    }
+
+    // Rotate refresh token: revoke the consumed token before issuing a replacement pair
+    await tokenRevocationService.revokeAsync({
+      token: cleanToken,
+      jti: claims.jti,
+      expiresAtSeconds: claims.exp,
     });
-    return { token: newToken };
+
+    const accessTtl = claims.actorType === 'STAFF' ? 24 * 3600 : 86400;
+    const accessToken = this.tokenService.signToken({
+      userId: claims.userId,
+      organizationId: resolvedOrgId,
+      centerId: resolvedCenterId,
+      globalCustomerId: claims.globalCustomerId,
+      role: resolvedRole,
+      actorType: claims.actorType,
+      deviceId: claims.deviceId,
+      tokenType: 'access',
+    }, accessTtl);
+
+    const nextRefreshToken = this.tokenService.signToken({
+      userId: claims.userId,
+      organizationId: resolvedOrgId,
+      centerId: resolvedCenterId,
+      globalCustomerId: claims.globalCustomerId,
+      role: resolvedRole,
+      actorType: claims.actorType,
+      deviceId: claims.deviceId,
+      tokenType: 'refresh',
+    }, 30 * 86400);
+
+    return {
+      token: accessToken,
+      accessToken,
+      refreshToken: nextRefreshToken,
+      expiresIn: accessTtl,
+    };
   }
 }

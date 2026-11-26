@@ -1,9 +1,13 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { tenantDbControlService } from '../../infrastructure/database/TenantDatabaseControlService.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { authorizeRoles } from '../middleware/authorize.js';
 
 const router = Router({ mergeParams: true });
+
+// Require authenticated platform staff for all direct tenant database endpoints (works even if mounted standalone)
+router.use(authenticate, authorizeRoles('SUPER_ADMIN', 'PLATFORM_OPERATOR'));
 
 function getParam(req: Request, name: string): string {
   const raw = req.params[name];
@@ -20,9 +24,9 @@ function getAuditContext(req: Request): {
   correlationId?: string;
 } {
   return {
-    userId: req.user?.userId || (req.user as any)?.id || '00000000-0000-0000-0000-000000000000',
-    userRole: req.user?.role || 'SUPER_ADMIN',
-    fullName: req.user?.fullName || 'Super Administrator',
+    userId: req.user!.userId,
+    userRole: req.user!.role,
+    fullName: req.user?.fullName || 'Platform Administrator',
     reason: (req.body?.reason as string) || (req.headers['x-audit-reason'] as string) || 'Super Admin Database Management',
     ipAddress: req.ip,
     correlationId: (req.headers['x-request-id'] as string) || (req.headers['x-correlation-id'] as string),
@@ -30,7 +34,7 @@ function getAuditContext(req: Request): {
 }
 
 // 1. Database Overview
-router.get('/overview', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/overview', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const overview = await tenantDbControlService.getDatabaseOverview(dairyId);
@@ -41,7 +45,7 @@ router.get('/overview', optionalAuthenticate, async (req: Request, res: Response
 });
 
 // 2. All Dynamic Tables Listing
-router.get('/tables', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/tables', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const tables = await tenantDbControlService.listTables(dairyId);
@@ -52,7 +56,7 @@ router.get('/tables', optionalAuthenticate, async (req: Request, res: Response, 
 });
 
 // 3. Table Schema & Metadata Detail
-router.get('/tables/:tableName/schema', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/tables/:tableName/schema', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const tableName = getParam(req, 'tableName');
@@ -63,7 +67,7 @@ router.get('/tables/:tableName/schema', optionalAuthenticate, async (req: Reques
   }
 });
 
-router.get('/tables/:tableName', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/tables/:tableName', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const tableName = getParam(req, 'tableName');
@@ -75,7 +79,7 @@ router.get('/tables/:tableName', optionalAuthenticate, async (req: Request, res:
 });
 
 // 4. Paginated Table Records
-router.get('/tables/:tableName/records', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/tables/:tableName/records', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const tableName = getParam(req, 'tableName');
@@ -104,7 +108,7 @@ router.get('/tables/:tableName/records', optionalAuthenticate, async (req: Reque
 });
 
 // 5. Single Record Detail
-router.get('/tables/:tableName/records/:recordId', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/tables/:tableName/records/:recordId', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const tableName = getParam(req, 'tableName');
@@ -122,8 +126,8 @@ router.get('/tables/:tableName/records/:recordId', optionalAuthenticate, async (
   }
 });
 
-// 6. Controlled Insert Record
-router.post('/tables/:tableName/records', optionalAuthenticate, async (req: Request, res: Response): Promise<void> => {
+// 6. Controlled Insert Record (Super Admin Only)
+router.post('/tables/:tableName/records', authorizeRoles('SUPER_ADMIN'), async (req: Request, res: Response): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const tableName = getParam(req, 'tableName');
@@ -137,8 +141,8 @@ router.post('/tables/:tableName/records', optionalAuthenticate, async (req: Requ
   }
 });
 
-// 7. Controlled Update Record
-router.put('/tables/:tableName/records/:recordId', optionalAuthenticate, async (req: Request, res: Response): Promise<void> => {
+// 7. Controlled Update Record (Super Admin Only)
+router.put('/tables/:tableName/records/:recordId', authorizeRoles('SUPER_ADMIN'), async (req: Request, res: Response): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const tableName = getParam(req, 'tableName');
@@ -153,8 +157,8 @@ router.put('/tables/:tableName/records/:recordId', optionalAuthenticate, async (
   }
 });
 
-// 8. Controlled Soft Delete Record
-router.delete('/tables/:tableName/records/:recordId', optionalAuthenticate, async (req: Request, res: Response): Promise<void> => {
+// 8. Controlled Soft Delete Record (Super Admin Only)
+router.delete('/tables/:tableName/records/:recordId', authorizeRoles('SUPER_ADMIN'), async (req: Request, res: Response): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const tableName = getParam(req, 'tableName');
@@ -169,7 +173,7 @@ router.delete('/tables/:tableName/records/:recordId', optionalAuthenticate, asyn
 });
 
 // 9. Actions: Verify Connection
-router.post('/actions/verify-connection', optionalAuthenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/actions/verify-connection', async (req: Request, res: Response): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const result = await tenantDbControlService.verifyConnection(dairyId);
@@ -180,7 +184,7 @@ router.post('/actions/verify-connection', optionalAuthenticate, async (req: Requ
 });
 
 // 10. Actions: Validate Schema
-router.post('/actions/validate-schema', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.post('/actions/validate-schema', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const result = await tenantDbControlService.validateSchema(dairyId);
@@ -191,7 +195,7 @@ router.post('/actions/validate-schema', optionalAuthenticate, async (req: Reques
 });
 
 // 11. Actions: Migration History
-router.get('/migrations', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/migrations', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const result = await tenantDbControlService.getMigrationHistory(dairyId);
@@ -201,8 +205,8 @@ router.get('/migrations', optionalAuthenticate, async (req: Request, res: Respon
   }
 });
 
-// 12. Actions: Retry Provisioning
-router.post('/actions/retry-provisioning', optionalAuthenticate, async (req: Request, res: Response): Promise<void> => {
+// 12. Actions: Retry Provisioning (Super Admin Only)
+router.post('/actions/retry-provisioning', authorizeRoles('SUPER_ADMIN'), async (req: Request, res: Response): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const mapping = tenantDbManager.getTenantMapping(dairyId);
@@ -216,8 +220,8 @@ router.post('/actions/retry-provisioning', optionalAuthenticate, async (req: Req
   }
 });
 
-// 13. Actions: Reconcile Mapping
-router.post('/actions/reconcile-mapping', optionalAuthenticate, async (req: Request, res: Response): Promise<void> => {
+// 13. Actions: Reconcile Mapping (Super Admin Only)
+router.post('/actions/reconcile-mapping', authorizeRoles('SUPER_ADMIN'), async (req: Request, res: Response): Promise<void> => {
   try {
     const dairyId = getParam(req, 'dairyId');
     const overview = await tenantDbControlService.getDatabaseOverview(dairyId);

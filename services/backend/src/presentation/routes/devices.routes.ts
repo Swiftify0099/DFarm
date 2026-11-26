@@ -1,7 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { GetDeviceTelemetryUseCase } from '../../application/use-cases/index.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 import { realtimePublisher } from '../../infrastructure/realtime/RealtimeEventPublisher.js';
 
 const router = Router();
@@ -238,13 +239,24 @@ router.post('/heartbeat', authenticate, async (req: Request, res: Response, next
 });
 
 // 1. Get Devices List for Dairy (Cross-referenced with Central Hardware Inventory)
-router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
-      return;
-    }
+router.get(
+  '/',
+  authenticate,
+  authorizePermission('devices:manage', 'hardware:read', 'hardware:kiosk_read'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const requestedOrg = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+      if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy device inventory query blocked.' });
+        return;
+      }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrg || req.user?.organizationId)
+        : req.user?.organizationId;
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+        return;
+      }
 
     const controlDb = tenantDbManager.getControlPlaneDb();
     let centralHardware: any[] = [];
@@ -429,14 +441,25 @@ async function verifyDeviceAccess(params: {
   return dev;
 }
 
-router.post('/:id/sync', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const id = String(req.params.id || '');
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
-    if (!organizationId) {
-      res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
-      return;
-    }
+router.post(
+  '/:id/sync',
+  authenticate,
+  authorizePermission('devices:manage', 'hardware:kiosk_read', 'collections:intake'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const id = String(req.params.id || '');
+      const requestedOrg = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
+      if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy device sync blocked.' });
+        return;
+      }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrg || req.user?.organizationId)
+        : req.user?.organizationId;
+      if (!organizationId) {
+        res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
+        return;
+      }
 
     await verifyDeviceAccess({
       deviceId: id,
@@ -459,16 +482,27 @@ router.post('/:id/sync', optionalAuthenticate, async (req: Request, res: Respons
 });
 
 // 2. Operational Center & Counter Mapping for Allocated Device
-router.post('/:id/mapping', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const id = String(req.params.id || '');
-    const { centerId, counterLabel, locationAssigned } = req.body;
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
+router.post(
+  '/:id/mapping',
+  authenticate,
+  authorizePermission('devices:manage', 'dairy:manage_config'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const id = String(req.params.id || '');
+      const { centerId, counterLabel, locationAssigned } = req.body;
+      const requestedOrg = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
+      if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy device mapping blocked.' });
+        return;
+      }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrg || req.user?.organizationId)
+        : req.user?.organizationId;
 
-    if (!organizationId) {
-      res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
-      return;
-    }
+      if (!organizationId) {
+        res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
+        return;
+      }
 
     await verifyDeviceAccess({
       deviceId: id,
@@ -509,16 +543,27 @@ router.post('/:id/mapping', optionalAuthenticate, async (req: Request, res: Resp
 });
 
 // 3. Record Device Calibration / Verification Metadata
-router.post('/:id/calibration', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const id = String(req.params.id || '');
-    const { calibrationDate, calibratedBy, verificationStatus = 'VERIFIED', serviceProvider, notes, nextReviewDate } = req.body;
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
+router.post(
+  '/:id/calibration',
+  authenticate,
+  authorizePermission('devices:manage', 'dairy:manage_config'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const id = String(req.params.id || '');
+      const { calibrationDate, calibratedBy, verificationStatus = 'VERIFIED', serviceProvider, notes, nextReviewDate } = req.body;
+      const requestedOrg = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
+      if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy device calibration write blocked.' });
+        return;
+      }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrg || req.user?.organizationId)
+        : req.user?.organizationId;
 
-    if (!organizationId) {
-      res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
-      return;
-    }
+      if (!organizationId) {
+        res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
+        return;
+      }
 
     await verifyDeviceAccess({
       deviceId: id,
@@ -565,15 +610,26 @@ router.post('/:id/calibration', optionalAuthenticate, async (req: Request, res: 
 });
 
 // 4. Get Calibration History for Device
-router.get('/:id/calibration', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const id = String(req.params.id || '');
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
+router.get(
+  '/:id/calibration',
+  authenticate,
+  authorizePermission('devices:manage', 'hardware:read', 'hardware:kiosk_read'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const id = String(req.params.id || '');
+      const requestedOrg = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
+      if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy device calibration lookup blocked.' });
+        return;
+      }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrg || req.user?.organizationId)
+        : req.user?.organizationId;
 
-    if (!organizationId) {
-      res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
-      return;
-    }
+      if (!organizationId) {
+        res.status(401).json({ success: false, error: 'Unauthorized: missing dairy tenant context' });
+        return;
+      }
 
     await verifyDeviceAccess({
       deviceId: id,
@@ -606,7 +662,11 @@ router.get('/:id/calibration', optionalAuthenticate, async (req: Request, res: R
   }
 });
 
-router.get('/telemetry', async (req: Request, res: Response, next: NextFunction) => {
+router.get(
+  '/telemetry',
+  authenticate,
+  authorizePermission('devices:manage', 'hardware:read', 'hardware:kiosk_read'),
+  async (req: Request, res: Response, next: NextFunction) => {
   try {
     const deviceId = (req.query['deviceId'] as string) || 'KIOSK_MAIN';
     const data = await getTelemetryUseCase.execute(deviceId);

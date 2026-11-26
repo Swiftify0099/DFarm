@@ -12,6 +12,7 @@ import {
   PostgresLedgerRepository,
 } from '../../infrastructure/index.js';
 import { authenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 import { syncRouter } from '../../modules/sync/sync.routes.js';
 
 const router = Router();
@@ -91,7 +92,7 @@ const handleBulkSync = async (req: Request, res: Response, next: NextFunction): 
   }
 };
 
-router.post('/bulk', authenticate, handleBulkSync);
+router.post('/bulk', authenticate, authorizePermission('collections:intake', 'sessions:manage'), handleBulkSync);
 
 const handleSyncBatch = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -127,8 +128,8 @@ const handleSyncBatch = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
-router.post('/transactions', authenticate, handleSyncBatch);
-router.post('/push', authenticate, handleSyncBatch);
+router.post('/transactions', authenticate, authorizePermission('collections:intake', 'sessions:manage'), handleSyncBatch);
+router.post('/push', authenticate, authorizePermission('collections:intake', 'sessions:manage'), handleSyncBatch);
 
 // Mount the comprehensive syncRouter for /push, /pull, /acknowledge, /status
 router.use('/', syncRouter);

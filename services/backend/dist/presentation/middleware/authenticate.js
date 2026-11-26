@@ -1,28 +1,42 @@
 import { HmacJwtTokenService } from '../../infrastructure/security/HmacJwtTokenService.js';
 import { UnauthorizedError, ForbiddenError } from '../../domain/errors/index.js';
 import { sseTicketService } from '../../infrastructure/security/SseTicketService.js';
+import { tokenRevocationService } from '../../infrastructure/security/TokenRevocationService.js';
 const tokenService = new HmacJwtTokenService();
-export function authenticate(req, _res, next) {
-    // Never accept query token on standard API endpoints
-    const authHeader = req.headers.authorization || req.headers['x-access-token'];
-    if (!authHeader) {
-        throw new UnauthorizedError('Authorization token required');
+export async function authenticate(req, _res, next) {
+    try {
+        // Never accept query token on standard API endpoints
+        const authHeader = req.headers.authorization || req.headers['x-access-token'];
+        if (!authHeader) {
+            throw new UnauthorizedError('Authorization token required');
+        }
+        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
+        const claims = tokenService.verifyToken(token);
+        if (claims.tokenType === 'refresh') {
+            throw new UnauthorizedError('Refresh tokens cannot be used as access tokens', 'INVALID_TOKEN_TYPE');
+        }
+        if (await tokenRevocationService.isRevoked(token, claims.jti)) {
+            throw new UnauthorizedError('Authentication token has been revoked', 'TOKEN_REVOKED');
+        }
+        req.user = claims;
+        next();
     }
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
-    const claims = tokenService.verifyToken(token);
-    req.user = claims;
-    next();
+    catch (err) {
+        next(err);
+    }
 }
-export function optionalAuthenticate(req, _res, next) {
+export async function optionalAuthenticate(req, _res, next) {
     // Never accept query token on standard API endpoints
     const authHeader = req.headers.authorization || req.headers['x-access-token'];
     if (!authHeader) {
         return next();
     }
     try {
-        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
         const claims = tokenService.verifyToken(token);
-        req.user = claims;
+        if (claims.tokenType !== 'refresh' && !(await tokenRevocationService.isRevoked(token, claims.jti))) {
+            req.user = claims;
+        }
     }
     catch {
         // Ignore invalid token in optional auth
@@ -52,8 +66,14 @@ export async function authenticateSseStream(req, res, next) {
     try {
         if (authHeader) {
             // Option A: Authorization header streaming
-            const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+            const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
             user = tokenService.verifyToken(token);
+            if (user.tokenType === 'refresh') {
+                throw new UnauthorizedError('Refresh tokens cannot be used for streaming access');
+            }
+            if (await tokenRevocationService.isRevoked(token, user.jti)) {
+                throw new UnauthorizedError('Authentication token has been revoked');
+            }
         }
         else if (ticketQuery) {
             // Option B: Purpose-specific, short-lived SSE ticket (distributed atomic single-use)

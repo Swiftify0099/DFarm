@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { ITokenService } from '../../application/ports/index.js';
 import { UnauthorizedError } from '../../domain/errors/index.js';
+import { validateKeyEntropyAndByteLength } from '../../config/env.js';
 
 export interface TokenClaims {
   userId: string;
@@ -12,6 +13,10 @@ export interface TokenClaims {
   fullName?: string;
   phoneNumber?: string;
   deviceId?: string;
+  tokenType?: 'access' | 'refresh';
+  jti?: string;
+  iss?: string;
+  aud?: string;
   iat?: number;
   exp?: number;
 }
@@ -24,11 +29,11 @@ export class HmacJwtTokenService implements ITokenService {
       secret ||
       process.env['JWT_SECRET'] ||
       'super-secret-jwt-token-with-at-least-32-characters-long';
-    if (
-      process.env['NODE_ENV'] === 'production' &&
-      (!secret && (!process.env['JWT_SECRET'] || resolved === 'super-secret-jwt-token-with-at-least-32-characters-long'))
-    ) {
-      throw new Error('CRITICAL: Production JWT_SECRET must be explicitly configured.');
+    if (process.env['NODE_ENV'] === 'production' && !secret) {
+      if (!process.env['JWT_SECRET'] || resolved === 'super-secret-jwt-token-with-at-least-32-characters-long') {
+        throw new Error('CRITICAL: Production JWT_SECRET must be explicitly configured.');
+      }
+      validateKeyEntropyAndByteLength(resolved, 'JWT_SECRET');
     }
     this.secret = resolved;
   }
@@ -44,13 +49,20 @@ export class HmacJwtTokenService implements ITokenService {
       fullName?: string;
       phoneNumber?: string;
       deviceId?: string;
+      tokenType?: 'access' | 'refresh';
+      jti?: string;
     },
     expiresInSeconds = 86400
   ): string {
     const now = Math.floor(Date.now() / 1000);
     const header = { alg: 'HS256', typ: 'JWT' };
+    const configuredIss = process.env['JWT_ISSUER'];
+    const configuredAud = process.env['JWT_AUDIENCE'];
     const claims: TokenClaims = {
       ...payload,
+      jti: payload.jti || crypto.randomUUID(),
+      ...(configuredIss ? { iss: configuredIss } : {}),
+      ...(configuredAud ? { aud: configuredAud } : {}),
       iat: now,
       exp: now + expiresInSeconds,
     };
@@ -76,6 +88,9 @@ export class HmacJwtTokenService implements ITokenService {
     fullName?: string;
     phoneNumber?: string;
     deviceId?: string;
+    tokenType?: 'access' | 'refresh';
+    jti?: string;
+    exp?: number;
   } {
     if (!token) {
       throw new UnauthorizedError('Authentication token missing');
@@ -94,6 +109,17 @@ export class HmacJwtTokenService implements ITokenService {
 
     if (!headerB64 || !payloadB64 || !signature) {
       throw new UnauthorizedError('Malformed JWT token structure');
+    }
+
+    let header: { alg?: string; typ?: string };
+    try {
+      header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
+    } catch {
+      throw new UnauthorizedError('Invalid token header encoding');
+    }
+
+    if (!header || header.alg !== 'HS256' || (header.typ && header.typ !== 'JWT')) {
+      throw new UnauthorizedError('Unsupported JWT algorithm or token header');
     }
 
     const expectedSignature = crypto
@@ -117,8 +143,20 @@ export class HmacJwtTokenService implements ITokenService {
     }
 
     const now = Math.floor(Date.now() / 1000);
-    if (payload.exp && payload.exp < now) {
+    if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) {
+      throw new UnauthorizedError('Token is missing mandatory expiration claim');
+    }
+    if (payload.exp < now) {
       throw new UnauthorizedError('Token has expired');
+    }
+
+    const configuredIss = process.env['JWT_ISSUER'];
+    if (configuredIss && payload.iss !== configuredIss) {
+      throw new UnauthorizedError('Invalid token issuer');
+    }
+    const configuredAud = process.env['JWT_AUDIENCE'];
+    if (configuredAud && payload.aud !== configuredAud) {
+      throw new UnauthorizedError('Invalid token audience');
     }
 
     if (!payload.userId || !payload.role || !payload.actorType) {
@@ -135,6 +173,9 @@ export class HmacJwtTokenService implements ITokenService {
       fullName: payload.fullName,
       phoneNumber: payload.phoneNumber,
       deviceId: payload.deviceId,
+      tokenType: payload.tokenType,
+      jti: payload.jti,
+      exp: payload.exp,
     };
   }
 }

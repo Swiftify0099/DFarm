@@ -40,6 +40,7 @@ test('DFARM Multi-Dairy Customer Membership & Identity Verification Suite', asyn
   let customerATenantId = '';
   let customerBTenantId = '';
   let dairyAToken = '';
+  let customerToken = '';
 
   // Setup mock organizations and centers in central and tenant databases
   await suite.test('0. Database Environment Pre-Flight & Provisioning', async () => {
@@ -95,6 +96,8 @@ test('DFARM Multi-Dairy Customer Membership & Identity Verification Suite', asyn
     assert.equal(verifyRes.body.success, true);
     assert.ok(verifyRes.body.globalCustomerId, 'Expected canonical globalCustomerId in response');
     globalCustomerId = verifyRes.body.globalCustomerId;
+    customerToken = verifyRes.body.accessToken || verifyRes.body.token;
+    assert.ok(customerToken);
 
     // 1c. Re-login with same mobile verifies that identity is stable (idempotent)
     doveOtpService.resetCooldown(testMobile);
@@ -187,7 +190,7 @@ test('DFARM Multi-Dairy Customer Membership & Identity Verification Suite', asyn
   await suite.test('4. Membership Discovery Directory returns all memberships with isolated statuses', async () => {
     const memRes = await request(app)
       .get('/api/v1/customers/memberships')
-      .query({ phone: testMobileE164 });
+      .set('Authorization', `Bearer ${customerToken}`);
 
     assert.equal(memRes.status, 200);
     assert.equal(memRes.body.success, true);
@@ -227,7 +230,7 @@ test('DFARM Multi-Dairy Customer Membership & Identity Verification Suite', asyn
     // 5c. Discover memberships again to verify independent lifecycle
     const updatedMemRes = await request(app)
       .get('/api/v1/customers/memberships')
-      .query({ phone: testMobileE164 });
+      .set('Authorization', `Bearer ${customerToken}`);
 
     assert.equal(updatedMemRes.status, 200);
     const updatedA = updatedMemRes.body.data.find((m) => m.organizationId === dairyAId);

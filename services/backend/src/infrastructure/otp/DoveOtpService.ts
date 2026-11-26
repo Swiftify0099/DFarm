@@ -92,7 +92,10 @@ export class DoveOtpService implements IOtpService {
       if (isProduction && (!secret || secret === 'dfarm-super-secure-admin-otp-secret-key-32chars!')) {
         throw new Error('CRITICAL: Production ADMIN_OTP_SECRET is missing or insecure.');
       }
-      return secret || config.JWT_SECRET;
+      if (!secret) {
+        throw new Error('CRITICAL: ADMIN_OTP_SECRET is missing.');
+      }
+      return secret;
     }
     const secret = process.env['JWT_SECRET'] || config.JWT_SECRET;
     if (isProduction && (!secret || secret === 'super-secret-jwt-token-with-at-least-32-characters-long')) {

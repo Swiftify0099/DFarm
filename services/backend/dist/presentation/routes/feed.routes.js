@@ -2,7 +2,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
 import { authorizePermission } from '../middleware/authorize.js';
 const router = Router();
 const getTenantDb = async (organizationId) => {
@@ -17,9 +17,16 @@ const getTenantDb = async (organizationId) => {
     return db;
 };
 // 1. Get Feed Products Catalog with Genuine Stock from Inventory
-router.get('/products', optionalAuthenticate, async (req, res, next) => {
+router.get('/products', authenticate, authorizePermission('feed:read', 'feed:manage', 'feed:sell', 'feed:view_own'), async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const requestedOrgId = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ success: false, error: 'Cross-dairy feed catalog query blocked.' });
+            return;
+        }
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (requestedOrgId || req.user?.organizationId)
+            : req.user?.organizationId;
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;
@@ -371,7 +378,7 @@ router.post('/sales', authenticate, authorizePermission('feed:sell'), async (req
     }
 });
 // 5. Get Feed Sales (Filtered by Dairy or Specific Customer)
-router.get('/sales', optionalAuthenticate, async (req, res, next) => {
+router.get('/sales', authenticate, authorizePermission('feed:read', 'feed:manage', 'feed:sell', 'feed:view_own'), async (req, res, next) => {
     try {
         let customerId = req.query['customerId'];
         if (req.user?.role === 'FARMER_CUSTOMER') {
@@ -384,7 +391,14 @@ router.get('/sales', optionalAuthenticate, async (req, res, next) => {
             }
             customerId = req.user.userId;
         }
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const requestedOrgId = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ success: false, error: 'Cross-dairy feed sales query blocked.' });
+            return;
+        }
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (requestedOrgId || req.user?.organizationId)
+            : req.user?.organizationId;
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;
@@ -441,9 +455,16 @@ router.get('/sales', optionalAuthenticate, async (req, res, next) => {
     }
 });
 // 6. Get Feed Stock Movements
-router.get('/movements', optionalAuthenticate, async (req, res, next) => {
+router.get('/movements', authenticate, authorizePermission('feed:read', 'feed:manage'), async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const requestedOrgId = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+        if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ success: false, error: 'Cross-dairy feed movements query blocked.' });
+            return;
+        }
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (requestedOrgId || req.user?.organizationId)
+            : req.user?.organizationId;
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;

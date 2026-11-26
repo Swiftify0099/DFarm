@@ -166,10 +166,28 @@ test('DFarm Multi-Tenant Isolation & Provisioning Test Suite', async (t) => {
   await t.test('Test E: Cross-Tenant Protection & IDOR Rejection Middleware', async () => {
     const dairyAId = 'a0000000-0000-0000-0000-000000000001';
     const dairyBId = 'b0000000-0000-0000-0000-000000000002';
+    const { HmacJwtTokenService } = await import('../dist/infrastructure/security/HmacJwtTokenService.js');
+    const tokenService = new HmacJwtTokenService();
+    const adminAToken = tokenService.signToken({
+      userId: 'a0000000-0000-0000-0000-000000000099',
+      organizationId: dairyAId,
+      role: 'DAIRY_ADMIN',
+      actorType: 'STAFF',
+    });
+    const superAdminNoOrgToken = tokenService.signToken({
+      userId: 'a0000000-0000-0000-0000-000000000098',
+      role: 'SUPER_ADMIN',
+      actorType: 'STAFF',
+    });
+
+    // 0. Unauthenticated request rejected with 401
+    const unauthRes = await request(app).get('/api/v1/customers');
+    assert.strictEqual(unauthRes.status, 401);
 
     // 1. Querying customer list with Dairy A context vs Dairy B in query (IDOR attack)
     const idorRes = await request(app)
       .get(`/api/v1/customers?organizationId=${dairyBId}`)
+      .set('Authorization', `Bearer ${adminAToken}`)
       .set('x-dairy-tenant-id', dairyAId);
 
     // Mismatched tenant headers/params must be rejected with 403 Forbidden
@@ -177,9 +195,10 @@ test('DFarm Multi-Tenant Isolation & Provisioning Test Suite', async (t) => {
     assert.strictEqual(idorRes.body.success, false);
     assert.ok(idorRes.body.error.includes('Cross-dairy query blocked'));
 
-    // 2. Omitting tenant context where tenant context is mandatory
+    // 2. Omitting tenant context for SUPER_ADMIN where tenant context is mandatory
     const noTenantRes = await request(app)
-      .get('/api/v1/customers');
+      .get('/api/v1/customers')
+      .set('Authorization', `Bearer ${superAdminNoOrgToken}`);
     assert.strictEqual(noTenantRes.status, 400);
     assert.strictEqual(noTenantRes.body.success, false);
     assert.ok(noTenantRes.body.error.includes('Dairy context'));

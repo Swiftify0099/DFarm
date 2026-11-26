@@ -200,7 +200,7 @@ test('DFARM End-to-End Biometric Pipeline & Multi-Tenant Database Isolation Suit
     customerAToken = tokenService.signToken({
       userId: customerAId,
       organizationId: dairyAId,
-      role: 'CUSTOMER',
+      role: 'FARMER_CUSTOMER',
       actorType: 'CUSTOMER',
     });
   });
@@ -297,6 +297,7 @@ test('DFARM End-to-End Biometric Pipeline & Multi-Tenant Database Isolation Suit
     // Fetch enrolled templates for Dairy A kiosk cache
     const templatesRes = await request(app)
       .get(`/api/v1/identity/face/templates?organizationId=${dairyAId}`)
+      .set('Authorization', `Bearer ${dairyAdminAToken}`)
       .set('x-dairy-id', dairyAId)
       .expect(200);
 
@@ -314,6 +315,7 @@ test('DFARM End-to-End Biometric Pipeline & Multi-Tenant Database Isolation Suit
     // Kiosk online recognition match for live farmer in Dairy A
     const kioskMatchRes = await request(app)
       .post('/api/v1/identity/face/match')
+      .set('Authorization', `Bearer ${dairyAdminAToken}`)
       .set('x-dairy-id', dairyAId)
       .send({
         embedding: customerAFiveSamples[2],
@@ -329,6 +331,7 @@ test('DFARM End-to-End Biometric Pipeline & Multi-Tenant Database Isolation Suit
     // Unknown person recognition in Dairy A -> UNKNOWN_PERSON
     const unknownRes = await request(app)
       .post('/api/v1/identity/face/match')
+      .set('Authorization', `Bearer ${dairyAdminAToken}`)
       .set('x-dairy-id', dairyAId)
       .send({
         embedding: unknownProbe,
@@ -344,6 +347,7 @@ test('DFARM End-to-End Biometric Pipeline & Multi-Tenant Database Isolation Suit
     // Dairy B kiosk requests face templates: Must return 0 templates (Customer A is in Dairy A)
     const dairyBTemplatesRes = await request(app)
       .get(`/api/v1/identity/face/templates?organizationId=${dairyBId}`)
+      .set('Authorization', `Bearer ${dairyAdminBToken}`)
       .set('x-dairy-id', dairyBId)
       .expect(200);
 
@@ -353,6 +357,7 @@ test('DFARM End-to-End Biometric Pipeline & Multi-Tenant Database Isolation Suit
     // Customer A probe sent to Dairy B: Must NOT recognize, must return UNKNOWN_PERSON
     const crossDairyMatch = await request(app)
       .post('/api/v1/identity/face/match')
+      .set('Authorization', `Bearer ${dairyAdminBToken}`)
       .set('x-dairy-id', dairyBId)
       .send({
         embedding: customerAFiveSamples[0],
@@ -368,6 +373,7 @@ test('DFARM End-to-End Biometric Pipeline & Multi-Tenant Database Isolation Suit
     // Verify shift session open and query
     const openSessionRes = await request(app)
       .post('/api/v1/collections/sessions/open')
+      .set('Authorization', `Bearer ${dairyAdminAToken}`)
       .set('x-dairy-id', dairyAId)
       .send({
         dairyId: dairyAId,
@@ -382,6 +388,7 @@ test('DFARM End-to-End Biometric Pipeline & Multi-Tenant Database Isolation Suit
     // Active session retrieval
     const activeSessionRes = await request(app)
       .get('/api/v1/collections/sessions/active')
+      .set('Authorization', `Bearer ${dairyAdminAToken}`)
       .set('x-dairy-id', dairyAId)
       .expect(200);
 

@@ -31,7 +31,9 @@ function buildValidProdEnv(overrides = {}) {
     JWT_SECRET: crypto.randomBytes(32).toString('hex'),
     ADMIN_OTP_SECRET: crypto.randomBytes(32).toString('hex'),
     TENANT_DB_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'),
+    DATA_ENCRYPTION_KEY_HEX: crypto.randomBytes(32).toString('hex'),
     OFFLINE_LEASE_SIGNING_KEY: crypto.randomBytes(32).toString('hex'),
+    DOVE_SMS_AUTHKEY: 'dove-prod-auth-key-test-valid-123456',
     CORS_ALLOWED_ORIGINS:
       'https://collection.dfarm.in,https://dairy.dfarm.in,https://admin.dfarm.in,https://dfarm-collection.pages.dev,https://dfarm-dairy-admin.pages.dev,https://dfarm-super-admin.pages.dev',
     ALLOW_TEST_PREVIEW_OTP: 'false',
@@ -359,10 +361,11 @@ test('FIX-01: Production Authentication, OTP Security, Secret Validation & CORS 
         .set('Authorization', `Bearer ${forgedSuperAdminToken}`);
       assert.equal(meRes.status, 401);
 
-      // Dynamic DF-* invitation fallback must be gone
+      // Dynamic DF-* invitation fallback must be gone (DF-014 rejects dairyCode-only lookups upfront with 400)
       const invRes = await request(app)
         .get('/api/v1/dairies/invitations/validate?dairyCode=DF-SAN-2813');
-      assert.equal(invRes.status, 404);
+      assert.equal(invRes.status, 400);
+      assert.equal(invRes.body.code, 'MISSING_TOKEN');
     } finally {
       db.query = origQuery;
     }

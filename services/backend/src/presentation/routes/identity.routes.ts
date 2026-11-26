@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { GetFaceTemplatesUseCase } from '../../application/use-cases/index.js';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
 import { authorizePermission } from '../middleware/authorize.js';
 import { Aes256GcmBiometricEncryptor } from '../../infrastructure/security/Aes256GcmBiometricEncryptor.js';
 import { PostgresCustomerRepository } from '../../infrastructure/repositories/PostgresCustomerRepository.js';
@@ -29,26 +29,34 @@ function computeCosineSimilarity(vecA: number[], vecB: number[]): number {
 }
 
 // 1. Get Dairy-Scoped Face Templates (Encrypted + Decrypted for Authorized Terminals)
-router.get('/face/templates', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const headerOrgId =
-      (req.headers['x-dairy-tenant-id'] as string) ||
-      (req.headers['x-dairy-id'] as string) ||
-      (req.headers['x-organization-id'] as string);
-    let organizationId =
-      req.user?.organizationId ||
-      (req.query['organizationId'] as string) ||
-      (req.query['dairyId'] as string) ||
-      headerOrgId;
-    if (!organizationId) {
-      organizationId = '00000000-0000-0000-0000-000000000001';
-    } else if (req.query['organizationId'] && req.user?.organizationId && req.query['organizationId'] !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
-      res.status(403).json({
-        success: false,
-        error: 'Cross-dairy template query blocked.',
-      });
-      return;
-    }
+router.get(
+  '/face/templates',
+  authenticate,
+  authorizePermission('customers:read', 'customers:identify_face', 'biometrics:manage'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const headerOrgId =
+        (req.headers['x-dairy-tenant-id'] as string) ||
+        (req.headers['x-dairy-id'] as string) ||
+        (req.headers['x-organization-id'] as string);
+      const queryOrgId = (req.query['organizationId'] as string) || (req.query['dairyId'] as string);
+      const requestedOrgId = queryOrgId || headerOrgId;
+
+      if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({
+          success: false,
+          error: 'Cross-dairy template query blocked.',
+        });
+        return;
+      }
+
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrgId || req.user?.organizationId)
+        : req.user?.organizationId;
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required.' });
+        return;
+      }
 
     // Only filter by centerId if explicitly provided in query parameters!
     // Kiosks serve all patrons belonging to the dairy tenant.
@@ -90,7 +98,7 @@ router.get('/face/templates', optionalAuthenticate, async (req: Request, res: Re
 });
 
 // 2. Real Neural Inference Endpoint for Mobile & Kiosk (OpenCV YuNet + SFace INT8)
-router.post('/face/detect-and-embed', optionalAuthenticate, async (req: Request, res: Response, _next: NextFunction): Promise<void> => {
+router.post('/face/detect-and-embed', authenticate, async (req: Request, res: Response, _next: NextFunction): Promise<void> => {
   try {
     const { imageBase64 } = req.body;
     if (!imageBase64 || typeof imageBase64 !== 'string') {
@@ -175,9 +183,13 @@ router.post('/face/detect-and-embed', optionalAuthenticate, async (req: Request,
 });
 
 // 3. Online Dairy-Scoped Face Matching Endpoint
-router.post('/face/match', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    let { embedding, imageBase64, customerId: targetCustomerId } = req.body;
+router.post(
+  '/face/match',
+  authenticate,
+  authorizePermission('customers:identify_face', 'biometrics:manage', 'customers:read', 'profile:view_own'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      let { embedding, imageBase64, customerId: targetCustomerId } = req.body;
 
     // If imageBase64 is provided instead of pre-computed embedding, run inference
     if ((!embedding || !Array.isArray(embedding)) && imageBase64) {
@@ -234,14 +246,23 @@ router.post('/face/match', optionalAuthenticate, async (req: Request, res: Respo
       (req.headers['x-dairy-tenant-id'] as string) ||
       (req.headers['x-dairy-id'] as string) ||
       (req.headers['x-organization-id'] as string);
-    let organizationId =
-      req.user?.organizationId ||
+    const requestedOrgId =
       (req.body.organizationId as string) ||
       (req.body.dairyId as string) ||
       (req.query['organizationId'] as string) ||
       headerOrgId;
+
+    if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy face matching blocked.' });
+      return;
+    }
+
+    const organizationId = req.user?.role === 'SUPER_ADMIN'
+      ? (requestedOrgId || req.user?.organizationId)
+      : req.user?.organizationId;
     if (!organizationId) {
-      organizationId = '00000000-0000-0000-0000-000000000001';
+      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required.' });
+      return;
     }
 
     // Do NOT restrict face matching across the dairy by operator centerId!
@@ -256,7 +277,11 @@ router.post('/face/match', optionalAuthenticate, async (req: Request, res: Respo
     let resolvedTargetCustomer: any = null;
 
     let effectiveTargetId = targetCustomerId;
-    if (!effectiveTargetId && (req.user?.actorType === 'CUSTOMER' || req.user?.role === 'FARMER_CUSTOMER')) {
+    if (req.user?.actorType === 'CUSTOMER' || req.user?.role === 'FARMER_CUSTOMER') {
+      if (targetCustomerId && targetCustomerId !== req.user.userId && targetCustomerId !== req.user.globalCustomerId) {
+        res.status(403).json({ success: false, error: 'Cross-customer face verification blocked.' });
+        return;
+      }
       effectiveTargetId = req.user.userId || req.user.globalCustomerId;
     }
 
@@ -455,32 +480,32 @@ router.post('/face/match', optionalAuthenticate, async (req: Request, res: Respo
 });
 
 // 4. Dairy Admin Biometric Lifecycle - Real Database Query (Metadata Only, ZERO Raw Vectors)
-router.get('/face/enrollments', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    let organizationId = req.user?.organizationId;
-    const queryOrgId = req.query['organizationId'] as string;
-    const headerOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
+router.get(
+  '/face/enrollments',
+  authenticate,
+  authorizePermission('customers:read', 'biometrics:manage'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      let organizationId = req.user!.organizationId;
+      const queryOrgId = req.query['organizationId'] as string;
+      const headerOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string);
 
-    if (organizationId) {
-      if (queryOrgId && queryOrgId !== organizationId && req.user?.role !== 'SUPER_ADMIN') {
-        res.status(403).json({
-          success: false,
-          error: 'Cross-dairy query blocked: Cannot access face enrollments of another dairy.',
-        });
+      if (req.user?.role !== 'SUPER_ADMIN') {
+        if ((queryOrgId && queryOrgId !== organizationId) || (headerOrgId && headerOrgId !== organizationId)) {
+          res.status(403).json({
+            success: false,
+            error: 'Cross-dairy query blocked: Cannot access face enrollments of another dairy.',
+          });
+          return;
+        }
+      } else {
+        organizationId = queryOrgId || headerOrgId || organizationId;
+      }
+
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
         return;
       }
-    } else {
-      organizationId = queryOrgId || headerOrgId;
-    }
-
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
-      return;
-    }
-
-    if (req.user) {
-      authorizePermission('customers:read', 'biometrics:manage')(req, res, () => {});
-    }
 
     const client = await tenantDbManager.getTenantDb(organizationId).catch(() => db);
 
@@ -553,41 +578,76 @@ router.get('/face/enrollments', optionalAuthenticate, async (req: Request, res: 
 });
 
 // 4. Request Face Re-enrollment
-router.post('/face/enrollments/:id/re-enroll', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    if (req.user) {
-      authorizePermission('biometrics:manage', 'customers:update')(req, res, () => {});
-    }
-    const { id } = req.params;
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-id'] as string);
-    const client = organizationId ? await tenantDbManager.getTenantDb(organizationId).catch(() => db) : db;
+router.post(
+  '/face/enrollments/:id/re-enroll',
+  authenticate,
+  authorizePermission('biometrics:manage', 'customers:update'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (req.user?.organizationId || (req.headers['x-dairy-id'] as string))
+        : req.user?.organizationId;
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+        return;
+      }
+      const client = await tenantDbManager.getTenantDb(organizationId).catch(() => db);
 
-    await client.query(`UPDATE face_enrollments SET status = 'SUPERSEDED' WHERE id = $1`, [id]);
-    res.json({ success: true, message: 'Re-enrollment requested successfully' });
-  } catch (err) {
-    next(err);
+      const updRes = await client.query(
+        `UPDATE face_enrollments
+         SET status = 'SUPERSEDED'
+         WHERE id = $1
+           AND customer_id IN (SELECT id FROM customers WHERE organization_id = $2)
+         RETURNING id;`,
+        [id, organizationId]
+      );
+      if (updRes.rows.length === 0) {
+        res.status(404).json({ success: false, error: 'Face enrollment not found in authorized dairy' });
+        return;
+      }
+      res.json({ success: true, message: 'Re-enrollment requested successfully' });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 // 5. Revoke Face Biometric Template
-router.post('/face/enrollments/:id/revoke', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    if (req.user) {
-      authorizePermission('biometrics:manage', 'customers:update')(req, res, () => {});
-    }
-    const { id } = req.params;
-    const { reason } = req.body;
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-id'] as string);
-    const client = organizationId ? await tenantDbManager.getTenantDb(organizationId).catch(() => db) : db;
+router.post(
+  '/face/enrollments/:id/revoke',
+  authenticate,
+  authorizePermission('biometrics:manage', 'customers:update'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const { reason } = req.body;
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (req.user?.organizationId || (req.headers['x-dairy-id'] as string))
+        : req.user?.organizationId;
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+        return;
+      }
+      const client = await tenantDbManager.getTenantDb(organizationId).catch(() => db);
 
-    await client.query(
-      `UPDATE face_enrollments SET status = 'REVOKED', erased_at = NOW(), erasure_reason = $2 WHERE id = $1`,
-      [id, reason || 'Revoked by authorized Dairy Admin']
-    );
-    res.json({ success: true, message: 'Face enrollment revoked and biometric templates purged from active terminals' });
-  } catch (err) {
-    next(err);
+      const revRes = await client.query(
+        `UPDATE face_enrollments
+         SET status = 'REVOKED', erased_at = NOW(), erasure_reason = $2
+         WHERE id = $1
+           AND customer_id IN (SELECT id FROM customers WHERE organization_id = $3)
+         RETURNING id;`,
+        [id, reason || 'Revoked by authorized Dairy Admin', organizationId]
+      );
+      if (revRes.rows.length === 0) {
+        res.status(404).json({ success: false, error: 'Face enrollment not found in authorized dairy' });
+        return;
+      }
+      res.json({ success: true, message: 'Face enrollment revoked and biometric templates purged from active terminals' });
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 export const identityRoutes = router;

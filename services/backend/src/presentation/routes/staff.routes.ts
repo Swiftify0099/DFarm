@@ -2,7 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'node:crypto';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { optionalAuthenticate, authenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 import { PhoneNumber } from '../../domain/value-objects/index.js';
 import { logger } from '../../shared/logger/index.js';
 
@@ -60,13 +61,23 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
 // ============================================================================
 // 1. GET /api/v1/staff - List all staff members for dairy
 // ============================================================================
-router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const organizationId =
-      req.user?.organizationId ||
-      (req.headers['x-dairy-id'] as string) ||
-      (req.query['organizationId'] as string) ||
-      (req.query['dairyId'] as string);
+router.get(
+  '/',
+  authenticate,
+  authorizePermission('dairy:read_staff', 'dairy:manage_staff', 'sessions:open', 'collections:view_all'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const requestedOrg =
+        (req.headers['x-dairy-id'] as string) ||
+        (req.query['organizationId'] as string) ||
+        (req.query['dairyId'] as string);
+      if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy staff directory query blocked.' });
+        return;
+      }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrg || req.user?.organizationId)
+        : req.user?.organizationId;
 
     if (!organizationId) {
       res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
@@ -119,13 +130,23 @@ router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: 
 // ============================================================================
 // 2. GET /api/v1/staff/centers - List active centers for staff assignment
 // ============================================================================
-router.get('/centers', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const organizationId =
-      req.user?.organizationId ||
-      (req.headers['x-dairy-id'] as string) ||
-      (req.query['organizationId'] as string) ||
-      (req.query['dairyId'] as string);
+router.get(
+  '/centers',
+  authenticate,
+  authorizePermission('dairy:read_staff', 'dairy:manage_staff', 'sessions:open', 'collections:view_all'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const requestedOrg =
+        (req.headers['x-dairy-id'] as string) ||
+        (req.query['organizationId'] as string) ||
+        (req.query['dairyId'] as string);
+      if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy center directory query blocked.' });
+        return;
+      }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrg || req.user?.organizationId)
+        : req.user?.organizationId;
 
     if (!organizationId) {
       res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });

@@ -96,6 +96,8 @@ export interface ITokenService {
         fullName?: string;
         phoneNumber?: string;
         deviceId?: string;
+        tokenType?: 'access' | 'refresh';
+        jti?: string;
     }, expiresInSeconds?: number): string;
     verifyToken(token: string): {
         userId: string;
@@ -107,6 +109,9 @@ export interface ITokenService {
         fullName?: string;
         phoneNumber?: string;
         deviceId?: string;
+        tokenType?: 'access' | 'refresh';
+        jti?: string;
+        exp?: number;
     };
 }
 export interface IOtpService {

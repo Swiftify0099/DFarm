@@ -425,7 +425,9 @@ test('DFarm Clean Architecture Implementation Test Suite', async (t) => {
     assert.strictEqual(custOtpRes.body.success, true);
 
     // E. Device Telemetry
-    const telemetryRes = await request(app).get('/api/v1/devices/telemetry?deviceId=KIOSK_MAIN');
+    const telemetryRes = await request(app)
+      .get('/api/v1/devices/telemetry?deviceId=KIOSK_MAIN')
+      .set('Authorization', `Bearer ${operatorToken}`);
     assert.strictEqual(telemetryRes.status, 200);
     assert.strictEqual(telemetryRes.body.success, true);
     assert.strictEqual(telemetryRes.body.data.status, 'ONLINE');
@@ -458,7 +460,9 @@ test('DFarm Clean Architecture Implementation Test Suite', async (t) => {
     const customerId = regRes.body.customerUuid;
 
     // H. Registration Status Polling
-    const statusRes = await request(app).get(`/api/v1/customers/${customerId}/status`);
+    const statusRes = await request(app)
+      .get(`/api/v1/customers/${customerId}/status`)
+      .set('Authorization', `Bearer ${operatorToken}`);
     assert.strictEqual(statusRes.status, 200);
     assert.strictEqual(statusRes.body.data.registrationStatus, 'PENDING_APPROVAL');
 

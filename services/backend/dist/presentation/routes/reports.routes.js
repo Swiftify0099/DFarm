@@ -1,8 +1,24 @@
 import { Router } from 'express';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 const router = Router();
+function resolveAuthorizedOrgId(req, res) {
+    const requestedOrgId = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
+    if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy reports query blocked.' });
+        return undefined;
+    }
+    const orgId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrgId || req.user?.organizationId)
+        : req.user?.organizationId;
+    if (!orgId) {
+        res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+        return undefined;
+    }
+    return orgId;
+}
 const getTenantDb = async (organizationId) => {
     if (organizationId) {
         try {
@@ -15,13 +31,11 @@ const getTenantDb = async (organizationId) => {
     return db;
 };
 // 1. Daily & Shift Collection Report
-router.get('/collections', optionalAuthenticate, async (req, res, next) => {
+router.get('/collections', authenticate, authorizePermission('reports:dairy_read', 'reports:read', 'billing:read', 'collections:view_all'), async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
-        if (!organizationId) {
-            res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+        const organizationId = resolveAuthorizedOrgId(req, res);
+        if (!organizationId)
             return;
-        }
         const { date, shift, category } = req.query;
         const client = await getTenantDb(organizationId);
         let rows = [];
@@ -91,13 +105,11 @@ router.get('/collections', optionalAuthenticate, async (req, res, next) => {
     }
 });
 // 2. Feed Stock & Sales Report
-router.get('/feed', optionalAuthenticate, async (req, res, next) => {
+router.get('/feed', authenticate, authorizePermission('reports:dairy_read', 'reports:read', 'feed:read', 'feed:manage'), async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
-        if (!organizationId) {
-            res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+        const organizationId = resolveAuthorizedOrgId(req, res);
+        if (!organizationId)
             return;
-        }
         const client = await getTenantDb(organizationId);
         let products = [];
         let sales = [];
@@ -149,13 +161,11 @@ router.get('/feed', optionalAuthenticate, async (req, res, next) => {
     }
 });
 // 3. Customer Ledger Summary Report
-router.get('/ledger', optionalAuthenticate, async (req, res, next) => {
+router.get('/ledger', authenticate, authorizePermission('reports:dairy_read', 'reports:read', 'billing:read', 'billing:manage'), async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
-        if (!organizationId) {
-            res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+        const organizationId = resolveAuthorizedOrgId(req, res);
+        if (!organizationId)
             return;
-        }
         const client = await getTenantDb(organizationId);
         let accounts = [];
         try {
@@ -199,13 +209,11 @@ router.get('/ledger', optionalAuthenticate, async (req, res, next) => {
     }
 });
 // 4. Bounded Data Export in CSV or JSON Format (With PII Masking & Zero Raw Biometrics)
-router.get('/export', optionalAuthenticate, async (req, res, next) => {
+router.get('/export', authenticate, authorizePermission('reports:dairy_read', 'reports:read', 'billing:manage'), async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.query['organizationId'];
-        if (!organizationId) {
-            res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+        const organizationId = resolveAuthorizedOrgId(req, res);
+        if (!organizationId)
             return;
-        }
         const type = req.query['type'] || 'collections';
         const format = req.query['format'] || 'json';
         const client = await getTenantDb(organizationId);

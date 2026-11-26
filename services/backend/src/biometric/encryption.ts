@@ -5,6 +5,7 @@
 
 import crypto from 'node:crypto';
 import { EncryptedBiometricTemplate } from '@dfarm/shared-types';
+import { validateKeyEntropyAndByteLength } from '../config/env.js';
 
 export class BiometricSecurityError extends Error {
   constructor(
@@ -31,15 +32,36 @@ export class BiometricEncryptionEngine {
   private readonly masterKey: Buffer;
   public readonly keyReference: string;
 
-  constructor(keyHex?: string, keyReference = 'key-v1-2026') {
-    const rawKeyHex = keyHex || process.env.DATA_ENCRYPTION_KEY_HEX || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-    if (!rawKeyHex || rawKeyHex.length !== 64) {
+  constructor(keyHex?: string, keyReference = 'key-v2-2026') {
+    const fromEnv = keyHex === undefined;
+    const rawKeyHex = (keyHex ?? process.env.DATA_ENCRYPTION_KEY_HEX ?? '').trim();
+    if (!rawKeyHex || !/^[0-9a-fA-F]{64}$/.test(rawKeyHex)) {
       throw new BiometricSecurityError(
         'INVALID_MASTER_KEY',
-        'Data encryption key must be a 64-character hex string representing a 256-bit AES key.'
+        'Data encryption key must be a valid 64-character hex string representing a 256-bit AES key.'
       );
     }
-    this.masterKey = Buffer.from(rawKeyHex, 'hex');
+
+    const isProd = process.env.NODE_ENV === 'production';
+    if (isProd || fromEnv) {
+      try {
+        validateKeyEntropyAndByteLength(rawKeyHex, 'DATA_ENCRYPTION_KEY_HEX');
+      } catch (err: any) {
+        throw new BiometricSecurityError(
+          'INVALID_MASTER_KEY',
+          err?.message || 'Data encryption key failed security validation.'
+        );
+      }
+    }
+
+    const keyBuf = Buffer.from(rawKeyHex, 'hex');
+    if (keyBuf.length !== 32) {
+      throw new BiometricSecurityError(
+        'INVALID_MASTER_KEY',
+        'Data encryption key must decode to exactly 32 bytes (256 bits).'
+      );
+    }
+    this.masterKey = keyBuf;
     this.keyReference = keyReference;
   }
 

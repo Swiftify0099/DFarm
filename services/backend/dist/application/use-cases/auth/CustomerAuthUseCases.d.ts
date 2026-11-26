@@ -65,8 +65,11 @@ export declare class VerifyCustomerOtpUseCase {
 export declare class RefreshTokenUseCase {
     private readonly tokenService;
     constructor(tokenService: ITokenService);
-    execute(oldToken: string): {
+    execute(oldToken: string): Promise<{
         token: string;
-    };
+        accessToken: string;
+        refreshToken: string;
+        expiresIn: number;
+    }>;
 }
 //# sourceMappingURL=CustomerAuthUseCases.d.ts.map

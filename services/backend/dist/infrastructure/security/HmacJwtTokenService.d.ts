@@ -9,6 +9,10 @@ export interface TokenClaims {
     fullName?: string;
     phoneNumber?: string;
     deviceId?: string;
+    tokenType?: 'access' | 'refresh';
+    jti?: string;
+    iss?: string;
+    aud?: string;
     iat?: number;
     exp?: number;
 }
@@ -25,6 +29,8 @@ export declare class HmacJwtTokenService implements ITokenService {
         fullName?: string;
         phoneNumber?: string;
         deviceId?: string;
+        tokenType?: 'access' | 'refresh';
+        jti?: string;
     }, expiresInSeconds?: number): string;
     verifyToken(token: string): {
         userId: string;
@@ -36,6 +42,9 @@ export declare class HmacJwtTokenService implements ITokenService {
         fullName?: string;
         phoneNumber?: string;
         deviceId?: string;
+        tokenType?: 'access' | 'refresh';
+        jti?: string;
+        exp?: number;
     };
 }
 //# sourceMappingURL=HmacJwtTokenService.d.ts.map

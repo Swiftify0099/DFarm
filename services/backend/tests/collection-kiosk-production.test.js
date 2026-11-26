@@ -131,8 +131,8 @@ test('DFarm Collection App / Kiosk Counter Production Verification Suite', async
         .get(`/api/v1/collections/sessions/active?centerId=${testCenterA}&deviceId=KIOSK_MAIN_01`)
         .set('Authorization', `Bearer ${operatorTokenB}`);
 
-      // Operator B belongs to Dairy B, querying Center A (Dairy A) returns 404 or empty session
-      assert.ok(res.status === 404 || (res.status === 200 && res.body.data?.sessionCode !== activeSessionCode));
+      // Operator B belongs to Dairy B, querying Center A (Dairy A) returns 403 or 404 or empty session
+      assert.ok(res.status === 403 || res.status === 404 || (res.status === 200 && res.body.data?.sessionCode !== activeSessionCode));
     });
   });
 
@@ -181,11 +181,12 @@ test('DFarm Collection App / Kiosk Counter Production Verification Suite', async
       .send({ operatorName: 'Rajesh Patil' });
     assert.equal(appRes.status, 200);
 
-    // Assign RFID card
-    await request(app)
+    // Assign RFID card via authorized Dairy Admin
+    const rfidAssignRes = await request(app)
       .patch(`/api/v1/customers/${enrolledFarmerUuid}/biometrics`)
-      .set('Authorization', `Bearer ${operatorTokenA}`)
+      .set('Authorization', `Bearer ${dairyAdminToken}`)
       .send({ rfidCardUid: testCardUid });
+    assert.equal(rfidAssignRes.status, 200);
 
     await t.test('4. Dedicated face templates endpoint returns decrypted embeddings scoped to active dairy', async () => {
       const res = await request(app)
@@ -437,9 +438,16 @@ test('DFarm Collection App / Kiosk Counter Production Verification Suite', async
   // ============================================================================
   await suite.test('GROUP F: Ledger Reconciliation & Zero Razorpay Constraint', async (t) => {
     await t.test('16. Double-entry subledger contains both online and offline MILK_CREDIT entries', async () => {
+      const dairyAdminToken = tokenService.signToken({
+        userId: '00000000-0000-0000-0000-000000000001',
+        organizationId: testDairyA,
+        role: 'PRIMARY_DAIRY_ADMIN',
+        actorType: 'STAFF',
+        fullName: 'Rajesh Patil',
+      });
       const res = await request(app)
         .get(`/api/v1/ledger/entries?customerId=${enrolledFarmerUuid}`)
-        .set('Authorization', `Bearer ${operatorTokenA}`);
+        .set('Authorization', `Bearer ${dairyAdminToken}`);
 
       assert.equal(res.status, 200);
       assert.equal(res.body.success, true);

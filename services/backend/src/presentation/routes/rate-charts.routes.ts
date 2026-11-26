@@ -3,7 +3,7 @@ import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 import { PostgresRateChartRepository } from '../../infrastructure/repositories/PostgresRateChartRepository.js';
 import { handleRateSync } from '../../modules/rates/rate.routes.js';
-import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
 import { authorizePermission } from '../middleware/authorize.js';
 
 const router = Router();
@@ -21,13 +21,24 @@ const getTenantDb = async (organizationId?: string) => {
 };
 
 // 1. List Rate Charts for Dairy
-router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
-      return;
-    }
+router.get(
+  '/',
+  authenticate,
+  authorizePermission('rate_charts:read', 'policies:rate_read', 'collections:view_all', 'collections:intake'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const requestedOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+      if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy rate chart access blocked.' });
+        return;
+      }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrgId || req.user?.organizationId)
+        : req.user?.organizationId;
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+        return;
+      }
 
     const query = `
       SELECT 
@@ -89,13 +100,20 @@ router.get('/sync', authenticate, handleRateSync);
 router.post('/sync', authenticate, handleRateSync);
 
 // 2. Create Draft Rate Chart Version with Backend Range & Field Validation
-router.post('/draft', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.post('/draft', authenticate, authorizePermission('rate_charts:manage'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    if (req.user) {
-      authorizePermission('rate_charts:manage')(req, res, () => {});
+    const requestedOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.body?.dairyId as string) || (req.body?.organizationId as string);
+    if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy rate chart creation blocked.' });
+      return;
     }
-
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.body?.dairyId as string) || (req.body?.organizationId as string);
+    const organizationId = req.user?.role === 'SUPER_ADMIN'
+      ? (requestedOrgId || req.user?.organizationId)
+      : req.user?.organizationId;
+    if (!organizationId) {
+      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+      return;
+    }
     const { title, milkCategory, baseRatePerLiter, minFat, maxFat: _maxFat, minSnf, maxSnf: _maxSnf, effectiveDate, changeNotes } = req.body;
 
     if (!organizationId) {
@@ -174,14 +192,17 @@ router.post('/draft', optionalAuthenticate, async (req: Request, res: Response, 
 });
 
 // 3. Activate Rate Chart Version (Preserving Historical Versions)
-router.post('/:id/activate', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.post('/:id/activate', authenticate, authorizePermission('rate_charts:manage'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    if (req.user) {
-      authorizePermission('rate_charts:manage')(req, res, () => {});
-    }
-
     const { id } = req.params;
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query?.organizationId as string);
+    const requestedOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query?.organizationId as string);
+    if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy rate chart activation blocked.' });
+      return;
+    }
+    const organizationId = req.user?.role === 'SUPER_ADMIN'
+      ? (requestedOrgId || req.user?.organizationId)
+      : req.user?.organizationId;
     const client = await getTenantDb(organizationId);
 
     // Look up chart category
@@ -194,7 +215,11 @@ router.post('/:id/activate', optionalAuthenticate, async (req: Request, res: Res
       return;
     }
 
-    const { milk_category } = chartRes.rows[0];
+    const { organization_id: chartOrgId, milk_category } = chartRes.rows[0];
+    if (organizationId && chartOrgId && chartOrgId !== organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy rate chart activation blocked.' });
+      return;
+    }
 
     // Deactivate previously active charts for the same category
     if (organizationId) {
@@ -213,9 +238,20 @@ router.post('/:id/activate', optionalAuthenticate, async (req: Request, res: Res
 });
 
 // 4. Rate Preview Calculation Endpoint (Pure Calculation, Zero Financial Mutation)
-router.post('/preview', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.post('/preview', authenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.body?.organizationId as string);
+    const requestedOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.body?.organizationId as string);
+    if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy rate preview blocked.' });
+      return;
+    }
+    const organizationId = req.user?.role === 'SUPER_ADMIN'
+      ? (requestedOrgId || req.user?.organizationId)
+      : req.user?.organizationId;
+    if (!organizationId) {
+      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+      return;
+    }
     const { milkCategory = 'COW', fatPercentage, fat, snfPercentage, snf, weightLiters = 10, volume = 10 } = req.body;
 
     const effFat = Number(fatPercentage ?? fat ?? (milkCategory === 'COW' ? 3.8 : 6.5));
@@ -225,12 +261,14 @@ router.post('/preview', optionalAuthenticate, async (req: Request, res: Response
     let activeChart;
     try {
       const category: 'COW' | 'BUFFALO' = milkCategory === 'BUFFALO' ? 'BUFFALO' : 'COW';
-      activeChart = await rateChartRepo.getActiveRateChart(
-        '00000000-0000-0000-0000-000000000002',
-        organizationId || '00000000-0000-0000-0000-000000000010',
-        category,
-        new Date().toISOString().slice(0, 10)
-      );
+      if (req.user?.centerId) {
+        activeChart = await rateChartRepo.getActiveRateChart(
+          req.user.centerId,
+          organizationId,
+          category,
+          new Date().toISOString().slice(0, 10)
+        );
+      }
     } catch {
       // Fallback calculation using standard rate formula
     }

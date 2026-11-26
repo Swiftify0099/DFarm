@@ -181,7 +181,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
  */
 export function hasPermission(role?: string, requiredPermission?: string): boolean {
   if (!role || !requiredPermission) return false;
-  const normalizedRole = role.toUpperCase();
+  const normalizedRole = role.trim().toUpperCase();
   const permissions = ROLE_PERMISSIONS[normalizedRole] || [];
   if (permissions.includes('*')) return true;
   if (permissions.includes(requiredPermission)) return true;
@@ -202,7 +202,11 @@ export function authorizePermission(...requiredPermissions: string[]) {
       throw new UnauthorizedError('Authentication required');
     }
 
-    const role = req.user.role;
+    if (requiredPermissions.length === 0) {
+      throw new ForbiddenError('Forbidden: Missing required permission policy');
+    }
+
+    const role = String(req.user.role || '').trim().toUpperCase();
     const isAuthorized = requiredPermissions.some((p) => hasPermission(role, p));
     if (!isAuthorized) {
       throw new ForbiddenError(
@@ -215,12 +219,14 @@ export function authorizePermission(...requiredPermissions: string[]) {
 }
 
 export function authorizeRoles(...allowedRoles: string[]) {
+  const normalizedAllowed = allowedRoles.map((r) => r.trim().toUpperCase()).filter(Boolean);
   return (req: Request, _res: Response, next: NextFunction): void => {
     if (!req.user) {
       throw new UnauthorizedError('Authentication required');
     }
 
-    if (allowedRoles.length > 0 && !allowedRoles.includes(req.user.role)) {
+    const userRole = String(req.user.role || '').trim().toUpperCase();
+    if (normalizedAllowed.length === 0 || !normalizedAllowed.includes(userRole)) {
       throw new ForbiddenError(`Forbidden: Role '${req.user.role}' lacks permission`);
     }
 

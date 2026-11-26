@@ -122,11 +122,12 @@ test('DFarm Dairy Admin Production Readiness & Operational Verification Suite', 
     await t.test('3. Query with mismatched header and query param is blocked', async () => {
       const res = await request(app)
         .get(`/api/v1/customers?organizationId=${testDairyB}`)
+        .set('Authorization', `Bearer ${dairyAdminTokenA}`)
         .set('x-dairy-tenant-id', testDairyA);
 
       assert.equal(res.status, 403);
       assert.equal(res.body.success, false);
-      assert.match(res.body.error, /Header dairy ID does not match/i);
+      assert.match(res.body.error, /Cross-dairy query blocked/i);
     });
   });
 
@@ -182,7 +183,8 @@ test('DFarm Dairy Admin Production Readiness & Operational Verification Suite', 
 
     await t.test('6. Customer registration status endpoint reflects PENDING_APPROVAL for farmer app', async () => {
       const res = await request(app)
-        .get(`/api/v1/customers/${registeredCustomerUuid}/status`);
+        .get(`/api/v1/customers/${registeredCustomerUuid}/status`)
+        .set('Authorization', `Bearer ${dairyAdminTokenA}`);
 
       assert.equal(res.status, 200);
       assert.equal(res.body.success, true);
@@ -217,7 +219,8 @@ test('DFarm Dairy Admin Production Readiness & Operational Verification Suite', 
 
     await t.test('9. Farmer status polling reflects APPROVED immediately after administrative action', async () => {
       const res = await request(app)
-        .get(`/api/v1/customers/${registeredCustomerUuid}/status`);
+        .get(`/api/v1/customers/${registeredCustomerUuid}/status`)
+        .set('Authorization', `Bearer ${dairyAdminTokenA}`);
 
       assert.equal(res.status, 200);
       assert.equal(res.body.success, true);

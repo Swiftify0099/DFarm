@@ -260,6 +260,7 @@ export class VerifyOperatorOtpUseCase {
             role: effectiveRole,
             actorType: 'STAFF',
             deviceId: verifiedDeviceId,
+            tokenType: 'access',
         });
         return {
             token,

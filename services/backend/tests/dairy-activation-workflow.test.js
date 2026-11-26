@@ -2,10 +2,18 @@ import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createApp } from '../dist/app.js';
+import { HmacJwtTokenService } from '../dist/infrastructure/security/HmacJwtTokenService.js';
 
 describe('DFarm Dairy Admin Activation & Real Email Workflow Test Suite', () => {
   let server;
   let baseUrl;
+  const tokenService = new HmacJwtTokenService();
+  const superAdminToken = tokenService.signToken({
+    userId: '11111111-1111-4111-a111-000000000099',
+    role: 'SUPER_ADMIN',
+    actorType: 'STAFF',
+    fullName: 'Super Administrator',
+  });
 
   it('setup backend test server', async () => {
     const app = createApp();
@@ -29,7 +37,10 @@ describe('DFarm Dairy Admin Activation & Real Email Workflow Test Suite', () => 
   it('should reject dairy creation when businessEmail is missing', async () => {
     const res = await fetch(`${baseUrl}/api/v1/dairies`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${superAdminToken}`,
+      },
       body: JSON.stringify({
         name: 'No Email Dairy',
         primaryAdminMobile: '9822112233',
@@ -48,7 +59,10 @@ describe('DFarm Dairy Admin Activation & Real Email Workflow Test Suite', () => 
   it('should reject dairy creation when businessEmail is malformed', async () => {
     const res = await fetch(`${baseUrl}/api/v1/dairies`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${superAdminToken}`,
+      },
       body: JSON.stringify({
         name: 'Malformed Email Dairy',
         businessEmail: 'not-an-email',
@@ -68,7 +82,10 @@ describe('DFarm Dairy Admin Activation & Real Email Workflow Test Suite', () => 
   it('should reject dairy creation when primary admin mobile is invalid', async () => {
     const res = await fetch(`${baseUrl}/api/v1/dairies`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${superAdminToken}`,
+      },
       body: JSON.stringify({
         name: 'Bad Mobile Dairy',
         businessEmail: 'admin@dairy.org',
@@ -94,7 +111,10 @@ describe('DFarm Dairy Admin Activation & Real Email Workflow Test Suite', () => 
   it('should provision dairy tenant and return 256-bit activation token & link', async () => {
     const res = await fetch(`${baseUrl}/api/v1/dairies`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${superAdminToken}`,
+      },
       body: JSON.stringify({
         name: `Sahyadri Cooperative ${Date.now()}`,
         businessEmail: testEmail,
@@ -211,7 +231,10 @@ describe('DFarm Dairy Admin Activation & Real Email Workflow Test Suite', () => 
   it('should reject resend on already activated Primary Admin account', async () => {
     const res = await fetch(`${baseUrl}/api/v1/dairies/invitations/resend`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${superAdminToken}`,
+      },
       body: JSON.stringify({ dairyId: createdDairyId }),
     });
 
@@ -225,7 +248,10 @@ describe('DFarm Dairy Admin Activation & Real Email Workflow Test Suite', () => 
     // 1. Create a fresh pending dairy
     const createRes = await fetch(`${baseUrl}/api/v1/dairies`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${superAdminToken}`,
+      },
       body: JSON.stringify({
         name: `Pending Dairy For Resend ${Date.now()}`,
         businessEmail: `pending.resend+${Date.now()}@dfarm.in`,
@@ -243,7 +269,10 @@ describe('DFarm Dairy Admin Activation & Real Email Workflow Test Suite', () => 
     // 2. Resend invitation
     const resendRes = await fetch(`${baseUrl}/api/v1/dairies/invitations/resend`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${superAdminToken}`,
+      },
       body: JSON.stringify({ dairyId: pendingDairyId }),
     });
 

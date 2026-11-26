@@ -583,7 +583,9 @@ test('DFARM PROMPT 4.2.3: Device Proof-of-Possession & Production Signing Key Au
         JWT_SECRET: crypto.randomBytes(32).toString('hex'),
         ADMIN_OTP_SECRET: crypto.randomBytes(32).toString('hex'),
         TENANT_DB_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'),
+        DATA_ENCRYPTION_KEY_HEX: crypto.randomBytes(32).toString('hex'),
         OFFLINE_LEASE_SIGNING_KEY: csprngHexKey,
+        DOVE_SMS_AUTHKEY: 'dove-prod-auth-key-test-valid-123456',
       });
     });
   });

@@ -1,21 +1,45 @@
 import crypto from 'node:crypto';
 import { BiometricVerificationError } from '../../domain/errors/index.js';
+import { validateKeyEntropyAndByteLength } from '../../config/env.js';
 export class Aes256GcmBiometricEncryptor {
     static ALGORITHM = 'aes-256-gcm';
     static IV_LENGTH_BYTES = 12; // 96 bits standard for GCM
     static AUTH_TAG_LENGTH_BYTES = 16; // 128 bits
     static EXPECTED_EMBEDDING_DIM = 128; // OpenCV SFace INT8
     masterKey;
+    previousKeys;
     keyReference;
-    constructor(keyHex, keyReference = 'key-sface128-v1') {
-        const rawKeyHex = keyHex ||
-            process.env['DATA_ENCRYPTION_KEY_HEX'] ||
-            '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-        if (!rawKeyHex || rawKeyHex.length !== 64) {
-            throw new BiometricVerificationError('Data encryption key must be a 64-character hex string representing a 256-bit AES key.');
+    constructor(keyHex, keyReference = 'key-sface128-v1', previousKeysHex) {
+        const fromEnv = keyHex === undefined;
+        const rawKeyHex = (keyHex ?? process.env['DATA_ENCRYPTION_KEY_HEX'] ?? '').trim();
+        if (!rawKeyHex || !/^[0-9a-fA-F]{64}$/.test(rawKeyHex)) {
+            throw new BiometricVerificationError('Data encryption key must be a valid 64-character hex string representing a 256-bit AES key.');
         }
-        this.masterKey = Buffer.from(rawKeyHex, 'hex');
+        const isProd = process.env['NODE_ENV'] === 'production';
+        if (isProd || fromEnv) {
+            try {
+                validateKeyEntropyAndByteLength(rawKeyHex, 'DATA_ENCRYPTION_KEY_HEX');
+            }
+            catch (err) {
+                throw new BiometricVerificationError(err?.message || 'Data encryption key failed security validation.');
+            }
+        }
+        const keyBuf = Buffer.from(rawKeyHex, 'hex');
+        if (keyBuf.length !== 32) {
+            throw new BiometricVerificationError('Data encryption key must decode to exactly 32 bytes (256 bits).');
+        }
+        this.masterKey = keyBuf;
         this.keyReference = keyReference;
+        const rawPrevList = previousKeysHex
+            ? previousKeysHex
+            : (process.env['DATA_ENCRYPTION_PREVIOUS_KEYS_HEX'] || '')
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean);
+        this.previousKeys = rawPrevList
+            .filter((hex) => /^[0-9a-fA-F]{64}$/.test(hex))
+            .map((hex) => Buffer.from(hex, 'hex'))
+            .filter((buf) => buf.length === 32);
     }
     serializeVector(vector) {
         const floatArray = vector instanceof Float32Array ? vector : new Float32Array(vector);
@@ -64,25 +88,35 @@ export class Aes256GcmBiometricEncryptor {
         const ivBuffer = Buffer.from(iv, 'base64');
         const authTagBuffer = Buffer.from(authTag, 'base64');
         const ciphertextBuffer = Buffer.from(encryptedData, 'base64');
+        if (ivBuffer.length !== Aes256GcmBiometricEncryptor.IV_LENGTH_BYTES) {
+            throw new BiometricVerificationError('Biometric decryption failed: invalid IV length');
+        }
+        if (authTagBuffer.length !== Aes256GcmBiometricEncryptor.AUTH_TAG_LENGTH_BYTES) {
+            throw new BiometricVerificationError('Biometric decryption failed: invalid auth tag length');
+        }
         const aadBuffer = Buffer.from(`DFARM:CUST=${customerId}:MODEL=${modelVersionId}`, 'utf8');
-        const decipher = crypto.createDecipheriv(Aes256GcmBiometricEncryptor.ALGORITHM, this.masterKey, ivBuffer, {
-            authTagLength: Aes256GcmBiometricEncryptor.AUTH_TAG_LENGTH_BYTES,
-        });
-        decipher.setAAD(aadBuffer);
-        decipher.setAuthTag(authTagBuffer);
-        try {
-            const plaintext = Buffer.concat([decipher.update(ciphertextBuffer), decipher.final()]);
-            const vector = this.deserializeVector(plaintext);
-            if (vector.length !== Aes256GcmBiometricEncryptor.EXPECTED_EMBEDDING_DIM) {
-                throw new BiometricVerificationError(`Decrypted embedding dimension mismatch: expected ${Aes256GcmBiometricEncryptor.EXPECTED_EMBEDDING_DIM}, found ${vector.length}`);
+        const keysToTry = [this.masterKey, ...this.previousKeys];
+        for (const key of keysToTry) {
+            const decipher = crypto.createDecipheriv(Aes256GcmBiometricEncryptor.ALGORITHM, key, ivBuffer, {
+                authTagLength: Aes256GcmBiometricEncryptor.AUTH_TAG_LENGTH_BYTES,
+            });
+            decipher.setAAD(aadBuffer);
+            decipher.setAuthTag(authTagBuffer);
+            try {
+                const plaintext = Buffer.concat([decipher.update(ciphertextBuffer), decipher.final()]);
+                const vector = this.deserializeVector(plaintext);
+                if (vector.length !== Aes256GcmBiometricEncryptor.EXPECTED_EMBEDDING_DIM) {
+                    throw new BiometricVerificationError(`Decrypted embedding dimension mismatch: expected ${Aes256GcmBiometricEncryptor.EXPECTED_EMBEDDING_DIM}, found ${vector.length}`);
+                }
+                return vector;
             }
-            return vector;
+            catch (err) {
+                if (err instanceof BiometricVerificationError)
+                    throw err;
+                // Try next key in versioned keyring if configured
+            }
         }
-        catch (err) {
-            if (err instanceof BiometricVerificationError)
-                throw err;
-            throw new BiometricVerificationError('Biometric decryption failed: corrupted template or AAD mismatch');
-        }
+        throw new BiometricVerificationError('Biometric decryption failed: corrupted template or AAD mismatch');
     }
 }
 //# sourceMappingURL=Aes256GcmBiometricEncryptor.js.map

@@ -302,7 +302,8 @@ test('DFarm Customer App / Farmer Mobile Experience Production Verification Suit
 
     await t.test('8. GET /customers/:id/status reflects PENDING_APPROVAL before admin review', async () => {
       const res = await request(app)
-        .get(`/api/v1/customers/${customerUuid}/status`);
+        .get(`/api/v1/customers/${customerUuid}/status`)
+        .set('Authorization', `Bearer ${adminTokenA}`);
 
       assert.equal(res.status, 200);
       assert.equal(res.body.success, true);
@@ -350,7 +351,8 @@ test('DFarm Customer App / Farmer Mobile Experience Production Verification Suit
 
     await t.test('11. Customer status polling reflects APPROVED and reveals authoritative Farmer Code', async () => {
       const res = await request(app)
-        .get(`/api/v1/customers/${customerUuid}/status`);
+        .get(`/api/v1/customers/${customerUuid}/status`)
+        .set('Authorization', `Bearer ${adminTokenA}`);
 
       assert.equal(res.status, 200);
       assert.equal(res.body.success, true);

@@ -1,16 +1,28 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { db } from '../../infrastructure/database/PostgresPool.js';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 
 const router = Router();
 
-router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
-      return;
-    }
+router.get(
+  '/',
+  authenticate,
+  authorizePermission('dairy:read_staff', 'dairy:manage_staff', 'audit:read'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const requestedOrg = (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+      if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy audit query blocked.' });
+        return;
+      }
+      const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (requestedOrg || req.user?.organizationId)
+        : req.user?.organizationId;
+      if (!organizationId) {
+        res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+        return;
+      }
 
     // Return audit entries
     const query = `

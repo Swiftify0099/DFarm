@@ -2,7 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { GetCustomerBillsUseCase } from '../../application/use-cases/index.js';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 
 const router = Router();
 const getBillsUseCase = new GetCustomerBillsUseCase();
@@ -18,7 +19,7 @@ const getTenantDb = async (organizationId?: string) => {
   return db;
 };
 
-router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/', authenticate, authorizePermission('bills:view_own', 'billing:read', 'billing:manage'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     let customerId = req.query['customerId'] as string | undefined;
 
@@ -33,7 +34,13 @@ router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: 
       customerId = req.user.userId;
     }
     const explicitOrg = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
-    const organizationId = explicitOrg || req.user?.organizationId;
+    if (explicitOrg && req.user?.organizationId && explicitOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy bills access blocked.' });
+      return;
+    }
+    const organizationId = req.user?.role === 'SUPER_ADMIN'
+      ? (explicitOrg || req.user?.organizationId)
+      : req.user?.organizationId;
 
     if (customerId) {
       const limit = req.query['limit'] ? Number(req.query['limit']) : 12;
@@ -92,11 +99,17 @@ router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: 
   }
 });
 
-router.post('/generate', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.post('/generate', authenticate, authorizePermission('billing:manage'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { customerId, periodStart, periodEnd, cycleName: _cycleName, operatorName: _operatorName } = req.body;
     const explicitOrg = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || req.body.organizationId || (req.query?.['organizationId'] as string);
-    const organizationId = explicitOrg || req.user?.organizationId;
+    if (explicitOrg && req.user?.organizationId && explicitOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy bill generation blocked.' });
+      return;
+    }
+    const organizationId = req.user?.role === 'SUPER_ADMIN'
+      ? (explicitOrg || req.user?.organizationId)
+      : req.user?.organizationId;
 
     if (!customerId || !organizationId) {
       res.status(400).json({ success: false, error: 'customerId and organizationId are required' });
@@ -107,7 +120,7 @@ router.post('/generate', optionalAuthenticate, async (req: Request, res: Respons
 
     // Resolve customer and center from tenant DB
     const custRes = await tenantDb.query(
-      `SELECT id, primary_center_id, farmer_code, full_name FROM customers WHERE (id = $1 OR global_customer_id = $1) LIMIT 1;`,
+      `SELECT id, organization_id, primary_center_id, farmer_code, full_name FROM customers WHERE (id = $1 OR global_customer_id = $1) LIMIT 1;`,
       [customerId]
     );
     if (custRes.rows.length === 0) {
@@ -115,8 +128,16 @@ router.post('/generate', optionalAuthenticate, async (req: Request, res: Respons
       return;
     }
     const customer = custRes.rows[0];
+    if (customer.organization_id && customer.organization_id !== organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy bill generation blocked.' });
+      return;
+    }
     const resolvedTenantCustomerId = customer.id;
-    const centerId = customer.primary_center_id || '00000000-0000-0000-0000-000000000002';
+    const centerId = customer.primary_center_id || req.user?.centerId;
+    if (!centerId) {
+      res.status(400).json({ success: false, error: 'Customer centerId could not be resolved' });
+      return;
+    }
 
     // Sum collections in date range from tenant DB
     const collRes = await tenantDb.query(

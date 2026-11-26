@@ -1,9 +1,26 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 
 const router = Router();
+
+function resolveAuthorizedOrgId(req: Request, res: Response): string | undefined {
+  const requestedOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+  if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+    res.status(403).json({ success: false, error: 'Cross-dairy reports query blocked.' });
+    return undefined;
+  }
+  const orgId = req.user?.role === 'SUPER_ADMIN'
+    ? (requestedOrgId || req.user?.organizationId)
+    : req.user?.organizationId;
+  if (!orgId) {
+    res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+    return undefined;
+  }
+  return orgId;
+}
 
 const getTenantDb = async (organizationId?: string) => {
   if (organizationId) {
@@ -17,13 +34,10 @@ const getTenantDb = async (organizationId?: string) => {
 };
 
 // 1. Daily & Shift Collection Report
-router.get('/collections', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/collections', authenticate, authorizePermission('reports:dairy_read', 'reports:read', 'billing:read', 'collections:view_all'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
-      return;
-    }
+    const organizationId = resolveAuthorizedOrgId(req, res);
+    if (!organizationId) return;
 
     const { date, shift, category } = req.query;
     const client = await getTenantDb(organizationId);
@@ -96,13 +110,10 @@ router.get('/collections', optionalAuthenticate, async (req: Request, res: Respo
 });
 
 // 2. Feed Stock & Sales Report
-router.get('/feed', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/feed', authenticate, authorizePermission('reports:dairy_read', 'reports:read', 'feed:read', 'feed:manage'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
-      return;
-    }
+    const organizationId = resolveAuthorizedOrgId(req, res);
+    if (!organizationId) return;
 
     const client = await getTenantDb(organizationId);
     let products: any[] = [];
@@ -164,13 +175,10 @@ router.get('/feed', optionalAuthenticate, async (req: Request, res: Response, ne
 });
 
 // 3. Customer Ledger Summary Report
-router.get('/ledger', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/ledger', authenticate, authorizePermission('reports:dairy_read', 'reports:read', 'billing:read', 'billing:manage'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
-      return;
-    }
+    const organizationId = resolveAuthorizedOrgId(req, res);
+    if (!organizationId) return;
 
     const client = await getTenantDb(organizationId);
     let accounts: any[] = [];
@@ -219,13 +227,10 @@ router.get('/ledger', optionalAuthenticate, async (req: Request, res: Response, 
 });
 
 // 4. Bounded Data Export in CSV or JSON Format (With PII Masking & Zero Raw Biometrics)
-router.get('/export', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/export', authenticate, authorizePermission('reports:dairy_read', 'reports:read', 'billing:manage'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
-    if (!organizationId) {
-      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
-      return;
-    }
+    const organizationId = resolveAuthorizedOrgId(req, res);
+    if (!organizationId) return;
 
     const type = (req.query['type'] as string) || 'collections';
     const format = (req.query['format'] as string) || 'json';

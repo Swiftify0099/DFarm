@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { ProcessOfflineSyncBatchUseCase, ProcessMilkIntakeUseCase, BulkCollectionSyncUseCase, } from '../../application/use-cases/index.js';
 import { PostgresCustomerRepository, PostgresShiftSessionRepository, PostgresCollectionTransactionRepository, PostgresRateChartRepository, PostgresLedgerRepository, } from '../../infrastructure/index.js';
 import { authenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 import { syncRouter } from '../../modules/sync/sync.routes.js';
 const router = Router();
 const customerRepo = new PostgresCustomerRepository();
@@ -61,7 +62,7 @@ const handleBulkSync = async (req, res, next) => {
         next(err);
     }
 };
-router.post('/bulk', authenticate, handleBulkSync);
+router.post('/bulk', authenticate, authorizePermission('collections:intake', 'sessions:manage'), handleBulkSync);
 const handleSyncBatch = async (req, res, next) => {
     try {
         const orgId = req.user?.organizationId;
@@ -91,8 +92,8 @@ const handleSyncBatch = async (req, res, next) => {
         next(err);
     }
 };
-router.post('/transactions', authenticate, handleSyncBatch);
-router.post('/push', authenticate, handleSyncBatch);
+router.post('/transactions', authenticate, authorizePermission('collections:intake', 'sessions:manage'), handleSyncBatch);
+router.post('/push', authenticate, authorizePermission('collections:intake', 'sessions:manage'), handleSyncBatch);
 // Mount the comprehensive syncRouter for /push, /pull, /acknowledge, /status
 router.use('/', syncRouter);
 export const syncRoutes = router;

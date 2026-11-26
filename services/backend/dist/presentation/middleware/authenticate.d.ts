@@ -9,6 +9,9 @@ export interface AuthenticatedUser {
     fullName?: string;
     phoneNumber?: string;
     deviceId?: string;
+    tokenType?: 'access' | 'refresh';
+    jti?: string;
+    exp?: number;
 }
 declare global {
     namespace Express {
@@ -17,8 +20,8 @@ declare global {
         }
     }
 }
-export declare function authenticate(req: Request, _res: Response, next: NextFunction): void;
-export declare function optionalAuthenticate(req: Request, _res: Response, next: NextFunction): void;
+export declare function authenticate(req: Request, _res: Response, next: NextFunction): Promise<void>;
+export declare function optionalAuthenticate(req: Request, _res: Response, next: NextFunction): Promise<void>;
 /**
  * Dedicated authentication middleware for SSE streaming endpoints (/dairy-admin/events).
  * Rejects raw access tokens in URL query strings (400/401).

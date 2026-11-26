@@ -2,10 +2,18 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { createApp } from '../dist/app.js';
+import { HmacJwtTokenService } from '../dist/infrastructure/security/HmacJwtTokenService.js';
 
 describe('Super Admin Dairy Location & Coordinates API Test Suite', () => {
   let server;
   let baseUrl;
+  const tokenService = new HmacJwtTokenService();
+  const superAdminToken = tokenService.signToken({
+    userId: '11111111-1111-4111-a111-000000000099',
+    role: 'SUPER_ADMIN',
+    actorType: 'STAFF',
+    fullName: 'Super Administrator',
+  });
 
   it('setup backend test server', async () => {
     const app = createApp();
@@ -22,7 +30,10 @@ describe('Super Admin Dairy Location & Coordinates API Test Suite', () => {
   it('should reject dairy creation with invalid latitude (> 90)', async () => {
     const res = await fetch(`${baseUrl}/api/v1/dairies`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${superAdminToken}`,
+      },
       body: JSON.stringify({
         name: 'Invalid Lat Dairy',
         latitude: 95.12345,
@@ -40,7 +51,10 @@ describe('Super Admin Dairy Location & Coordinates API Test Suite', () => {
   it('should reject dairy creation with invalid longitude (> 180)', async () => {
     const res = await fetch(`${baseUrl}/api/v1/dairies`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${superAdminToken}`,
+      },
       body: JSON.stringify({
         name: 'Invalid Lng Dairy',
         latitude: 18.5204,
@@ -77,7 +91,10 @@ describe('Super Admin Dairy Location & Coordinates API Test Suite', () => {
 
     const res = await fetch(`${baseUrl}/api/v1/dairies`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${superAdminToken}`,
+      },
       body: JSON.stringify(payload),
     });
 
@@ -96,7 +113,9 @@ describe('Super Admin Dairy Location & Coordinates API Test Suite', () => {
 
   it('should retrieve created dairy by ID with accurate location metadata', async () => {
     assert.ok(createdDairyId);
-    const res = await fetch(`${baseUrl}/api/v1/dairies/${createdDairyId}`);
+    const res = await fetch(`${baseUrl}/api/v1/dairies/${createdDairyId}`, {
+      headers: { Authorization: `Bearer ${superAdminToken}` },
+    });
     assert.equal(res.status, 200);
 
     const json = await res.json();
@@ -111,7 +130,10 @@ describe('Super Admin Dairy Location & Coordinates API Test Suite', () => {
     assert.ok(createdDairyId);
     const res = await fetch(`${baseUrl}/api/v1/dairies/${createdDairyId}/location`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${superAdminToken}`,
+      },
       body: JSON.stringify({
         latitude: 16.8501234,
         longitude: 74.6512345,

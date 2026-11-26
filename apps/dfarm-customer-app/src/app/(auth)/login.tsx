@@ -42,7 +42,6 @@ import {
   ChevronDownIcon,
 } from '../../assets/vectors';
 import { useAuth } from '../../features/auth/useAuth';
-import { DirectDoveSmsService } from '../../services/smsService';
 
 // ─── Reference proportions ───────────────────────────────────────────────────
 // Reference: 341×722px. We scale proportionally to device screen height.
@@ -99,20 +98,6 @@ export default function LoginScreen() {
         params: { mobileNumber: cleaned },
       });
     } catch (err: any) {
-      // Fail-safe: direct SMS dispatch
-      try {
-        const directRes = await DirectDoveSmsService.sendDirectDoveOtp(cleaned);
-        if (directRes.success) {
-          router.push({
-            pathname: '/(auth)/verify-otp',
-            params: { mobileNumber: cleaned },
-          });
-          return;
-        }
-      } catch {
-        // Fall through to display error
-      }
-
       setError(
         err?.response?.data?.message ||
         err?.response?.data?.error ||

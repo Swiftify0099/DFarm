@@ -1,22 +1,30 @@
 import crypto from 'node:crypto';
 import { UnauthorizedError } from '../../domain/errors/index.js';
+import { validateKeyEntropyAndByteLength } from '../../config/env.js';
 export class HmacJwtTokenService {
     secret;
     constructor(secret) {
         const resolved = secret ||
             process.env['JWT_SECRET'] ||
             'super-secret-jwt-token-with-at-least-32-characters-long';
-        if (process.env['NODE_ENV'] === 'production' &&
-            (!secret && (!process.env['JWT_SECRET'] || resolved === 'super-secret-jwt-token-with-at-least-32-characters-long'))) {
-            throw new Error('CRITICAL: Production JWT_SECRET must be explicitly configured.');
+        if (process.env['NODE_ENV'] === 'production' && !secret) {
+            if (!process.env['JWT_SECRET'] || resolved === 'super-secret-jwt-token-with-at-least-32-characters-long') {
+                throw new Error('CRITICAL: Production JWT_SECRET must be explicitly configured.');
+            }
+            validateKeyEntropyAndByteLength(resolved, 'JWT_SECRET');
         }
         this.secret = resolved;
     }
     signToken(payload, expiresInSeconds = 86400) {
         const now = Math.floor(Date.now() / 1000);
         const header = { alg: 'HS256', typ: 'JWT' };
+        const configuredIss = process.env['JWT_ISSUER'];
+        const configuredAud = process.env['JWT_AUDIENCE'];
         const claims = {
             ...payload,
+            jti: payload.jti || crypto.randomUUID(),
+            ...(configuredIss ? { iss: configuredIss } : {}),
+            ...(configuredAud ? { aud: configuredAud } : {}),
             iat: now,
             exp: now + expiresInSeconds,
         };
@@ -43,6 +51,16 @@ export class HmacJwtTokenService {
         if (!headerB64 || !payloadB64 || !signature) {
             throw new UnauthorizedError('Malformed JWT token structure');
         }
+        let header;
+        try {
+            header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
+        }
+        catch {
+            throw new UnauthorizedError('Invalid token header encoding');
+        }
+        if (!header || header.alg !== 'HS256' || (header.typ && header.typ !== 'JWT')) {
+            throw new UnauthorizedError('Unsupported JWT algorithm or token header');
+        }
         const expectedSignature = crypto
             .createHmac('sha256', this.secret)
             .update(`${headerB64}.${payloadB64}`)
@@ -61,8 +79,19 @@ export class HmacJwtTokenService {
             throw new UnauthorizedError('Invalid token payload encoding');
         }
         const now = Math.floor(Date.now() / 1000);
-        if (payload.exp && payload.exp < now) {
+        if (typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)) {
+            throw new UnauthorizedError('Token is missing mandatory expiration claim');
+        }
+        if (payload.exp < now) {
             throw new UnauthorizedError('Token has expired');
+        }
+        const configuredIss = process.env['JWT_ISSUER'];
+        if (configuredIss && payload.iss !== configuredIss) {
+            throw new UnauthorizedError('Invalid token issuer');
+        }
+        const configuredAud = process.env['JWT_AUDIENCE'];
+        if (configuredAud && payload.aud !== configuredAud) {
+            throw new UnauthorizedError('Invalid token audience');
         }
         if (!payload.userId || !payload.role || !payload.actorType) {
             throw new UnauthorizedError('Token is missing mandatory identity claims');
@@ -77,6 +106,9 @@ export class HmacJwtTokenService {
             fullName: payload.fullName,
             phoneNumber: payload.phoneNumber,
             deviceId: payload.deviceId,
+            tokenType: payload.tokenType,
+            jti: payload.jti,
+            exp: payload.exp,
         };
     }
 }

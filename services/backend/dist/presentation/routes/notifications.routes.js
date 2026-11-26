@@ -1,12 +1,12 @@
 import { Router } from 'express';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 const router = Router();
-router.get('/', optionalAuthenticate, async (req, res, next) => {
+router.get('/', authenticate, async (req, res, next) => {
     try {
-        const customerId = req.user?.userId;
-        const organizationId = req.user?.organizationId;
+        const customerId = req.user.userId;
+        const organizationId = req.user.organizationId;
         if (customerId) {
             const client = organizationId ? await tenantDbManager.getTenantDb(organizationId) : db;
             try {
@@ -47,11 +47,11 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
         next(err);
     }
 });
-router.post('/:id/read', optionalAuthenticate, async (req, res, next) => {
+router.post('/:id/read', authenticate, async (req, res, next) => {
     try {
         const { id } = req.params;
-        const customerId = req.user?.userId;
-        const organizationId = req.user?.organizationId;
+        const customerId = req.user.userId;
+        const organizationId = req.user.organizationId;
         if (customerId && id) {
             const client = organizationId ? await tenantDbManager.getTenantDb(organizationId) : db;
             try {

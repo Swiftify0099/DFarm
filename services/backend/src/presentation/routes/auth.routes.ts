@@ -17,6 +17,7 @@ import { PostgresCustomerMembershipRepository } from '../../infrastructure/repos
 import { authenticate } from '../middleware/authenticate.js';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { deviceChallengeService } from '../../infrastructure/security/DeviceChallengeService.js';
+import { tokenRevocationService } from '../../infrastructure/security/TokenRevocationService.js';
 
 export function serializeOtpResponse(result: {
   success: boolean;
@@ -344,10 +345,10 @@ router.get('/admin/me', authenticate, async (req: Request, res: Response, next: 
 // ============================================================================
 // 4. Token Refresh
 // ============================================================================
-router.post('/refresh-token', (req: Request, res: Response, next: NextFunction) => {
+router.post('/refresh-token', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const token = req.body.refreshToken || req.headers.authorization?.slice(7);
-    const result = refreshTokenUseCase.execute(token);
+    const token = req.body?.refreshToken || req.headers.authorization?.slice(7);
+    const result = await refreshTokenUseCase.execute(token);
     res.json({ success: true, ...result });
   } catch (err) {
     next(err);
@@ -357,7 +358,28 @@ router.post('/refresh-token', (req: Request, res: Response, next: NextFunction) 
 // ============================================================================
 // 5. Logout
 // ============================================================================
-router.post('/logout', (_req: Request, res: Response) => {
+router.post('/logout', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization || (req.headers['x-access-token'] as string | undefined);
+  const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader?.trim();
+  const refreshToken = typeof req.body?.refreshToken === 'string' ? req.body.refreshToken.trim() : undefined;
+
+  if (accessToken) {
+    try {
+      const claims = tokenService.verifyToken(accessToken);
+      await tokenRevocationService.revokeAsync({ token: accessToken, jti: claims.jti, expiresAtSeconds: claims.exp });
+    } catch {
+      await tokenRevocationService.revokeAsync({ token: accessToken });
+    }
+  }
+  if (refreshToken) {
+    try {
+      const claims = tokenService.verifyToken(refreshToken);
+      await tokenRevocationService.revokeAsync({ token: refreshToken, jti: claims.jti, expiresAtSeconds: claims.exp });
+    } catch {
+      await tokenRevocationService.revokeAsync({ token: refreshToken });
+    }
+  }
+
   res.json({ success: true, message: 'Logged out successfully' });
 });
 

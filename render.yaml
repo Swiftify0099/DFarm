@@ -37,6 +37,8 @@ services:
         generateValue: true
       - key: TENANT_DB_ENCRYPTION_KEY
         generateValue: true
+      - key: DATA_ENCRYPTION_KEY_HEX
+        sync: false
       - key: OFFLINE_LEASE_SIGNING_KEY
         generateValue: true
       - key: OFFLINE_LEASE_ACTIVE_KEY_ID

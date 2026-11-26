@@ -108,9 +108,9 @@ router.post('/audit', async (req: Request, res: Response, next: NextFunction) =>
     }
 
     await superAdminRepo.logAudit({
-      actorId: req.user?.userId || '00000000-0000-0000-0000-000000000099',
-      actorRole: req.user?.role || 'SUPER_ADMIN',
-      actorName: req.user?.fullName || 'Super Administrator',
+      actorId: req.user!.userId,
+      actorRole: req.user!.role,
+      actorName: req.user?.fullName || 'Platform Administrator',
       action,
       entityType,
       entityId,

@@ -36,6 +36,10 @@ declare const envSchema: z.ZodObject<{
         prefer: "prefer";
     }>>;
     JWT_SECRET: z.ZodDefault<z.ZodString>;
+    JWT_ISSUER: z.ZodOptional<z.ZodString>;
+    JWT_AUDIENCE: z.ZodOptional<z.ZodString>;
+    DATA_ENCRYPTION_KEY_HEX: z.ZodOptional<z.ZodString>;
+    DATA_ENCRYPTION_PREVIOUS_KEYS_HEX: z.ZodOptional<z.ZodString>;
     OFFLINE_LEASE_SIGNING_KEY: z.ZodOptional<z.ZodString>;
     OFFLINE_LEASE_ACTIVE_KEY_ID: z.ZodDefault<z.ZodString>;
     OFFLINE_LEASE_PREVIOUS_KEYS: z.ZodOptional<z.ZodString>;

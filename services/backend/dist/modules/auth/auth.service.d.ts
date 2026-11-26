@@ -34,12 +34,10 @@ export declare class AuthService {
         name: string;
     }>>;
     /**
-     * Internal staff login by username for administration / field officer onboarding.
+     * Passwordless staff login is permanently disabled (DF-001).
+     * Staff must authenticate via verified OTP + device/admin checks.
      */
-    static loginStaff(username: string): Promise<{
-        token: string;
-        user: Record<string, unknown>;
-    }>;
+    static loginStaff(_username: string): Promise<never>;
     /**
      * Request an OTP for a registered customer mobile number using official Supabase Auth.
      * Does NOT fabricate success or send through a dummy provider.

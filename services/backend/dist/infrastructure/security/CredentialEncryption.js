@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { config } from '../../config/env.js';
+import { config, validateKeyEntropyAndByteLength } from '../../config/env.js';
 /**
  * AES-256-GCM Envelope Encryption for Tenant Database Credentials & URIs
  *
@@ -14,11 +14,16 @@ export class CredentialEncryption {
     static getKey() {
         const isProduction = config.NODE_ENV === 'production' || process.env['NODE_ENV'] === 'production';
         const rawKey = process.env['TENANT_DB_ENCRYPTION_KEY'] || config.TENANT_DB_ENCRYPTION_KEY;
-        if (isProduction && (!rawKey || rawKey === 'dfarm-super-secret-encryption-key-32chars!')) {
-            throw new Error('CRITICAL: Production TENANT_DB_ENCRYPTION_KEY must be explicitly configured.');
+        if (isProduction) {
+            if (!rawKey || rawKey === 'dfarm-super-secret-encryption-key-32chars!') {
+                throw new Error('CRITICAL: Production TENANT_DB_ENCRYPTION_KEY must be explicitly configured.');
+            }
+            validateKeyEntropyAndByteLength(rawKey, 'TENANT_DB_ENCRYPTION_KEY');
         }
-        const effectiveKey = rawKey || config.JWT_SECRET;
-        return crypto.createHash('sha256').update(effectiveKey).digest();
+        if (!rawKey) {
+            throw new Error('CRITICAL: TENANT_DB_ENCRYPTION_KEY is missing.');
+        }
+        return crypto.createHash('sha256').update(rawKey).digest();
     }
     static encrypt(plainText) {
         if (!plainText) {

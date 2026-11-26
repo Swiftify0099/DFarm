@@ -2,7 +2,8 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { optionalAuthenticate, authenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 import { PhoneNumber } from '../../domain/value-objects/index.js';
 import { logger } from '../../shared/logger/index.js';
 const router = Router();
@@ -57,12 +58,18 @@ const ROLE_PERMISSIONS = {
 // ============================================================================
 // 1. GET /api/v1/staff - List all staff members for dairy
 // ============================================================================
-router.get('/', optionalAuthenticate, async (req, res, next) => {
+router.get('/', authenticate, authorizePermission('dairy:read_staff', 'dairy:manage_staff', 'sessions:open', 'collections:view_all'), async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId ||
-            req.headers['x-dairy-id'] ||
+        const requestedOrg = req.headers['x-dairy-id'] ||
             req.query['organizationId'] ||
             req.query['dairyId'];
+        if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ success: false, error: 'Cross-dairy staff directory query blocked.' });
+            return;
+        }
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (requestedOrg || req.user?.organizationId)
+            : req.user?.organizationId;
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;
@@ -112,12 +119,18 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
 // ============================================================================
 // 2. GET /api/v1/staff/centers - List active centers for staff assignment
 // ============================================================================
-router.get('/centers', optionalAuthenticate, async (req, res, next) => {
+router.get('/centers', authenticate, authorizePermission('dairy:read_staff', 'dairy:manage_staff', 'sessions:open', 'collections:view_all'), async (req, res, next) => {
     try {
-        const organizationId = req.user?.organizationId ||
-            req.headers['x-dairy-id'] ||
+        const requestedOrg = req.headers['x-dairy-id'] ||
             req.query['organizationId'] ||
             req.query['dairyId'];
+        if (requestedOrg && req.user?.organizationId && requestedOrg !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+            res.status(403).json({ success: false, error: 'Cross-dairy center directory query blocked.' });
+            return;
+        }
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (requestedOrg || req.user?.organizationId)
+            : req.user?.organizationId;
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;

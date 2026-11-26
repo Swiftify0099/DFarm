@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 const router = Router();
 const getDashboardData = async (req, res, next) => {
     try {
@@ -18,7 +19,9 @@ const getDashboardData = async (req, res, next) => {
                 return;
             }
         }
-        const organizationId = tokenOrgId || headerOrgId || queryOrgId;
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (queryOrgId || headerOrgId || tokenOrgId)
+            : tokenOrgId;
         if (!organizationId) {
             res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
             return;
@@ -151,7 +154,7 @@ const getDashboardData = async (req, res, next) => {
         next(err);
     }
 };
-router.get('/metrics', optionalAuthenticate, getDashboardData);
-router.get('/summary', optionalAuthenticate, getDashboardData);
+router.get('/metrics', authenticate, authorizePermission('reports:dairy_read', 'dairy:read_staff', 'collections:view_all', 'billing:read'), getDashboardData);
+router.get('/summary', authenticate, authorizePermission('reports:dairy_read', 'dairy:read_staff', 'collections:view_all', 'billing:read'), getDashboardData);
 export const dashboardRoutes = router;
 //# sourceMappingURL=dashboard.routes.js.map

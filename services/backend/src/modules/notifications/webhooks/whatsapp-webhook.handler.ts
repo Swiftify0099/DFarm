@@ -9,11 +9,23 @@ export class WhatsAppWebhookHandler {
    * Verifies Meta WhatsApp Webhook verification challenge (GET request).
    */
   public static verifyChallenge(mode: string, verifyToken: string, challenge: string): string {
-    if (mode === 'subscribe' && verifyToken === config.WHATSAPP_WEBHOOK_VERIFY_TOKEN) {
+    const isProduction = config.NODE_ENV === 'production' || process.env['NODE_ENV'] === 'production';
+    const configuredToken = process.env['WHATSAPP_WEBHOOK_VERIFY_TOKEN'] || config.WHATSAPP_WEBHOOK_VERIFY_TOKEN;
+    if (
+      isProduction &&
+      (!configuredToken ||
+        configuredToken === 'dfarm_whatsapp_verify_token_default' ||
+        configuredToken.toLowerCase().includes('placeholder'))
+    ) {
+      logger.error('WhatsApp webhook verification failed: production verify token not configured');
+      throw new BadRequestError('Webhook verification is not configured', 'WEBHOOK_NOT_CONFIGURED');
+    }
+
+    if (mode === 'subscribe' && verifyToken === configuredToken) {
       logger.info('WhatsApp webhook verification challenge verified successfully');
       return challenge;
     }
-    logger.warn({ mode, verifyToken }, 'WhatsApp webhook challenge verification failed');
+    logger.warn({ mode }, 'WhatsApp webhook challenge verification failed');
     throw new BadRequestError('Invalid webhook verification token or mode', 'INVALID_VERIFICATION_TOKEN');
   }
 
@@ -21,13 +33,25 @@ export class WhatsAppWebhookHandler {
    * Verifies HMAC-SHA256 signature from Meta (x-hub-signature-256 header).
    */
   public static verifySignature(rawBody: string | Buffer, signatureHeader?: string | null): boolean {
+    const isProduction = config.NODE_ENV === 'production' || process.env['NODE_ENV'] === 'production';
+    const appSecret = process.env['WHATSAPP_APP_SECRET'] || config.WHATSAPP_APP_SECRET;
+    if (
+      isProduction &&
+      (!appSecret ||
+        appSecret === 'dfarm_whatsapp_app_secret_placeholder' ||
+        appSecret.toLowerCase().includes('placeholder'))
+    ) {
+      logger.error('WhatsApp webhook rejected: production WHATSAPP_APP_SECRET not configured');
+      return false;
+    }
+
     if (!signatureHeader || !signatureHeader.startsWith('sha256=')) {
       logger.warn('WhatsApp webhook rejected: Missing or invalid x-hub-signature-256 header');
       return false;
     }
 
     const expectedSignature = signatureHeader.slice(7); // strip 'sha256='
-    const hmac = crypto.createHmac('sha256', config.WHATSAPP_APP_SECRET);
+    const hmac = crypto.createHmac('sha256', appSecret);
     hmac.update(rawBody);
     const calculatedSignature = hmac.digest('hex');
 

@@ -2,7 +2,8 @@ import crypto from 'node:crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
-import { optionalAuthenticate } from '../middleware/authenticate.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { authorizePermission } from '../middleware/authorize.js';
 import { paymentRouter } from '../../modules/payments/payment.routes.js';
 
 const router = Router();
@@ -19,9 +20,16 @@ const getTenantDb = async (organizationId?: string) => {
 };
 
 // 1. Get Payment Records for Dairy
-router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.get('/', authenticate, authorizePermission('billing:read', 'billing:manage', 'passbook:view_own'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+    const requestedOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+    if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy payments access blocked.' });
+      return;
+    }
+    const organizationId = req.user?.role === 'SUPER_ADMIN'
+      ? (requestedOrgId || req.user?.organizationId)
+      : req.user?.organizationId;
     if (!organizationId) {
       res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
       return;
@@ -82,7 +90,7 @@ router.get('/', optionalAuthenticate, async (req: Request, res: Response, next: 
 });
 
 // 2. Record Customer Payment / Payout
-router.post('/', optionalAuthenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+router.post('/', authenticate, authorizePermission('billing:manage'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { customerId, amount, paymentMethod, transactionReference, notes, operatorName } = req.body;
     if (!customerId || !amount) {
@@ -90,18 +98,38 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response, next:
       return;
     }
 
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.body.organizationId as string);
+    const requestedOrgId = (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.body.organizationId as string);
+    if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy payment recording blocked.' });
+      return;
+    }
+    const organizationId = req.user?.role === 'SUPER_ADMIN'
+      ? (requestedOrgId || req.user?.organizationId)
+      : req.user?.organizationId;
+    if (!organizationId || !req.user?.userId) {
+      res.status(400).json({ success: false, error: 'Authenticated dairy organization and operator context are required' });
+      return;
+    }
+
     const numAmount = Number(amount);
     const paymentId = crypto.randomUUID();
 
     if (organizationId) {
       const client = await getTenantDb(organizationId);
       const custRes = await client.query(
-        `SELECT id, primary_center_id FROM customers WHERE (id = $1 OR global_customer_id = $1) LIMIT 1;`,
+        `SELECT id, organization_id, primary_center_id FROM customers WHERE (id = $1 OR global_customer_id = $1) LIMIT 1;`,
         [customerId]
       );
+      if (custRes.rows.length > 0 && custRes.rows[0].organization_id !== organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        res.status(403).json({ success: false, error: 'Cross-dairy customer payout blocked.' });
+        return;
+      }
       const effectiveCustomerId = custRes.rows[0]?.id || customerId;
-      const centerId = custRes.rows[0]?.primary_center_id || '00000000-0000-0000-0000-000000000083';
+      const centerId = custRes.rows[0]?.primary_center_id || req.user.centerId;
+      if (!centerId) {
+        res.status(400).json({ success: false, error: 'Customer or operator centerId could not be resolved' });
+        return;
+      }
 
       let accRes = await client.query(
         `SELECT id, current_balance FROM customer_ledger_accounts WHERE customer_id = $1 LIMIT 1;`,
@@ -135,9 +163,9 @@ router.post('/', optionalAuthenticate, async (req: Request, res: Response, next:
           effectiveCustomerId,
           numAmount,
           balanceAfter,
-          `Disbursed ₹${numAmount} via ${paymentMethod || 'BANK_TRANSFER'} Ref: ${transactionReference || 'N/A'} by ${operatorName || 'Admin'}: ${notes || ''}`,
+          `Disbursed ₹${numAmount} via ${paymentMethod || 'BANK_TRANSFER'} Ref: ${transactionReference || 'N/A'} by ${operatorName || req.user?.fullName || 'Admin'}: ${notes || ''}`,
           `PAY-${paymentId}-${Date.now()}`,
-          req.user?.userId || '00000000-0000-0000-0000-000000000084',
+          req.user.userId,
         ]
       );
 

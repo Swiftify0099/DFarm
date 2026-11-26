@@ -5,7 +5,7 @@ import { PostgresCustomerRepository, PostgresCustomerMembershipRepository, Aes25
 import { db } from '../../infrastructure/database/PostgresPool.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 import { authenticate, optionalAuthenticate } from '../middleware/authenticate.js';
-import { authorizePermission } from '../middleware/authorize.js';
+import { authorizePermission, hasPermission } from '../middleware/authorize.js';
 import { CustomerNotFoundError } from '../../domain/errors/index.js';
 import { logger } from '../../shared/logger/index.js';
 import { config } from '../../config/env.js';
@@ -28,13 +28,13 @@ const updateProfileUseCase = new UpdateCustomerProfileUseCase(customerRepo);
 const getMembershipsUseCase = new GetCustomerMembershipsUseCase(membershipRepo, customerRepo);
 const selectDairyMembershipUseCase = new SelectDairyMembershipUseCase(membershipRepo, tokenService, customerRepo);
 // 1. List / Search Customers (Kiosk and Admin)
-router.get('/', optionalAuthenticate, async (req, res, next) => {
+router.get('/', authenticate, authorizePermission('customers:read', 'customers:identify_face', 'customers:identify_rfid', 'customers:identify_manual'), async (req, res, next) => {
     try {
-        let organizationId = req.user?.organizationId;
+        let organizationId = req.user.organizationId;
         const headerOrgId = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
         const queryOrgId = req.query['organizationId'];
-        if (organizationId) {
-            if (queryOrgId && queryOrgId !== organizationId && req.user?.role !== 'SUPER_ADMIN') {
+        if (req.user?.role !== 'SUPER_ADMIN') {
+            if ((queryOrgId && queryOrgId !== organizationId) || (headerOrgId && headerOrgId !== organizationId)) {
                 res.status(403).json({
                     success: false,
                     error: 'Cross-dairy query blocked: Cannot query customer data of another dairy.',
@@ -42,15 +42,8 @@ router.get('/', optionalAuthenticate, async (req, res, next) => {
                 return;
             }
         }
-        else if (headerOrgId && queryOrgId && headerOrgId !== queryOrgId) {
-            res.status(403).json({
-                success: false,
-                error: 'Cross-dairy query blocked: Header dairy ID does not match query organization ID.',
-            });
-            return;
-        }
         else {
-            organizationId = queryOrgId || headerOrgId;
+            organizationId = queryOrgId || headerOrgId || organizationId;
         }
         if (!organizationId) {
             res.status(400).json({
@@ -127,13 +120,30 @@ router.get('/me', authenticate, async (req, res, next) => {
     }
 });
 // 2b. Multi-Dairy Customer Memberships Discovery
-router.get('/memberships', optionalAuthenticate, async (req, res, next) => {
+router.get('/memberships', authenticate, async (req, res, next) => {
     try {
-        const userPhone = req.user?.userId?.startsWith('unregistered:')
+        const isStaff = req.user?.actorType === 'STAFF';
+        const tokenPhone = req.user?.userId?.startsWith('unregistered:')
             ? req.user.userId.replace('unregistered:', '')
-            : req.query['phone'] || req.query['mobileNumber'];
+            : req.user?.phoneNumber;
+        const requestedGlobalId = req.query['globalCustomerId'];
+        const requestedPhone = req.query['phone'] || req.query['mobileNumber'];
+        if (!isStaff) {
+            if (requestedGlobalId && req.user?.globalCustomerId && requestedGlobalId !== req.user.globalCustomerId) {
+                res.status(403).json({ success: false, error: 'Cross-customer membership lookup blocked.' });
+                return;
+            }
+            if (requestedPhone && tokenPhone && requestedPhone !== tokenPhone) {
+                res.status(403).json({ success: false, error: 'Cross-customer phone membership lookup blocked.' });
+                return;
+            }
+        }
+        const userPhone = isStaff ? (requestedPhone || tokenPhone) : tokenPhone;
+        const globalCustomerId = isStaff
+            ? (requestedGlobalId || req.user?.globalCustomerId)
+            : req.user?.globalCustomerId;
         const result = await getMembershipsUseCase.execute({
-            globalCustomerId: req.user?.globalCustomerId || req.query['globalCustomerId'],
+            globalCustomerId,
             phone: userPhone,
             customerId: req.user?.userId,
             organizationId: req.user?.organizationId,
@@ -196,6 +206,16 @@ router.post('/register', optionalAuthenticate, async (req, res, next) => {
                 error: 'Dairy selection (organizationId) is required for customer registration.',
             });
             return;
+        }
+        if (req.user?.actorType === 'STAFF') {
+            if (!hasPermission(req.user.role, 'customers:update') && !hasPermission(req.user.role, 'customers:approve') && req.user.role !== 'SUPER_ADMIN') {
+                res.status(403).json({ success: false, error: 'Forbidden: Staff role lacks customer registration permission.' });
+                return;
+            }
+            if (req.user.role !== 'SUPER_ADMIN' && req.user.organizationId && targetOrgId !== req.user.organizationId) {
+                res.status(403).json({ success: false, error: 'Cross-dairy customer registration blocked.' });
+                return;
+            }
         }
         // Strict Tenant Database Availability Verification
         const tenantMapping = tenantDbManager.getTenantMapping(targetOrgId);
@@ -278,13 +298,13 @@ router.post('/register', optionalAuthenticate, async (req, res, next) => {
     }
 });
 // 4. List Pending Customer Registrations (Dairy Admin Approvals Queue)
-router.get('/pending', optionalAuthenticate, async (req, res, next) => {
+router.get('/pending', authenticate, authorizePermission('customers:read', 'customers:approve'), async (req, res, next) => {
     try {
-        let orgId = req.user?.organizationId;
+        let orgId = req.user.organizationId;
         const queryOrgId = req.query['organizationId'];
         const headerOrgId = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'];
-        if (orgId) {
-            if (queryOrgId && queryOrgId !== orgId && req.user?.role !== 'SUPER_ADMIN') {
+        if (req.user?.role !== 'SUPER_ADMIN') {
+            if ((queryOrgId && queryOrgId !== orgId) || (headerOrgId && headerOrgId !== orgId)) {
                 res.status(403).json({
                     success: false,
                     error: 'Cross-dairy query blocked: Cannot view pending registrations of another dairy.',
@@ -293,10 +313,7 @@ router.get('/pending', optionalAuthenticate, async (req, res, next) => {
             }
         }
         else {
-            orgId = queryOrgId || headerOrgId;
-        }
-        if (req.user) {
-            authorizePermission('customers:read', 'customers:approve')(req, res, () => { });
+            orgId = queryOrgId || headerOrgId || orgId;
         }
         const data = await getPendingRegistrationsUseCase.execute(orgId);
         res.json({ success: true, count: data.length, data });
@@ -306,15 +323,37 @@ router.get('/pending', optionalAuthenticate, async (req, res, next) => {
     }
 });
 // 5. Get Customer Registration Status
-router.get('/:id/status', async (req, res, next) => {
+router.get('/:id/status', authenticate, async (req, res, next) => {
     try {
         const id = req.params.id;
-        const customerId = (Array.isArray(id) ? id[0] : id) || '';
-        const orgId = req.user?.organizationId ||
-            req.query['organizationId'] ||
-            req.query['dairyId'] ||
-            req.headers['x-dairy-id'] ||
-            req.headers['x-dairy-tenant-id'] ||
+        let customerId = (Array.isArray(id) ? id[0] : id) || '';
+        if (customerId === 'me') {
+            customerId = req.user.userId;
+        }
+        if (req.user?.actorType === 'CUSTOMER' &&
+            customerId !== req.user.userId &&
+            (!req.user.globalCustomerId || customerId !== req.user.globalCustomerId)) {
+            res.status(403).json({
+                success: false,
+                error: 'Cross-customer access blocked: customer can only check their own status.',
+            });
+            return;
+        }
+        if (req.user?.actorType === 'STAFF' &&
+            !hasPermission(req.user.role, 'customers:read') &&
+            !hasPermission(req.user.role, 'customers:identify_manual') &&
+            !hasPermission(req.user.role, 'customers:identify_face') &&
+            !hasPermission(req.user.role, 'customers:identify_rfid')) {
+            res.status(403).json({ success: false, error: 'Forbidden: Missing customer read permission.' });
+            return;
+        }
+        const orgId = req.user?.role === 'SUPER_ADMIN'
+            ? (req.query['organizationId'] ||
+                req.query['dairyId'] ||
+                req.headers['x-dairy-id'] ||
+                req.user?.organizationId)
+            : req.user?.organizationId;
+        req.headers['x-dairy-tenant-id'] ||
             undefined;
         const data = await getCustomerStatusUseCase.execute(customerId, orgId);
         let assignedDairyName = 'DFarm Dairy Cooperative';
@@ -371,18 +410,8 @@ const handleApprove = async (req, res, next) => {
         next(err);
     }
 };
-router.post('/:id/approve', optionalAuthenticate, (req, res, next) => {
-    if (req.user) {
-        return authorizePermission('customers:approve')(req, res, next);
-    }
-    next();
-}, handleApprove);
-router.patch('/:id/approve', optionalAuthenticate, (req, res, next) => {
-    if (req.user) {
-        return authorizePermission('customers:approve')(req, res, next);
-    }
-    next();
-}, handleApprove);
+router.post('/:id/approve', authenticate, authorizePermission('customers:approve'), handleApprove);
+router.patch('/:id/approve', authenticate, authorizePermission('customers:approve'), handleApprove);
 // 7. Reject Pending Customer Registration with Mandatory Detailed Reason
 const handleReject = async (req, res, next) => {
     try {
@@ -390,7 +419,9 @@ const handleReject = async (req, res, next) => {
         const customerId = (Array.isArray(id) ? id[0] : id) || '';
         const reason = req.body?.reason;
         const operatorName = req.body?.operatorName || req.user?.fullName || 'Dairy Administrator';
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'] || req.query['organizationId'];
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (req.user?.organizationId || req.headers['x-dairy-id'] || req.query['organizationId'])
+            : req.user?.organizationId;
         const data = await rejectRegistrationUseCase.execute(customerId, reason, operatorName, organizationId);
         res.json({
             success: true,
@@ -406,29 +437,18 @@ const handleReject = async (req, res, next) => {
         next(err);
     }
 };
-router.post('/:id/reject', optionalAuthenticate, (req, res, next) => {
-    if (req.user) {
-        return authorizePermission('customers:approve', 'customers:reject')(req, res, next);
-    }
-    next();
-}, handleReject);
-router.patch('/:id/reject', optionalAuthenticate, (req, res, next) => {
-    if (req.user) {
-        return authorizePermission('customers:approve', 'customers:reject')(req, res, next);
-    }
-    next();
-}, handleReject);
+router.post('/:id/reject', authenticate, authorizePermission('customers:approve', 'customers:reject'), handleReject);
+router.patch('/:id/reject', authenticate, authorizePermission('customers:approve', 'customers:reject'), handleReject);
 // 8. Suspend Customer
-router.post('/:id/suspend', optionalAuthenticate, async (req, res, next) => {
+router.post('/:id/suspend', authenticate, authorizePermission('customers:update'), async (req, res, next) => {
     try {
-        if (req.user) {
-            authorizePermission('customers:update')(req, res, () => { });
-        }
         const id = req.params.id;
         const customerId = (Array.isArray(id) ? id[0] : id) || '';
         const reason = req.body?.reason || 'Suspended by dairy administration';
         const operatorName = req.body?.operatorName || req.user?.fullName || 'Dairy Administrator';
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'];
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (req.user?.organizationId || req.headers['x-dairy-id'])
+            : req.user?.organizationId;
         const data = await suspendCustomerUseCase.execute(customerId, reason, operatorName, organizationId);
         res.json({
             success: true,
@@ -445,15 +465,14 @@ router.post('/:id/suspend', optionalAuthenticate, async (req, res, next) => {
     }
 });
 // 9. Reactivate Customer
-router.post('/:id/reactivate', optionalAuthenticate, async (req, res, next) => {
+router.post('/:id/reactivate', authenticate, authorizePermission('customers:update'), async (req, res, next) => {
     try {
-        if (req.user) {
-            authorizePermission('customers:update')(req, res, () => { });
-        }
         const id = req.params.id;
         const customerId = (Array.isArray(id) ? id[0] : id) || '';
         const operatorName = req.body?.operatorName || req.user?.fullName || 'Dairy Administrator';
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'];
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (req.user?.organizationId || req.headers['x-dairy-id'])
+            : req.user?.organizationId;
         const data = await reactivateCustomerUseCase.execute(customerId, operatorName, organizationId);
         res.json({
             success: true,
@@ -470,11 +489,8 @@ router.post('/:id/reactivate', optionalAuthenticate, async (req, res, next) => {
     }
 });
 // 10. Update Customer Profile Details
-router.patch('/:id', optionalAuthenticate, async (req, res, next) => {
+router.patch('/:id', authenticate, authorizePermission('customers:update'), async (req, res, next) => {
     try {
-        if (req.user) {
-            authorizePermission('customers:update')(req, res, () => { });
-        }
         // Security Gate: Generic profile updates cannot mutate bank account details
         if (req.body?.bankAccountNumber || req.body?.bankIfscCode || req.body?.bankName || req.body?.bankDetails) {
             res.status(403).json({
@@ -486,7 +502,9 @@ router.patch('/:id', optionalAuthenticate, async (req, res, next) => {
         const id = req.params.id;
         const customerId = (Array.isArray(id) ? id[0] : id) || '';
         const { fullName, village, permittedCategories, mobileNumber } = req.body;
-        const organizationId = req.user?.organizationId || req.headers['x-dairy-id'];
+        const organizationId = req.user?.role === 'SUPER_ADMIN'
+            ? (req.user?.organizationId || req.headers['x-dairy-id'])
+            : req.user?.organizationId;
         const data = await updateProfileUseCase.execute(customerId, { fullName, village, permittedCategories, mobileNumber }, organizationId);
         res.json({
             success: true,
@@ -505,9 +523,6 @@ router.patch('/:id', optionalAuthenticate, async (req, res, next) => {
 // 11. Soft Delete Customer
 const handleSoftDeleteCustomer = async (req, res, next) => {
     try {
-        if (req.user) {
-            authorizePermission('customers:delete', 'customers:update')(req, res, () => { });
-        }
         const id = req.params.id;
         const customerId = (Array.isArray(id) ? id[0] : id) || '';
         const reason = req.body?.reason || 'Soft-deleted by administrator';
@@ -528,14 +543,11 @@ const handleSoftDeleteCustomer = async (req, res, next) => {
         next(err);
     }
 };
-router.post('/:id/soft-delete', optionalAuthenticate, handleSoftDeleteCustomer);
-router.delete('/:id', optionalAuthenticate, handleSoftDeleteCustomer);
+router.post('/:id/soft-delete', authenticate, authorizePermission('customers:delete', 'customers:update'), handleSoftDeleteCustomer);
+router.delete('/:id', authenticate, authorizePermission('customers:delete', 'customers:update'), handleSoftDeleteCustomer);
 // 12. Restore Soft Deleted Customer
-router.post('/:id/restore', optionalAuthenticate, async (req, res, next) => {
+router.post('/:id/restore', authenticate, authorizePermission('customers:update'), async (req, res, next) => {
     try {
-        if (req.user) {
-            authorizePermission('customers:update')(req, res, () => { });
-        }
         const id = req.params.id;
         const customerId = (Array.isArray(id) ? id[0] : id) || '';
         const customer = await customerRepo.findById(customerId, req.user?.organizationId, true);
@@ -572,13 +584,23 @@ const handleBiometricsUpdate = async (req, res, next) => {
                     req.user?.globalCustomerId ||
                     '';
         }
-        if (!customerId && !req.user) {
+        if (!req.user) {
             res.status(401).json({
                 success: false,
                 error: {
                     code: 'UNAUTHORIZED',
-                    message: 'Authentication context or customer ID is required to update biometrics.',
+                    message: 'Authentication is required to update biometrics.',
                 },
+            });
+            return;
+        }
+        if (req.user.actorType === 'STAFF' &&
+            !hasPermission(req.user.role, 'biometrics:manage') &&
+            !hasPermission(req.user.role, 'customers:update') &&
+            req.user.role !== 'SUPER_ADMIN') {
+            res.status(403).json({
+                success: false,
+                error: 'Forbidden: Staff role lacks permission to modify customer biometrics.',
             });
             return;
         }
@@ -819,28 +841,28 @@ const handleBiometricsUpdate = async (req, res, next) => {
     }
 };
 // 10.1 Biometrics routes without :id (resolved via token claims / body)
-router.post('/biometrics/update', optionalAuthenticate, handleBiometricsUpdate);
-router.put('/biometrics/update', optionalAuthenticate, handleBiometricsUpdate);
-router.patch('/biometrics/update', optionalAuthenticate, handleBiometricsUpdate);
-router.post('/biometrics', optionalAuthenticate, handleBiometricsUpdate);
-router.put('/biometrics', optionalAuthenticate, handleBiometricsUpdate);
-router.patch('/biometrics', optionalAuthenticate, handleBiometricsUpdate);
+router.post('/biometrics/update', authenticate, handleBiometricsUpdate);
+router.put('/biometrics/update', authenticate, handleBiometricsUpdate);
+router.patch('/biometrics/update', authenticate, handleBiometricsUpdate);
+router.post('/biometrics', authenticate, handleBiometricsUpdate);
+router.put('/biometrics', authenticate, handleBiometricsUpdate);
+router.patch('/biometrics', authenticate, handleBiometricsUpdate);
 // 10.2 Biometrics routes with explicit "me" alias
-router.post('/me/biometrics/update', optionalAuthenticate, handleBiometricsUpdate);
-router.put('/me/biometrics/update', optionalAuthenticate, handleBiometricsUpdate);
-router.patch('/me/biometrics/update', optionalAuthenticate, handleBiometricsUpdate);
-router.post('/me/biometrics', optionalAuthenticate, handleBiometricsUpdate);
-router.put('/me/biometrics', optionalAuthenticate, handleBiometricsUpdate);
-router.patch('/me/biometrics', optionalAuthenticate, handleBiometricsUpdate);
+router.post('/me/biometrics/update', authenticate, handleBiometricsUpdate);
+router.put('/me/biometrics/update', authenticate, handleBiometricsUpdate);
+router.patch('/me/biometrics/update', authenticate, handleBiometricsUpdate);
+router.post('/me/biometrics', authenticate, handleBiometricsUpdate);
+router.put('/me/biometrics', authenticate, handleBiometricsUpdate);
+router.patch('/me/biometrics', authenticate, handleBiometricsUpdate);
 // 10.3 Parameterized :id routes
-router.put('/:id/biometrics/update', optionalAuthenticate, handleBiometricsUpdate);
-router.post('/:id/biometrics/update', optionalAuthenticate, handleBiometricsUpdate);
-router.patch('/:id/biometrics/update', optionalAuthenticate, handleBiometricsUpdate);
-router.patch('/:id/biometrics', optionalAuthenticate, handleBiometricsUpdate);
-router.post('/:id/biometrics', optionalAuthenticate, handleBiometricsUpdate);
-router.put('/:id/biometrics', optionalAuthenticate, handleBiometricsUpdate);
+router.put('/:id/biometrics/update', authenticate, handleBiometricsUpdate);
+router.post('/:id/biometrics/update', authenticate, handleBiometricsUpdate);
+router.patch('/:id/biometrics/update', authenticate, handleBiometricsUpdate);
+router.patch('/:id/biometrics', authenticate, handleBiometricsUpdate);
+router.post('/:id/biometrics', authenticate, handleBiometricsUpdate);
+router.put('/:id/biometrics', authenticate, handleBiometricsUpdate);
 // 11. Get Customer By ID
-router.get('/:id', optionalAuthenticate, async (req, res, next) => {
+router.get('/:id', authenticate, async (req, res, next) => {
     try {
         const id = req.params.id;
         let customerId = (Array.isArray(id) ? id[0] : id) || '';
@@ -859,14 +881,22 @@ router.get('/:id', optionalAuthenticate, async (req, res, next) => {
                 customerId = cust.id;
             }
         }
-        // Farmer customer can only view their own profile
-        if (req.user?.role === 'FARMER_CUSTOMER' &&
+        // Farmer customer / guest can only view their own profile
+        if ((req.user?.actorType === 'CUSTOMER' || req.user?.role === 'FARMER_CUSTOMER' || req.user?.role === 'GUEST_FARMER') &&
             customerId !== req.user.userId &&
             (!req.user.globalCustomerId || customerId !== req.user.globalCustomerId)) {
             res.status(403).json({
                 success: false,
                 error: 'Cross-customer access blocked: customer can only access their own profile.',
             });
+            return;
+        }
+        if (req.user?.actorType === 'STAFF' &&
+            !hasPermission(req.user.role, 'customers:read') &&
+            !hasPermission(req.user.role, 'customers:identify_manual') &&
+            !hasPermission(req.user.role, 'customers:identify_face') &&
+            !hasPermission(req.user.role, 'customers:identify_rfid')) {
+            res.status(403).json({ success: false, error: 'Forbidden: Role lacks customer read permission.' });
             return;
         }
         const data = await getCustomerByIdUseCase.execute(customerId, req.user?.organizationId);
@@ -958,8 +988,27 @@ router.put('/:id/bank-details', authenticate, async (req, res, next) => {
             });
             return;
         }
-        // Resolve tenant client
-        const customer = await getCustomerByIdUseCase.execute(customerId);
+        // Enforce actor & tenant authorization on bank details mutation (DF-015)
+        if (req.user?.actorType === 'STAFF' &&
+            !hasPermission(req.user.role, 'customers:update') &&
+            req.user.role !== 'SUPER_ADMIN') {
+            res.status(403).json({
+                success: false,
+                error: 'Forbidden: Staff role lacks permission to update customer bank details.',
+            });
+            return;
+        }
+        // Resolve tenant client with strict tenant isolation
+        const customer = await getCustomerByIdUseCase.execute(customerId, req.user?.organizationId);
+        if (req.user?.organizationId &&
+            customer.organizationId !== req.user.organizationId &&
+            req.user.role !== 'SUPER_ADMIN') {
+            res.status(403).json({
+                success: false,
+                error: 'Cross-dairy modification blocked: Customer belongs to a different dairy organization.',
+            });
+            return;
+        }
         const orgId = customer.organizationId || req.user?.organizationId;
         const client = orgId ? await tenantDbManager.getTenantDb(orgId) : db;
         const holder = accountHolderName || customer.fullName;
