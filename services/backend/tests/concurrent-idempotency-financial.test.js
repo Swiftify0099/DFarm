@@ -12,6 +12,7 @@ const REQUIRE_REAL_PG = process.env['REQUIRE_REAL_POSTGRES'] === '1';
 async function canConnectRealPostgres(url) {
   if (!url) return false;
   const probe = new Pool({ connectionString: url, connectionTimeoutMillis: 2000 });
+  probe.on('error', () => {});
   try {
     const res = await probe.query('SELECT version() AS v;');
     return Boolean(res.rows[0]?.v);
@@ -42,6 +43,17 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
 
   await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
 
+  const poolErrors = [];
+  const guardedPools = new WeakSet();
+  const attachPoolErrorGuard = (pool, label) => {
+    if (!pool || guardedPools.has(pool)) return pool;
+    guardedPools.add(pool);
+    pool.on('error', (err) => {
+      poolErrors.push({ label, code: err?.code, message: err?.message || String(err) });
+    });
+    return pool;
+  };
+
   const suffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
   const dbNameCtrl = `dfarm_conc_ctrl_${suffix}`;
   const dbNameAlpha = `dfarm_conc_a_${suffix}`;
@@ -51,22 +63,172 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
   const alphaUrl = makeDbUrl(TEST_PG_URL, dbNameAlpha);
   const betaUrl = makeDbUrl(TEST_PG_URL, dbNameBeta);
 
-  const adminPool = new Pool({ connectionString: TEST_PG_URL, connectionTimeoutMillis: 5000 });
+  const adminPool = attachPoolErrorGuard(
+    new Pool({ connectionString: TEST_PG_URL, connectionTimeoutMillis: 5000 }),
+    'adminPool'
+  );
   let poolCtrl;
   let poolAlpha;
   let poolBeta;
+  let tenantDbManagerRef = null;
+  let dbRef = null;
+  const createdDatabases = [];
+  const closedPools = new WeakSet();
+  let cleanupPromise = null;
+
+  const closePoolCleanly = async (pool, label, closeAction) => {
+    if (!pool || closedPools.has(pool)) return;
+    closedPools.add(pool);
+
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+      if (pool.totalCount === pool.idleCount && pool.waitingCount === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    if (pool.totalCount !== pool.idleCount || pool.waitingCount > 0) {
+      throw new Error(
+        `Pool '${label}' still had checked-out or waiting clients before teardown (total=${pool.totalCount}, idle=${pool.idleCount}, waiting=${pool.waitingCount}).`
+      );
+    }
+
+    const expectedRemovals = Number(pool.totalCount || 0);
+    let removedCount = 0;
+    let resolveRemoved;
+    const removedPromise =
+      expectedRemovals > 0
+        ? new Promise((resolve) => {
+            resolveRemoved = resolve;
+          })
+        : Promise.resolve();
+
+    const onRemove = () => {
+      removedCount += 1;
+      if (removedCount >= expectedRemovals && resolveRemoved) {
+        resolveRemoved();
+      }
+    };
+
+    if (expectedRemovals > 0) {
+      pool.on('remove', onRemove);
+    }
+
+    try {
+      if (closeAction) {
+        await closeAction();
+      } else if (!pool.ending && !pool.ended) {
+        await pool.end();
+      }
+
+      if (expectedRemovals > 0) {
+        await Promise.race([
+          removedPromise,
+          new Promise((resolve) => setTimeout(resolve, 3000)),
+        ]);
+      }
+    } finally {
+      if (expectedRemovals > 0) {
+        pool.off('remove', onRemove);
+      }
+    }
+  };
+
+  const waitForDbIdle = async (dbName) => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const res = await adminPool.query(
+        `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+        [dbName]
+      );
+      if (Number(res.rows[0]?.cnt || 0) === 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const finalRes = await adminPool.query(
+      `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+      [dbName]
+    );
+    const remaining = Number(finalRes.rows[0]?.cnt || 0);
+    if (remaining > 0) {
+      throw new Error(
+        `Disposable database '${dbName}' still had ${remaining} active/idle connection(s) before DROP DATABASE.`
+      );
+    }
+  };
 
   const orgAlpha = crypto.randomUUID();
   const orgBeta = crypto.randomUUID();
 
+  const cleanup = () => {
+    if (cleanupPromise) return cleanupPromise;
+    cleanupPromise = (async () => {
+      const cleanupErrors = [];
+      const runStep = async (fn) => {
+        try {
+          await fn();
+        } catch (err) {
+          cleanupErrors.push(err instanceof Error ? err : new Error(String(err)));
+        }
+      };
+
+      // 1. Close all TenantDatabaseManager pools before global PostgresPool and direct test pools
+      if (tenantDbManagerRef) {
+        for (const [orgId, label] of [
+          [orgAlpha, 'tenantPoolAlpha'],
+          [orgBeta, 'tenantPoolBeta'],
+        ]) {
+          await runStep(async () => {
+            const tenantPool = tenantDbManagerRef.getTenantPool?.(orgId);
+            if (tenantPool) {
+              attachPoolErrorGuard(tenantPool, label);
+              await closePoolCleanly(tenantPool, label, () => tenantDbManagerRef.closeTenantPool(orgId));
+            }
+          });
+        }
+        await runStep(() => tenantDbManagerRef.closeAllPools());
+      }
+
+      // 2. Close global PostgresPool singleton safely
+      if (dbRef) {
+        await runStep(async () => {
+          attachPoolErrorGuard(dbRef.pool, 'globalDbPool');
+          await closePoolCleanly(dbRef.pool, 'globalDbPool', () => dbRef.close());
+        });
+      }
+
+      // 3. Close direct test pools
+      await runStep(() => closePoolCleanly(poolCtrl, 'poolCtrl'));
+      await runStep(() => closePoolCleanly(poolAlpha, 'poolAlpha'));
+      await runStep(() => closePoolCleanly(poolBeta, 'poolBeta'));
+
+      // 4. Wait for all dependent connections to settle, then drop created disposable databases
+      for (const dbName of [...createdDatabases].reverse()) {
+        await runStep(async () => {
+          await waitForDbIdle(dbName);
+          await adminPool.query(`DROP DATABASE IF EXISTS ${dbName};`);
+        });
+      }
+
+      // 5. Close admin maintenance pool last
+      await runStep(() => closePoolCleanly(adminPool, 'adminPool'));
+
+      assert.deepEqual(poolErrors, [], `Unexpected async PostgreSQL pool errors: ${JSON.stringify(poolErrors)}`);
+      if (cleanupErrors.length > 0) {
+        throw cleanupErrors[0];
+      }
+    })();
+    return cleanupPromise;
+  };
+
   try {
     await adminPool.query(`CREATE DATABASE ${dbNameCtrl};`);
+    createdDatabases.push(dbNameCtrl);
     await adminPool.query(`CREATE DATABASE ${dbNameAlpha};`);
+    createdDatabases.push(dbNameAlpha);
     await adminPool.query(`CREATE DATABASE ${dbNameBeta};`);
+    createdDatabases.push(dbNameBeta);
 
-    poolCtrl = new Pool({ connectionString: ctrlUrl, max: 5 });
-    poolAlpha = new Pool({ connectionString: alphaUrl, max: 15 });
-    poolBeta = new Pool({ connectionString: betaUrl, max: 10 });
+    poolCtrl = attachPoolErrorGuard(new Pool({ connectionString: ctrlUrl, max: 5 }), 'poolCtrl');
+    poolAlpha = attachPoolErrorGuard(new Pool({ connectionString: alphaUrl, max: 15 }), 'poolAlpha');
+    poolBeta = attachPoolErrorGuard(new Pool({ connectionString: betaUrl, max: 10 }), 'poolBeta');
 
     const verRes = await poolAlpha.query(`SELECT current_setting('server_version_num')::int AS ver_num;`);
     const verNum = Number(verRes.rows[0]?.ver_num || 0);
@@ -89,7 +251,10 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
     assert.ok(betaMigs.every((m) => m.status === 'APPLIED'));
 
     const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+    dbRef = db;
+    attachPoolErrorGuard(db.pool, 'globalDbPool');
     const { tenantDbManager } = await import('../dist/infrastructure/database/TenantDatabaseManager.js');
+    tenantDbManagerRef = tenantDbManager;
     const { CredentialEncryption } = await import('../dist/infrastructure/security/CredentialEncryption.js');
     const { PostgresCollectionTransactionRepository } = await import('../dist/infrastructure/repositories/PostgresCollectionTransactionRepository.js');
     const { PostgresCustomerRepository } = await import('../dist/infrastructure/repositories/PostgresCustomerRepository.js');
@@ -117,11 +282,6 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
     };
     tenantDbManager.setControlPlaneDb(controlPlaneAdapter);
 
-    suite.after(async () => {
-      await tenantDbManager.closeAllPools().catch(() => {});
-      await db.close().catch(() => {});
-    });
-
     await poolCtrl.query(
       `INSERT INTO organizations (id, name, code, status)
        VALUES ($1, 'Cooperative Dairy ALPHA', $3, 'ACTIVE'),
@@ -146,6 +306,8 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
     assert.equal(tenantDbManager.getTenantMapping(orgBeta)?.databaseName, dbNameBeta);
     const verifyTenantA = await tenantDbManager.getStrictTenantDb(orgAlpha);
     const verifyTenantB = await tenantDbManager.getStrictTenantDb(orgBeta);
+    attachPoolErrorGuard(tenantDbManager.getTenantPool(orgAlpha), 'tenantPoolAlpha');
+    attachPoolErrorGuard(tenantDbManager.getTenantPool(orgBeta), 'tenantPoolBeta');
     assert.equal((await verifyTenantA.query('SELECT current_database() AS d;')).rows[0].d, dbNameAlpha);
     assert.equal((await verifyTenantB.query('SELECT current_database() AS d;')).rows[0].d, dbNameBeta);
 
@@ -376,18 +538,6 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
       assert.strictEqual(Number(mcRetryCheck.rows[0].count), 1);
     });
   } finally {
-    try {
-      const { tenantDbManager } = await import('../dist/infrastructure/database/TenantDatabaseManager.js');
-      const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
-      await tenantDbManager.closeAllPools().catch(() => {});
-      await db.close().catch(() => {});
-    } catch {}
-    await poolCtrl?.end().catch(() => {});
-    await poolAlpha?.end().catch(() => {});
-    await poolBeta?.end().catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameAlpha} WITH (FORCE);`).catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameBeta} WITH (FORCE);`).catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameCtrl} WITH (FORCE);`).catch(() => {});
-    await adminPool.end().catch(() => {});
+    await cleanup();
   }
 });

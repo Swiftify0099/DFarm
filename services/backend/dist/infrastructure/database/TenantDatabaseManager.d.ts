@@ -45,6 +45,9 @@ export declare class TenantDatabaseManager {
     private isRealPostgresRequired;
     private isTestEnvironment;
     private getSslConfig;
+    private createTenantPool;
+    private endPoolSafely;
+    getTenantPool(dairyId: string): pg.Pool | undefined;
     getControlPlaneDb(): IDatabaseClient;
     setControlPlaneDb(db: IDatabaseClient): void;
     initialize(controlPlaneDb?: IDatabaseClient): Promise<void>;

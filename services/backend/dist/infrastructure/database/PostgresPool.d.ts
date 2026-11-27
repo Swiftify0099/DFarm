@@ -4,6 +4,7 @@ export declare class PostgresDatabase {
     readonly pool: pg.Pool;
     private memDbAdapter;
     private isPostgresConnected;
+    private closePromise;
     private constructor();
     static getInstance(): PostgresDatabase;
     private withTimeout;

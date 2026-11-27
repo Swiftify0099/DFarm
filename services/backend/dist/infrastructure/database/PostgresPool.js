@@ -13,6 +13,7 @@ export class PostgresDatabase {
     pool;
     memDbAdapter = null;
     isPostgresConnected = null;
+    closePromise = null;
     constructor() {
         const connectionString = config.CENTRAL_DATABASE_URL || config.DATABASE_URL;
         const conn = connectionString || '';
@@ -669,7 +670,15 @@ export class PostgresDatabase {
         throw new Error('PostgreSQL central database connection is currently unavailable.');
     }
     async close() {
-        await this.pool.end();
+        if (this.closePromise) {
+            return this.closePromise;
+        }
+        const poolAny = this.pool;
+        if (poolAny.ending || poolAny.ended) {
+            return;
+        }
+        this.closePromise = this.pool.end();
+        return this.closePromise;
     }
 }
 export const db = PostgresDatabase.getInstance();

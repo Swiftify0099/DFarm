@@ -16,6 +16,7 @@ export class PostgresDatabase {
   public readonly pool: pg.Pool;
   private memDbAdapter: any = null;
   private isPostgresConnected: boolean | null = null;
+  private closePromise: Promise<void> | null = null;
 
   private constructor() {
     const connectionString = config.CENTRAL_DATABASE_URL || config.DATABASE_URL;
@@ -718,7 +719,15 @@ export class PostgresDatabase {
   }
 
   public async close(): Promise<void> {
-    await this.pool.end();
+    if (this.closePromise) {
+      return this.closePromise;
+    }
+    const poolAny = this.pool as any;
+    if (poolAny.ending || poolAny.ended) {
+      return;
+    }
+    this.closePromise = this.pool.end();
+    return this.closePromise;
   }
 }
 

@@ -2,24 +2,23 @@
 
 **Repository:** `Swiftify0099/DFarm`  
 **Branch:** `fix/cloudflare-pages-production-deploy`  
-**Verified Public HEAD:** `8eba95427ee2170ee46c02f3a08ffde86a2bde24` (Parent: `9d0568b32e117dc93d8c62389c482b5a77d68f40`)  
+**Verified Public HEAD:** `db8b73296247a8dd800e7276f12eda4a68c2ff4b` (Parent: `8eba95427ee2170ee46c02f3a08ffde86a2bde24`)  
 **Target Issues:** `DF-007` (P0) & Device-Management Scope of `DF-018` (P1)  
-**Final Classification:** **BLOCKED ON LIVE PG17 / PARTIAL (RESTART-04.1 Fixture Alignment Applied Locally; Pending Subsequent Live PG17 CI Run)** *(RESTART-04.1 fixed the three `users.user_role` fixture `INSERT` statements in `services/backend/tests/restart04-real-postgres-device-sync.test.js` that caused GitHub Actions Run `45947088946` / Job `140334160273` to fail with SQLSTATE `42703`. Post-edit `npm run build:backend`, `npm run db:validate` (`13/13`), `npm run db:test` (`22/22` offline, internal PG skipped), and all `15` backend offline suites (`258/258`) PASS locally. Live PostgreSQL `17.12` execution on this Windows host remains blocked because Docker Desktop (`com.docker.service` stopped; WSL/VM backend engine returns `HTTP 503` / `Docker Desktop is unable to start`) and native PostgreSQL 17 are unavailable, and `git commit`/`push` is prohibited by safety rules. RESTART-04 is NOT marked PG17 verified until a subsequent real PG17 run passes.)*
+**Final Classification:** **RESTART-04 PG17 GATE VERIFIED (`PASS` — Run `45968244756`, PG `17.12`, `8/8` Passed, `0` Failed, `0` Skipped)** *(Commit `db8b73296247a8dd800e7276f12eda4a68c2ff4b` committed the `RESTART-04.1` fixture alignment removing the three `users.user_role` references in `services/backend/tests/restart04-real-postgres-device-sync.test.js`, and GitHub Actions Run `45968244756` passed all `8/8` subtests on real PostgreSQL `17.12` with zero skips and zero `pg-mem` fallback, verifying `DF-007`'s RESTART-04 PG17 gate. On the same HEAD `db8b732`, `RESTART-03` CI Run `45968244699` / Job `140402037268` FAILED in the final teardown of `services/backend/tests/concurrent-idempotency-financial.test.js` (`uncaughtException: terminating connection due to administrator command` after tests 1–3 passed; remediated locally in `RESTART-03.6` and awaiting a subsequent live PG17 CI run), and Gitleaks Run `45968244743` failed with `54` historical findings across `43` commits (`DF-003` OPEN under `RESTART-12`). Remaining tenant integrity tracks (`DF-016` / `RESTART-05`/`09`/`10`) and unmounted modular biometrics (`DF-018` / `RESTART-07`) remain open under their dedicated prompts.)*
 
 ---
 
-## 1. Baseline Verification, CI Failure & RESTART-04.1 Reconciliation
+## 1. Baseline Verification, CI Evidence & RESTART-03.6 Reconciliation
 
-Before modifying code, local repository state and GitHub Actions CI evidence on HEAD `8eba95427ee2170ee46c02f3a08ffde86a2bde24` were reconciled:
+Repository state and GitHub Actions CI evidence on latest verified public HEAD `db8b73296247a8dd800e7276f12eda4a68c2ff4b` (parent `8eba95427ee2170ee46c02f3a08ffde86a2bde24`):
 
-- **Git Baseline:** Checked out branch `fix/cloudflare-pages-production-deploy` at public HEAD `8eba95427ee2170ee46c02f3a08ffde86a2bde24` (parent `9d0568b32e117dc93d8c62389c482b5a77d68f40`) with a clean working tree.
-- **RESTART-03 Real PG17 Gate (HEAD `8eba954`):** CI Run `45947088863` **PASSED** on PostgreSQL `17.12` (5-suite repository verification gate).
-- **RESTART-04 Real PG17 Gate (HEAD `8eba954`):** CI Run `45947088946` / Job `140334160273` (`RESTART-04 PostgreSQL 17 Device Sync & Security Gate`) **FAILED** with PostgreSQL SQLSTATE `42703` (`column "user_role" of relation "users" does not exist`) at `services/backend/tests/restart04-real-postgres-device-sync.test.js:182`.
-  - **Root Cause:** Authoritative migration `supabase/migrations/003_user_identity_foundation.sql` (`SHARED`) defines `users.role`, not `users.user_role`. (`user_role` is added only by control-plane migrations `029` and `030`, not tenant-operational migrations.) The PG17 test fixture inserted both `role` and `user_role` in three `INSERT INTO users` blocks (control-plane seed near line 149, Tenant A seed near line 183, Tenant B seed near line 216).
-  - **RESTART-04.1 Fix:** Removed `user_role` and the duplicated role literal from all three `INSERT INTO users` blocks in `services/backend/tests/restart04-real-postgres-device-sync.test.js`, preserving `role`, organization IDs, active/inactive states, usernames, and all security/authorization cases. Production schema and migrations were not altered.
-- **Gitleaks Scan (HEAD `8eba954`):** CI Run `45947088844` **FAILED** with `54` findings across `42` commits (kept under `DF-003` / `RESTART-12`; external credential rotations and approved history rewrite remain pending operator action).
-- **Prior `9d0568b` Baseline Reference:** CI Run `45943003261` / Job `140321315106` passed the 5-suite PG `17.12` gate (`44/44`), and Gitleaks Run `45943003232` failed on `54` findings across `41` commits.
-- **Independent Outbox Finding Preserved for `RESTART-09` (`DF-021`):** RESTART-04 CI logs recorded background `relation "dashboard_events_outbox" does not exist` errors because `RealtimeEventPublisher.processOutboxBatch()` (`services/backend/src/infrastructure/realtime/RealtimeEventPublisher.ts`) queries `dashboard_events_outbox` via central `db`, while `supabase/migrations/041_dairy_admin_realtime_and_station_monitoring.sql` creates `dashboard_events_outbox` on the `TENANT_OPERATIONAL` track. Deliberately left untouched in RESTART-04.1 for `RESTART-09`.
+- **Git Baseline:** Checked out branch `fix/cloudflare-pages-production-deploy` at public HEAD `db8b73296247a8dd800e7276f12eda4a68c2ff4b` (parent `8eba95427ee2170ee46c02f3a08ffde86a2bde24`, prior `9d0568b32e117dc93d8c62389c482b5a77d68f40`).
+- **RESTART-04 Real PG17 Gate (HEAD `db8b732` — CURRENT):** CI Run `45968244756` (`RESTART-04 PostgreSQL 17 Device Sync & Security Gate`) **PASSED** on PostgreSQL `17.12` — **`8` passed, `0` failed, `0` skipped** (zero `pg-mem` fallback). `DF-007`'s RESTART-04 PG17 gate is **VERIFIED**.
+  - *(Prior `8eba954` failure `45947088946` / Job `140334160273` with SQLSTATE `42703` `users.user_role` was resolved by removing `user_role` from the three `INSERT INTO users` fixture blocks in `services/backend/tests/restart04-real-postgres-device-sync.test.js`, committed at `db8b732`.)*
+- **RESTART-03 Real PG17 Gate (HEAD `db8b732` — CURRENT):** CI Run `45968244699` / Job `140402037268` (`RESTART-03 PostgreSQL 17 Repository Verification`) **FAILED** during final suite teardown in `services/backend/tests/concurrent-idempotency-financial.test.js` (`uncaughtException: terminating connection due to administrator command`; Tests 1–3 passed, outer suite failed on teardown). The 5-suite RESTART-03 gate does **not** currently pass on `db8b732`. `RESTART-03.6` implemented a single deterministic teardown lifecycle across `concurrent-idempotency-financial.test.js`, `TenantDatabaseManager.ts`, and `PostgresPool.ts` locally; live PG17 CI re-verification is pending commit/push.
+  - *(Prior `8eba954` baseline: CI Run `45947088863` PASSED; prior `9d0568b` baseline: CI Run `45943003261` / Job `140321315106` PASSED `44/44`.)*
+- **Gitleaks Scan (HEAD `db8b732` — CURRENT):** CI Run `45968244743` **FAILED** with `54` findings across `43` commits (kept under `DF-003` / `RESTART-12`; external credential rotations and approved history rewrite remain operator-controlled work).
+- **Independent Tenant Integrity & Outbox Scope Preserved:** `DF-021` (`RealtimeEventPublisher.processOutboxBatch()` querying central `db` while `041_dairy_admin_realtime_and_station_monitoring.sql` creates `dashboard_events_outbox` on `TENANT_OPERATIONAL`) remains preserved for `RESTART-09`, `DF-020` migration reconciliation (`031`/`040`) remains preserved for `RESTART-05`, `DF-022`/`DF-024` remain preserved for `RESTART-10`, and modular biometric routes (`DF-018`) remain preserved for `RESTART-07`.
 - **Safety Preservation Verified:**
   - `.temp/` and untracked/local files preserved untouched; no `git reset --hard`, `git clean`, `git stash`, commit, push, or history rewrite executed.
 
@@ -79,7 +78,7 @@ Before modifying code, local repository state and GitHub Actions CI evidence on 
 
 ---
 
-## 3. Exact Verification Matrix (Post-RESTART-04.1 Edit on HEAD `8eba954`)
+## 3. Exact Verification Matrix (Reconciled on Public HEAD `db8b732` + Local `RESTART-03.6` Teardown Remediation)
 
 | Check / Suite | Command / Runner | Environment | Executed | Pass | Fail | Skip | Exit Code | Status |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
@@ -107,20 +106,21 @@ Before modifying code, local repository state and GitHub Actions CI evidence on 
 | **Super Admin (`dfarm-super-admin`)** *(prior baseline; unchanged in 04.1)* | `npm run --workspace=apps/dfarm-super-admin test` | Vitest (`10/10` files, baseline) | 48 | 48 | 0 | 0 | `0` | **BASELINE PASS (not re-run; no client/contract edits)** |
 | **RESTART-04 Real PG17 Suite (Default Local)** | `node --test services/backend/tests/restart04-real-postgres-device-sync.test.js` | No PG17 on host (Post-edit) | 1 | 0 | 0 | **1** | `0` | **SKIP (no `pg-mem` fallback)** |
 | **RESTART-04 PG17 CI Runner (Strict Guard Local)** | `REQUIRE_REAL_POSTGRES=1 NODE_ENV=test DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1 TEST_REAL_POSTGRES=1 node scripts/ci-run-restart04-pg17.js` | No `TEST_POSTGRES_URL` / PG17 (Post-edit) | 0 | 0 | 0 | 0 | **`1`** | **FAIL CLOSED (`exit 1`)** |
-| **RESTART-04 Real PG17 CI Gate (HEAD `8eba954` pre-fix)** | GitHub Actions Run `45947088946` / Job `140334160273` | GitHub Actions PG `17.12` | - | 0 | 1 | 0 | **`1`** | **FAIL (`42703` `users.user_role` at line 182; fixed locally in 04.1)** |
-| **RESTART-03 Real PG17 CI Gate (HEAD `8eba954`)** | GitHub Actions Run `45947088863` | GitHub Actions PG `17.12` | - | - | 0 | 0 | `0` | **PASS** |
-| **Secret Scanning (Gitleaks, HEAD `8eba954`)** | GitHub Actions Run `45947088844` | Gitleaks full history | - | - | 54 | 0 | `1` | **FAIL (`54` findings across `42` commits; `DF-003` / `RESTART-12`)** |
+| **RESTART-04 Real PG17 CI Gate (HEAD `db8b732` — CURRENT)** | GitHub Actions Run `45968244756` | GitHub Actions PG `17.12` | **8** | **8** | **0** | **0** | **`0`** | **PASS (`DF-007` RESTART-04 PG17 VERIFIED)** |
+| **RESTART-03 Real PG17 CI Gate (HEAD `db8b732` — CURRENT)** | GitHub Actions Run `45968244699` / Job `140402037268` | GitHub Actions PG `17.12` | - | - | 1 | 0 | **`1`** | **FAIL (`concurrent-idempotency-financial.test.js` teardown `uncaughtException`; remediated locally in `RESTART-03.6`, awaiting new PG17 CI run)** |
+| **Secret Scanning (Gitleaks, HEAD `db8b732` — CURRENT)** | GitHub Actions Run `45968244743` | Gitleaks full history | - | - | 54 | 0 | `1` | **FAIL (`54` findings across `43` commits; `DF-003` OPEN under `RESTART-12`)** |
 
-**Aggregated Offline Totals (Post-RESTART-04.1 Edit):**  
+**Aggregated Offline Totals (Post-RESTART-03.6 Edit):**  
 - Backend offline suites executed: **`15/15` files PASS — `258/258` tests PASS, `0` failed, `0` skipped**.  
-- Frontend baseline preserved (not re-run in RESTART-04.1 because no shared contracts or client files changed): **`4/4` apps (`40/40` test files) — `255/255` tests PASS**.
+- Frontend baseline preserved (not re-run because no shared contracts or client files changed): **`4/4` apps (`40/40` test files) — `255/255` tests PASS**.
 
 ---
 
 ## 4. Scope Boundaries & Remaining Blockers
 
-- **Out-of-Scope Tracks Preserved Unchanged:** Did not start `RESTART-05..12` (biometric module mounting / `customerBiometricRouter` under `RESTART-07`, static device telemetry stubs / `DF-019` under `RESTART-08`, outbox `dashboard_events_outbox` / `RealtimeEventPublisher` under `RESTART-09`, Union Bank under `RESTART-10`, migration `031`/`040` or financial formulas, Gitleaks full-history rewrite `DF-003` under `RESTART-12`).
-- **Live PostgreSQL `17.12` Verification Blocker:** After the RESTART-04.1 fixture fix, `restart04-real-postgres-device-sync.test.js` could not execute locally against a live PostgreSQL `17.12` server because Docker Desktop's Linux VM backend failed to start (`com.docker.service` stopped; `docker desktop start` remained in `starting` with `HTTP 503` / `Docker Desktop is unable to start`), no native `psql`/PG17 server is installed on this Windows host, and `git commit`/`push` to trigger `.github/workflows/dfarm-restart04-postgres17.yml` is prohibited. Once committed/pushed or run against `docker-compose.pg17-verify.yml` (`TEST_POSTGRES_URL=...`), run:
+- **Out-of-Scope Tracks Preserved Unchanged:** Did not start `RESTART-05..12` (migration `031`/`040` reconciliation under `RESTART-05`, biometric module mounting / `customerBiometricRouter` under `RESTART-07`, static device telemetry stubs / `DF-019` under `RESTART-08`, outbox `dashboard_events_outbox` / `RealtimeEventPublisher` under `RESTART-09`, Union Bank under `RESTART-10`, Gitleaks full-history rewrite `DF-003` under `RESTART-12`).
+- **RESTART-03 Live PostgreSQL `17.12` Re-Verification Pending:** `RESTART-04` is verified on live PostgreSQL `17.12` via GitHub Actions Run `45968244756` (`8/8` PASS, `0` skips). For `RESTART-03`, `RESTART-03.6` remediated the `concurrent-idempotency-financial.test.js` pool/DB teardown regression locally (`PostgresPool.ts`, `TenantDatabaseManager.ts`, `concurrent-idempotency-financial.test.js`), but local PostgreSQL `17.12` execution remains unavailable on this Windows host (`com.docker.service` stopped and no native PG17 server installed), and `git commit`/`push` is prohibited by task rules. Once committed/pushed or executed against `docker-compose.pg17-verify.yml`, run both gates:
   ```bash
+  REQUIRE_REAL_POSTGRES=1 NODE_ENV=test DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1 TEST_REAL_POSTGRES=1 node scripts/ci-run-pg17-suites.js
   REQUIRE_REAL_POSTGRES=1 NODE_ENV=test DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1 TEST_REAL_POSTGRES=1 node scripts/ci-run-restart04-pg17.js
   ```

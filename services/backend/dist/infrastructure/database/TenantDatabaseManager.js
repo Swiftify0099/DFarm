@@ -64,6 +64,29 @@ export class TenantDatabaseManager {
             config.NODE_ENV === 'production';
         return shouldEnableSsl ? { rejectUnauthorized: false } : undefined;
     }
+    createTenantPool(dairyId, connectionUri) {
+        const tenantPool = new pg.Pool({
+            connectionString: connectionUri,
+            max: config.TENANT_POOL_MAX || 5,
+            idleTimeoutMillis: config.TENANT_POOL_IDLE_TIMEOUT_MS || 30000,
+            connectionTimeoutMillis: config.TENANT_POOL_CONNECTION_TIMEOUT_MS || 30000,
+            ssl: this.getSslConfig(connectionUri),
+        });
+        tenantPool.on('error', (err) => {
+            logger.error({ dairyId, code: err?.code, error: err?.message || String(err) }, 'Unexpected error on idle PostgreSQL tenant pool client');
+        });
+        return tenantPool;
+    }
+    async endPoolSafely(pool) {
+        const anyPool = pool;
+        if (anyPool.ending || anyPool.ended) {
+            return;
+        }
+        await pool.end();
+    }
+    getTenantPool(dairyId) {
+        return this.tenantPools.get(dairyId);
+    }
     getControlPlaneDb() {
         return this.controlPlaneDb || defaultControlPlaneDb;
     }
@@ -237,13 +260,7 @@ export class TenantDatabaseManager {
         }
         try {
             const decryptedUri = CredentialEncryption.decrypt(mapping.connectionUriEncrypted);
-            const tenantPool = new pg.Pool({
-                connectionString: decryptedUri,
-                max: config.TENANT_POOL_MAX || 5,
-                idleTimeoutMillis: config.TENANT_POOL_IDLE_TIMEOUT_MS || 30000,
-                connectionTimeoutMillis: config.TENANT_POOL_CONNECTION_TIMEOUT_MS || 30000,
-                ssl: this.getSslConfig(decryptedUri),
-            });
+            const tenantPool = this.createTenantPool(dairyId, decryptedUri);
             this.tenantPools.set(dairyId, tenantPool);
             return this.wrapPgPool(tenantPool);
         }
@@ -391,13 +408,7 @@ export class TenantDatabaseManager {
             this.tenantMemDbs.set(dairyId, tenantClient);
         }
         else {
-            const tenantPool = new pg.Pool({
-                connectionString: tenantUri,
-                max: config.TENANT_POOL_MAX || 5,
-                idleTimeoutMillis: config.TENANT_POOL_IDLE_TIMEOUT_MS || 30000,
-                connectionTimeoutMillis: config.TENANT_POOL_CONNECTION_TIMEOUT_MS || 30000,
-                ssl: this.getSslConfig(tenantUri),
-            });
+            const tenantPool = this.createTenantPool(dairyId, tenantUri);
             this.tenantPools.set(dairyId, tenantPool);
             tenantClient = this.wrapPgPool(tenantPool);
         }
@@ -585,13 +596,7 @@ export class TenantDatabaseManager {
             throw new Error(`Tenant database connection credentials missing for dairy: ${dairyId}`);
         }
         const decryptedUri = CredentialEncryption.decrypt(mapping.connectionUriEncrypted);
-        const tenantPool = new pg.Pool({
-            connectionString: decryptedUri,
-            max: config.TENANT_POOL_MAX || 5,
-            idleTimeoutMillis: config.TENANT_POOL_IDLE_TIMEOUT_MS || 30000,
-            connectionTimeoutMillis: config.TENANT_POOL_CONNECTION_TIMEOUT_MS || 30000,
-            ssl: this.getSslConfig(decryptedUri),
-        });
+        const tenantPool = this.createTenantPool(dairyId, decryptedUri);
         this.tenantPools.set(dairyId, tenantPool);
         return this.wrapPgPool(tenantPool);
     }
@@ -614,26 +619,32 @@ export class TenantDatabaseManager {
     }
     async closeTenantPool(dairyId) {
         const pool = this.tenantPools.get(dairyId);
-        if (pool) {
-            await pool.end();
-            this.tenantPools.delete(dairyId);
-        }
+        this.tenantPools.delete(dairyId);
         this.tenantMemDbs.delete(dairyId);
+        if (pool) {
+            await this.endPoolSafely(pool);
+        }
     }
     async evictTenantPool(dairyId) {
         return this.closeTenantPool(dairyId);
     }
     async closeAllPools() {
-        for (const [dairyId, pool] of this.tenantPools.entries()) {
+        const entries = Array.from(this.tenantPools.entries());
+        this.tenantPools.clear();
+        this.tenantMemDbs.clear();
+        const errors = [];
+        for (const [dairyId, pool] of entries) {
             try {
-                await pool.end();
+                await this.endPoolSafely(pool);
             }
             catch (err) {
                 logger.error({ dairyId, error: err.message }, 'Error closing tenant pool');
+                errors.push(err instanceof Error ? err : new Error(String(err)));
             }
         }
-        this.tenantPools.clear();
-        this.tenantMemDbs.clear();
+        if (errors.length > 0) {
+            throw errors[0];
+        }
     }
     /**
      * Permanently deprovisions a dairy tenant:
@@ -763,7 +774,7 @@ export class TenantDatabaseManager {
                     client.release();
                 }
             },
-            close: async () => pool.end(),
+            close: async () => this.endPoolSafely(pool),
         };
     }
     deriveAdminDatabaseUri(baseUri) {
@@ -1096,7 +1107,7 @@ export class TenantDatabaseManager {
                     releaseMutex();
                 }
             },
-            close: async () => pool.end(),
+            close: async () => this.endPoolSafely(pool),
         };
     }
 }
