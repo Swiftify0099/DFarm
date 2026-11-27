@@ -1,5 +1,4 @@
-import { CustomerNotFoundError } from '../../../domain/errors/index.js';
-import { db } from '../../../infrastructure/database/PostgresPool.js';
+import { CustomerNotFoundError, DomainValidationError } from '../../../domain/errors/index.js';
 import { tenantDbManager } from '../../../infrastructure/database/TenantDatabaseManager.js';
 export class GetCustomerKhataSummaryUseCase {
     ledgerRepo;
@@ -7,6 +6,9 @@ export class GetCustomerKhataSummaryUseCase {
         this.ledgerRepo = ledgerRepo;
     }
     async execute(customerId, organizationId) {
+        if (!organizationId || !organizationId.trim()) {
+            throw new DomainValidationError('Authenticated organization ID is required for customer ledger summary.', 'MISSING_ORGANIZATION_ID');
+        }
         const account = await this.ledgerRepo.findByCustomer(customerId, organizationId);
         if (!account) {
             throw new CustomerNotFoundError(customerId);
@@ -20,12 +22,19 @@ export class GetCustomerLedgerEntriesUseCase {
         this.ledgerRepo = ledgerRepo;
     }
     async execute(customerId, limit = 50, offset = 0, organizationId) {
+        if (!organizationId || !organizationId.trim()) {
+            throw new DomainValidationError('Authenticated organization ID is required for customer ledger entries.', 'MISSING_ORGANIZATION_ID');
+        }
         const entries = await this.ledgerRepo.listEntries(customerId, limit, offset, organizationId);
         return entries;
     }
 }
 export class GetCustomerBillsUseCase {
     async execute(customerId, limit = 12, organizationId) {
+        if (!organizationId || !organizationId.trim()) {
+            throw new DomainValidationError('Authenticated organization ID is required for customer bills lookup.', 'MISSING_ORGANIZATION_ID');
+        }
+        const cleanOrgId = organizationId.trim();
         const sql = `
       SELECT 
         mb.id,
@@ -40,19 +49,15 @@ export class GetCustomerBillsUseCase {
         mb.approved_at as paid_at
       FROM monthly_bills mb
       LEFT JOIN billing_periods bp ON bp.id = mb.billing_period_id
-      LEFT JOIN customers c ON c.id = mb.customer_id
+      JOIN customers c ON c.id = mb.customer_id
       WHERE (mb.customer_id = $1 OR c.global_customer_id = $1)
+        AND mb.organization_id = $3
+        AND c.organization_id = $3
       ORDER BY mb.created_at DESC
       LIMIT $2;
     `;
-        let client = db;
-        if (organizationId) {
-            try {
-                client = await tenantDbManager.getTenantDb(organizationId);
-            }
-            catch { }
-        }
-        const result = await client.query(sql, [customerId, limit]);
+        const client = await tenantDbManager.getStrictTenantDb(cleanOrgId);
+        const result = await client.query(sql, [customerId, limit, cleanOrgId]);
         return result.rows.map((row) => ({
             id: row.id,
             billId: row.id,

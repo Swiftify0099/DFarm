@@ -11,6 +11,7 @@ import {
 } from '../../application/use-cases/index.js';
 import {
   PostgresCustomerRepository,
+  PostgresCustomerMembershipRepository,
   PostgresShiftSessionRepository,
   PostgresCollectionTransactionRepository,
   PostgresRateChartRepository,
@@ -24,6 +25,7 @@ import { realtimePublisher } from '../../infrastructure/realtime/RealtimeEventPu
 
 const router = Router();
 const customerRepo = new PostgresCustomerRepository();
+const membershipRepo = new PostgresCustomerMembershipRepository();
 const sessionRepo = new PostgresShiftSessionRepository();
 const transactionRepo = new PostgresCollectionTransactionRepository();
 const rateChartRepo = new PostgresRateChartRepository();
@@ -807,7 +809,9 @@ router.post(
         const entryType = diffAmount > 0 ? 'CREDIT' : 'DEBIT';
         const absDiff = Math.abs(diffAmount);
         await ledgerRepo.appendEntry({
+          organizationId,
           customerId: txn.customer_id,
+          operatorId: req.user!.userId,
           entryType,
           amount: absDiff,
           balanceAfter: 0,
@@ -908,7 +912,7 @@ router.get(
     let customerId = req.user?.userId;
     if (req.user?.role === 'FARMER_CUSTOMER') {
       const queryId = req.query['customerId'] as string;
-      if (queryId && queryId !== req.user.userId) {
+      if (queryId && queryId !== req.user.userId && (!req.user.globalCustomerId || queryId !== req.user.globalCustomerId)) {
         res.status(403).json({
           success: false,
           error: 'Cross-customer query blocked: customer can only view their own delivery history.',
@@ -922,7 +926,57 @@ router.get(
     const page = Math.max(1, Number(req.query['page'] || 1));
     const limit = Math.max(1, Number(req.query['limit'] || req.query['pageSize'] || 50));
     const offset = req.query['offset'] !== undefined ? Number(req.query['offset']) : (page - 1) * limit;
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+    const scope = String(req.query['scope'] || '').toLowerCase();
+
+    // Explicit consolidated multi-dairy history via authoritative central membership index only
+    if (scope === 'consolidated' && req.user?.role === 'FARMER_CUSTOMER') {
+      if (!req.user.globalCustomerId) {
+        res.status(400).json({
+          success: false,
+          code: 'MISSING_GLOBAL_IDENTITY',
+          error: 'Global customer identity is required for consolidated multi-dairy history.',
+        });
+        return;
+      }
+      const memberships = await membershipRepo.listMembershipsByGlobalId(req.user.globalCustomerId);
+      const authorizedMemberships = memberships
+        .filter((m) => m.membershipStatus === 'APPROVED')
+        .map((m) => ({
+          organizationId: m.organizationId,
+          tenantCustomerId: m.tenantCustomerId,
+          dairyName: m.dairyName,
+        }));
+      const consolidated = await transactionRepo.listConsolidatedForMemberships({
+        memberships: authorizedMemberships,
+        limit,
+        offset,
+      });
+      res.json({
+        success: true,
+        partial: consolidated.partial,
+        unavailableDairies: consolidated.unavailableDairies,
+        data: consolidated.transactions.map((r) => r.toJSON()),
+      });
+      return;
+    }
+
+    const requestedOrgId =
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.headers['x-dairy-id'] as string) ||
+      (req.headers['x-organization-id'] as string) ||
+      (req.query['organizationId'] as string) ||
+      (req.query['dairyId'] as string);
+    if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy collection history query blocked.' });
+      return;
+    }
+    const organizationId = req.user?.role === 'SUPER_ADMIN'
+      ? (requestedOrgId || req.user?.organizationId)
+      : req.user?.organizationId;
+    if (!organizationId) {
+      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+      return;
+    }
 
     const data = await getHistoryUseCase.execute(customerId!, limit, offset, organizationId);
     res.json({ success: true, data });
@@ -941,7 +995,7 @@ router.get(
     let customerId = req.user?.userId;
     if (req.user?.role === 'FARMER_CUSTOMER') {
       const queryId = req.query['customerId'] as string;
-      if (queryId && queryId !== req.user.userId) {
+      if (queryId && queryId !== req.user.userId && (!req.user.globalCustomerId || queryId !== req.user.globalCustomerId)) {
         res.status(403).json({
           success: false,
           error: 'Cross-customer query blocked: customer can only view their own summary.',
@@ -952,9 +1006,25 @@ router.get(
       customerId = (req.query['customerId'] as string) || req.user?.userId;
     }
 
-    const monthYear = req.query['monthYear'] as string;
-    const organizationId = req.user?.organizationId || (req.headers['x-dairy-tenant-id'] as string) || (req.headers['x-dairy-id'] as string) || (req.query['organizationId'] as string);
+    const requestedOrgId =
+      (req.headers['x-dairy-tenant-id'] as string) ||
+      (req.headers['x-dairy-id'] as string) ||
+      (req.headers['x-organization-id'] as string) ||
+      (req.query['organizationId'] as string) ||
+      (req.query['dairyId'] as string);
+    if (requestedOrgId && req.user?.organizationId && requestedOrgId !== req.user.organizationId && req.user?.role !== 'SUPER_ADMIN') {
+      res.status(403).json({ success: false, error: 'Cross-dairy monthly summary query blocked.' });
+      return;
+    }
+    const organizationId = req.user?.role === 'SUPER_ADMIN'
+      ? (requestedOrgId || req.user?.organizationId)
+      : req.user?.organizationId;
+    if (!organizationId) {
+      res.status(400).json({ success: false, error: 'Dairy context (organizationId) is required' });
+      return;
+    }
 
+    const monthYear = req.query['monthYear'] as string;
     const data = await getSummaryUseCase.execute(customerId!, monthYear, organizationId);
     res.json({ success: true, data });
   } catch (err) {

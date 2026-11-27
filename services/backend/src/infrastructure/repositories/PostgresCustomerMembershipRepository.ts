@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { ICustomerMembershipRepository } from '../../application/ports/index.js';
 import { CustomerMembership, MembershipStatus } from '../../domain/entities/CustomerMembership.js';
 import { GlobalCustomerIdentity } from '../../domain/entities/GlobalCustomerIdentity.js';
-import { tenantDbManager } from '../database/TenantDatabaseManager.js';
+import { tenantDbManager, TenantDatabaseUnavailableError } from '../database/TenantDatabaseManager.js';
 import { db } from '../database/PostgresPool.js';
 
 export class PostgresCustomerMembershipRepository implements ICustomerMembershipRepository {
@@ -30,8 +30,11 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
         updatedAt: row.updated_at,
       });
     } catch (err: any) {
-      // If table doesn't exist yet, return null
-      return null;
+      throw new TenantDatabaseUnavailableError(
+        'CONTROL_PLANE',
+        'CONTROL_PLANE_UNAVAILABLE',
+        err?.message || 'Control-plane customer identity lookup failed'
+      );
     }
   }
 
@@ -107,8 +110,12 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
         updatedAt: row.updated_at,
         lastSynchronizedAt: row.last_synchronized_at,
       }));
-    } catch {
-      return [];
+    } catch (err: any) {
+      throw new TenantDatabaseUnavailableError(
+        'CONTROL_PLANE',
+        'CONTROL_PLANE_UNAVAILABLE',
+        err?.message || 'Control-plane customer membership query failed'
+      );
     }
   }
 
@@ -158,8 +165,12 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
         updatedAt: row.updated_at,
         lastSynchronizedAt: row.last_synchronized_at,
       });
-    } catch {
-      return null;
+    } catch (err: any) {
+      throw new TenantDatabaseUnavailableError(
+        'CONTROL_PLANE',
+        'CONTROL_PLANE_UNAVAILABLE',
+        err?.message || 'Control-plane membership lookup failed'
+      );
     }
   }
 
@@ -202,21 +213,17 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
 
   public async updateMembershipStatus(organizationId: string, tenantCustomerId: string, status: string, farmerCode?: string, customerName?: string): Promise<void> {
     const client = this.getDb();
-    try {
-      const sql = `
-        UPDATE customer_dairy_memberships
-        SET 
-          membership_status = $1,
-          farmer_code = COALESCE($2, farmer_code),
-          customer_name = COALESCE($3, customer_name),
-          updated_at = NOW(),
-          last_synchronized_at = NOW()
-        WHERE organization_id = $4 AND tenant_customer_id = $5;
-      `;
-      await client.query(sql, [status, farmerCode || null, customerName || null, organizationId, tenantCustomerId]);
-    } catch {
-      // Ignore if table not present in test doubles
-    }
+    const sql = `
+      UPDATE customer_dairy_memberships
+      SET 
+        membership_status = $1,
+        farmer_code = COALESCE($2, farmer_code),
+        customer_name = COALESCE($3, customer_name),
+        updated_at = NOW(),
+        last_synchronized_at = NOW()
+      WHERE organization_id = $4 AND tenant_customer_id = $5;
+    `;
+    await client.query(sql, [status, farmerCode || null, customerName || null, organizationId, tenantCustomerId]);
   }
 
   public async getMembershipCount(globalCustomerId: string): Promise<number> {
@@ -225,8 +232,12 @@ export class PostgresCustomerMembershipRepository implements ICustomerMembership
       const sql = `SELECT COUNT(id) AS cnt FROM customer_dairy_memberships WHERE global_customer_id = $1;`;
       const res = await client.query(sql, [globalCustomerId]);
       return Number(res.rows[0]?.cnt || 0);
-    } catch {
-      return 0;
+    } catch (err: any) {
+      throw new TenantDatabaseUnavailableError(
+        'CONTROL_PLANE',
+        'CONTROL_PLANE_UNAVAILABLE',
+        err?.message || 'Control-plane membership count failed'
+      );
     }
   }
 }

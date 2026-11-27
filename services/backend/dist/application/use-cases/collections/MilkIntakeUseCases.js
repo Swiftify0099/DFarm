@@ -133,6 +133,9 @@ export class GetCustomerCollectionHistoryUseCase {
         this.transactionRepo = transactionRepo;
     }
     async execute(customerId, limit = 50, offset = 0, organizationId) {
+        if (!organizationId || !organizationId.trim()) {
+            throw new DomainValidationError('Authenticated organization ID is required for collection history lookup.', 'MISSING_ORGANIZATION_ID');
+        }
         const records = await this.transactionRepo.listByCustomer(customerId, limit, offset, organizationId);
         return records.map((r) => r.toJSON());
     }
@@ -143,6 +146,9 @@ export class GetMonthlyMilkSummaryUseCase {
         this.transactionRepo = transactionRepo;
     }
     async execute(customerId, monthYear, organizationId) {
+        if (!organizationId || !organizationId.trim()) {
+            throw new DomainValidationError('Authenticated organization ID is required for monthly milk summary.', 'MISSING_ORGANIZATION_ID');
+        }
         const my = monthYear || new Date().toISOString().substring(0, 7); // YYYY-MM
         return this.transactionRepo.getMonthlySummary(customerId, my, organizationId);
     }

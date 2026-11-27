@@ -1230,21 +1230,32 @@ export class TenantDatabaseManager {
 
     const adapter = db.adapters.createPg();
     const pool = new adapter.Pool();
+    let txMutex: Promise<void> = Promise.resolve();
 
     return {
       query: (text: string, params?: any[]) => pool.query(text, params),
       withTransaction: async <T>(callback: (client: pg.PoolClient) => Promise<T>): Promise<T> => {
+        const previous = txMutex;
+        let releaseMutex!: () => void;
+        txMutex = new Promise<void>((resolve) => {
+          releaseMutex = resolve;
+        });
+        await previous;
+
         const client = await pool.connect();
+        const backup = db.backup();
         try {
           await client.query('BEGIN');
           const result = await callback(client);
           await client.query('COMMIT');
           return result;
         } catch (err) {
-          await client.query('ROLLBACK');
+          await client.query('ROLLBACK').catch(() => {});
+          backup.restore();
           throw err;
         } finally {
           client.release();
+          releaseMutex();
         }
       },
       close: async () => pool.end(),

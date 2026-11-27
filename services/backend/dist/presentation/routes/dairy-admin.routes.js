@@ -1,17 +1,14 @@
 import { Router } from 'express';
-import { db } from '../../infrastructure/database/PostgresPool.js';
-import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
+import { tenantDbManager, TenantDatabaseUnavailableError } from '../../infrastructure/database/TenantDatabaseManager.js';
 import { authenticate, authenticateSseStream } from '../middleware/authenticate.js';
 import { sseTicketService } from '../../infrastructure/security/SseTicketService.js';
 import { realtimePublisher } from '../../infrastructure/realtime/RealtimeEventPublisher.js';
 import { isOriginAllowed } from '../../config/cors.js';
 export const dairyAdminRoutes = Router();
 /**
- * Middleware to enforce strict tenant isolation and resolve the authorized dairy organization ID.
- * Returns 403 Forbidden if a user tries to access a different organization or is an unauthorized role.
+ * Authorizes caller role and resolves the bounded organizationId without touching any database.
  */
-async function resolveAndAuthorizeTenant(req, res) {
-    // Reject customer accounts from accessing administrative endpoints
+function authorizeDairyAdminScope(req, res) {
     if (req.user?.actorType === 'CUSTOMER' || req.user?.role === 'FARMER_CUSTOMER') {
         res.status(403).json({
             success: false,
@@ -21,9 +18,11 @@ async function resolveAndAuthorizeTenant(req, res) {
         return null;
     }
     const tokenOrgId = req.user?.organizationId;
-    const headerOrgId = req.headers['x-dairy-tenant-id'] || req.headers['x-dairy-id'] || req.headers['x-organization-id'];
+    const headerOrgId = req.headers['x-dairy-tenant-id'] ||
+        req.headers['x-dairy-id'] ||
+        req.headers['x-organization-id'];
     const queryOrgId = req.query['organizationId'];
-    // If token is present, it is the sole authority
+    // If token is present, it is the sole authority for non-SUPER_ADMIN callers
     if (tokenOrgId) {
         const requestedOrg = headerOrgId || queryOrgId;
         if (requestedOrg && requestedOrg !== tokenOrgId && req.user?.role !== 'SUPER_ADMIN') {
@@ -35,7 +34,9 @@ async function resolveAndAuthorizeTenant(req, res) {
             return null;
         }
     }
-    const organizationId = tokenOrgId || headerOrgId || queryOrgId;
+    const organizationId = req.user?.role === 'SUPER_ADMIN'
+        ? (headerOrgId || queryOrgId || tokenOrgId)
+        : (tokenOrgId || headerOrgId || queryOrgId);
     if (!organizationId) {
         res.status(400).json({
             success: false,
@@ -44,14 +45,68 @@ async function resolveAndAuthorizeTenant(req, res) {
         });
         return null;
     }
-    let tenantDb;
+    return organizationId;
+}
+/**
+ * Explicitly resolves the central control-plane DB for control-plane authoritative routes
+ * (e.g. distributed SSE ticket issuance) after enforcing organization authorization.
+ */
+async function resolveControlPlaneContext(req, res) {
+    const organizationId = authorizeDairyAdminScope(req, res);
+    if (!organizationId)
+        return null;
+    const controlDb = tenantDbManager.getControlPlaneDb();
     try {
-        tenantDb = await tenantDbManager.getTenantDb(organizationId);
+        const orgRes = await controlDb.query(`SELECT id, status FROM organizations WHERE id = $1 LIMIT 1;`, [organizationId]);
+        if (orgRes.rows.length === 0) {
+            res.status(404).json({
+                success: false,
+                errorCode: 'ORGANIZATION_NOT_FOUND',
+                error: 'Authorized dairy organization does not exist in control plane.',
+            });
+            return null;
+        }
+        if (String(orgRes.rows[0].status || '').toUpperCase() !== 'ACTIVE') {
+            res.status(403).json({
+                success: false,
+                errorCode: 'ORGANIZATION_INACTIVE',
+                error: 'Dairy organization is inactive or suspended.',
+            });
+            return null;
+        }
     }
     catch {
-        tenantDb = db;
+        res.status(503).json({
+            success: false,
+            errorCode: 'CONTROL_PLANE_UNAVAILABLE',
+            error: 'Control-plane database is unavailable.',
+        });
+        return null;
     }
-    return { organizationId, tenantDb };
+    return { organizationId, controlDb };
+}
+/**
+ * Strict tenant-operational DB resolver: enforces tenant isolation via getStrictTenantDb
+ * and fails closed with HTTP 503 when tenant mapping or DB is unavailable.
+ * NEVER falls back to central control-plane DB.
+ */
+async function resolveStrictTenantContext(req, res) {
+    const organizationId = authorizeDairyAdminScope(req, res);
+    if (!organizationId)
+        return null;
+    try {
+        const tenantDb = await tenantDbManager.getStrictTenantDb(organizationId);
+        return { organizationId, tenantDb };
+    }
+    catch (err) {
+        const code = err instanceof TenantDatabaseUnavailableError ? err.code : 'TENANT_DATABASE_UNAVAILABLE';
+        res.status(503).json({
+            success: false,
+            errorCode: code,
+            error: err?.message || 'Tenant database is unavailable.',
+        });
+        return null;
+    }
 }
 /**
  * Validates that an optional centerId belongs to the authenticated organization
@@ -126,7 +181,7 @@ dairyAdminRoutes.post('/events/ticket', authenticate, async (req, res) => {
         });
         return;
     }
-    const tenant = await resolveAndAuthorizeTenant(req, res);
+    const tenant = await resolveControlPlaneContext(req, res);
     if (!tenant)
         return;
     const ticket = sseTicketService.issueTicket(req.user, 30);
@@ -143,7 +198,7 @@ dairyAdminRoutes.post('/events/ticket', authenticate, async (req, res) => {
     });
 });
 dairyAdminRoutes.get('/events', authenticateSseStream, async (req, res) => {
-    const tenant = await resolveAndAuthorizeTenant(req, res);
+    const tenant = await resolveStrictTenantContext(req, res);
     if (!tenant)
         return;
     const { organizationId, tenantDb } = tenant;
@@ -191,7 +246,7 @@ dairyAdminRoutes.get('/events', authenticateSseStream, async (req, res) => {
 // ============================================================================
 dairyAdminRoutes.get('/metrics', authenticate, async (req, res, next) => {
     try {
-        const tenant = await resolveAndAuthorizeTenant(req, res);
+        const tenant = await resolveStrictTenantContext(req, res);
         if (!tenant)
             return;
         const { organizationId, tenantDb } = tenant;
@@ -333,7 +388,7 @@ dairyAdminRoutes.get('/metrics', authenticate, async (req, res, next) => {
 // ============================================================================
 dairyAdminRoutes.get('/centers/metrics', authenticate, async (req, res, next) => {
     try {
-        const tenant = await resolveAndAuthorizeTenant(req, res);
+        const tenant = await resolveStrictTenantContext(req, res);
         if (!tenant)
             return;
         const { organizationId, tenantDb } = tenant;
@@ -454,7 +509,7 @@ dairyAdminRoutes.get('/centers/metrics', authenticate, async (req, res, next) =>
 // ============================================================================
 dairyAdminRoutes.get('/collections/feed', authenticate, async (req, res, next) => {
     try {
-        const tenant = await resolveAndAuthorizeTenant(req, res);
+        const tenant = await resolveStrictTenantContext(req, res);
         if (!tenant)
             return;
         const { organizationId, tenantDb } = tenant;
@@ -547,7 +602,7 @@ dairyAdminRoutes.get('/collections/feed', authenticate, async (req, res, next) =
 // ============================================================================
 dairyAdminRoutes.get('/sessions', authenticate, async (req, res, next) => {
     try {
-        const tenant = await resolveAndAuthorizeTenant(req, res);
+        const tenant = await resolveStrictTenantContext(req, res);
         if (!tenant)
             return;
         const { organizationId, tenantDb } = tenant;
@@ -612,7 +667,7 @@ dairyAdminRoutes.get('/sessions', authenticate, async (req, res, next) => {
 // ============================================================================
 dairyAdminRoutes.get('/stations', authenticate, async (req, res, next) => {
     try {
-        const tenant = await resolveAndAuthorizeTenant(req, res);
+        const tenant = await resolveStrictTenantContext(req, res);
         if (!tenant)
             return;
         const { organizationId, tenantDb } = tenant;
@@ -731,7 +786,7 @@ dairyAdminRoutes.post('/stations/:id/block', authenticate, async (req, res, next
             });
             return;
         }
-        const tenant = await resolveAndAuthorizeTenant(req, res);
+        const tenant = await resolveStrictTenantContext(req, res);
         if (!tenant)
             return;
         const { organizationId, tenantDb } = tenant;
@@ -823,7 +878,7 @@ dairyAdminRoutes.post('/stations/:id/unblock', authenticate, async (req, res, ne
             });
             return;
         }
-        const tenant = await resolveAndAuthorizeTenant(req, res);
+        const tenant = await resolveStrictTenantContext(req, res);
         if (!tenant)
             return;
         const { organizationId, tenantDb } = tenant;

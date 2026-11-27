@@ -63,10 +63,11 @@ export interface AtomicMilkIntakeResult {
 export interface ICollectionTransactionRepository {
     save(transaction: MilkCollectionTransaction): Promise<void>;
     saveAtomicIntake(params: AtomicMilkIntakeParams): Promise<AtomicMilkIntakeResult>;
+    findById(id: string, organizationId: string): Promise<MilkCollectionTransaction | null>;
     findByIdempotencyKey(key: string, organizationId: string): Promise<MilkCollectionTransaction | null>;
-    listRecentBySession(sessionId: string, limit?: number): Promise<MilkCollectionTransaction[]>;
-    listByCustomer(customerId: string, limit?: number, offset?: number, organizationId?: string): Promise<MilkCollectionTransaction[]>;
-    getMonthlySummary(customerId: string, monthYear: string, organizationId?: string): Promise<{
+    listRecentBySession(sessionId: string, limit: number, organizationId: string): Promise<MilkCollectionTransaction[]>;
+    listByCustomer(customerId: string, limit: number, offset: number, organizationId: string): Promise<MilkCollectionTransaction[]>;
+    getMonthlySummary(customerId: string, monthYear: string, organizationId: string): Promise<{
         monthYear: string;
         totalLiters: number;
         cowLiters: number;
@@ -81,9 +82,11 @@ export interface IRateChartRepository {
     getActiveRateChart(centerId: string, organizationId: string, category: MilkCategory, businessDate: string): Promise<RateChart>;
 }
 export interface ILedgerRepository {
-    findByCustomer(customerId: string, organizationId?: string): Promise<CustomerLedgerAccount | null>;
-    save(account: CustomerLedgerAccount, newEntry?: LedgerEntry): Promise<void>;
-    listEntries(customerId: string, limit?: number, offset?: number, organizationId?: string): Promise<LedgerEntry[]>;
+    findByCustomer(customerId: string, organizationId: string): Promise<CustomerLedgerAccount | null>;
+    save(account: CustomerLedgerAccount, newEntry?: LedgerEntry, options?: {
+        operatorId?: string;
+    }): Promise<void>;
+    listEntries(customerId: string, limit: number, offset: number, organizationId: string): Promise<LedgerEntry[]>;
 }
 export interface ITokenService {
     signToken(payload: {

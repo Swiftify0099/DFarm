@@ -5,8 +5,37 @@ import {
   AtomicMilkIntakeResult,
 } from '../../application/ports/index.js';
 import { MilkCollectionTransaction, MilkCollectionTransactionProps } from '../../domain/entities/MilkCollectionTransaction.js';
-import { db } from '../database/PostgresPool.js';
-import { tenantDbManager } from '../database/TenantDatabaseManager.js';
+import {
+  DomainValidationError,
+  ForbiddenError,
+  ForbiddenTenantError,
+} from '../../domain/errors/index.js';
+import {
+  IDatabaseClient,
+  tenantDbManager,
+  TenantDatabaseUnavailableError,
+} from '../database/TenantDatabaseManager.js';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface AuthorizedMembershipRef {
+  organizationId: string;
+  tenantCustomerId: string;
+  dairyName?: string;
+}
+
+export interface ConsolidatedHistoryUnavailableDairy {
+  organizationId: string;
+  dairyName?: string;
+  code: string;
+  message: string;
+}
+
+export interface ConsolidatedHistoryResult {
+  transactions: MilkCollectionTransaction[];
+  partial: boolean;
+  unavailableDairies: ConsolidatedHistoryUnavailableDairy[];
+}
 
 export class PostgresCollectionTransactionRepository implements ICollectionTransactionRepository {
   private mapRowToTransaction(row: any): MilkCollectionTransaction {
@@ -42,62 +71,240 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
     return new MilkCollectionTransaction(props);
   }
 
-  private async getDb(organizationId?: string) {
-    if (organizationId) {
-      return tenantDbManager.getTenantDb(organizationId);
+  private assertValidOrganizationId(organizationId?: string): string {
+    if (!organizationId || typeof organizationId !== 'string' || !organizationId.trim()) {
+      throw new DomainValidationError(
+        'Authenticated organization ID is strictly required for collection transaction operations.',
+        'MISSING_ORGANIZATION_ID'
+      );
     }
-    return db;
+    const cleanOrgId = organizationId.trim();
+    if (!UUID_REGEX.test(cleanOrgId)) {
+      throw new DomainValidationError(
+        'Invalid organization ID format for collection transaction operation.',
+        'INVALID_ORGANIZATION_ID'
+      );
+    }
+    return cleanOrgId;
+  }
+
+  private async getAuthorizedTenantDb(organizationId?: string): Promise<{ orgId: string; tenantDb: IDatabaseClient }> {
+    const orgId = this.assertValidOrganizationId(organizationId);
+    const tenantDb = await tenantDbManager.getStrictTenantDb(orgId);
+    return { orgId, tenantDb };
+  }
+
+  private isConstraintOrDomainError(err: any): boolean {
+    const pgCode = err?.code;
+    return (
+      pgCode === '23505' ||
+      pgCode === '23503' ||
+      pgCode === '23514' ||
+      pgCode === '22P02' ||
+      err instanceof DomainValidationError ||
+      err instanceof ForbiddenError ||
+      err instanceof ForbiddenTenantError ||
+      err?.code === 'IDEMPOTENCY_PAYLOAD_MISMATCH'
+    );
+  }
+
+  private async queryTenant<T extends Record<string, any> = any>(
+    client: { query: (text: string, params?: any[]) => Promise<{ rows: T[] }> },
+    organizationId: string,
+    sql: string,
+    params: any[]
+  ): Promise<{ rows: T[] }> {
+    try {
+      return await client.query(sql, params);
+    } catch (err: any) {
+      if (err instanceof TenantDatabaseUnavailableError || this.isConstraintOrDomainError(err)) {
+        throw err;
+      }
+      throw new TenantDatabaseUnavailableError(
+        organizationId,
+        'QUERY_FAILED',
+        'Tenant collection database query failed'
+      );
+    }
+  }
+
+  private async validateOperationalContext(
+    client: { query: (text: string, params?: any[]) => Promise<{ rows: any[] }> },
+    params: {
+      organizationId: string;
+      centerId?: string;
+      customerId: string;
+      operatorId?: string;
+      sessionId?: string;
+    }
+  ): Promise<string> {
+    const { organizationId, centerId, customerId, operatorId, sessionId } = params;
+
+    // 1. Validate organization exists and is ACTIVE in tenant DB (never auto-create)
+    const orgRes = await this.queryTenant<{ id: string; status: string }>(
+      client,
+      organizationId,
+      `SELECT id, status FROM organizations WHERE id = $1 LIMIT 1;`,
+      [organizationId]
+    );
+    if (orgRes.rows.length === 0) {
+      throw new DomainValidationError(
+        `Organization '${organizationId}' does not exist in tenant database.`,
+        'INVALID_ORGANIZATION'
+      );
+    }
+    if (String(orgRes.rows[0]!.status || '').toUpperCase() !== 'ACTIVE') {
+      throw new ForbiddenError(
+        `Organization '${organizationId}' is not active.`,
+        'ORGANIZATION_INACTIVE'
+      );
+    }
+
+    // 2. Validate center exists, belongs to this organization, and is ACTIVE (never auto-create C-01)
+    if (!centerId || !UUID_REGEX.test(centerId)) {
+      throw new DomainValidationError('Valid collection center ID is required.', 'INVALID_CENTER_ID');
+    }
+    const centerRes = await this.queryTenant<{ id: string; organization_id: string; status: string }>(
+      client,
+      organizationId,
+      `SELECT id, organization_id, status FROM dairy_centers WHERE id = $1 LIMIT 1;`,
+      [centerId]
+    );
+    if (centerRes.rows.length === 0) {
+      throw new DomainValidationError(
+        `Collection center '${centerId}' does not exist in tenant database.`,
+        'INVALID_CENTER'
+      );
+    }
+    const center = centerRes.rows[0]!;
+    if (String(center.organization_id || '').toLowerCase() !== organizationId.toLowerCase()) {
+      throw new ForbiddenTenantError(
+        `Cross-tenant center '${centerId}' does not belong to organization '${organizationId}'.`
+      );
+    }
+    if (String(center.status || '').toUpperCase() !== 'ACTIVE') {
+      throw new DomainValidationError(
+        `Collection center '${centerId}' is inactive.`,
+        'INACTIVE_CENTER'
+      );
+    }
+
+    // 3. Validate customer exists, belongs to this organization, and is not soft-deleted
+    if (!customerId || !UUID_REGEX.test(customerId)) {
+      throw new DomainValidationError('Valid customer ID is required.', 'INVALID_CUSTOMER_ID');
+    }
+    const custRes = await this.queryTenant<{ id: string; organization_id: string; is_deleted: boolean }>(
+      client,
+      organizationId,
+      `SELECT id, organization_id, is_deleted FROM customers WHERE id = $1 LIMIT 1;`,
+      [customerId]
+    );
+    if (custRes.rows.length === 0) {
+      throw new DomainValidationError(
+        `Customer '${customerId}' does not exist in tenant database.`,
+        'INVALID_CUSTOMER'
+      );
+    }
+    const cust = custRes.rows[0]!;
+    if (String(cust.organization_id || '').toLowerCase() !== organizationId.toLowerCase()) {
+      throw new ForbiddenTenantError(
+        `Cross-tenant customer '${customerId}' does not belong to organization '${organizationId}'.`
+      );
+    }
+    if (cust.is_deleted) {
+      throw new DomainValidationError(`Customer '${customerId}' is deleted.`, 'CUSTOMER_DELETED');
+    }
+
+    // 4. Resolve and validate operator from authoritative tenant session/user records (never fabricate)
+    let resolvedOperatorId = operatorId;
+    if (sessionId && UUID_REGEX.test(sessionId)) {
+      const sessRes = await this.queryTenant<{ id: string; organization_id: string; opening_operator_id: string }>(
+        client,
+        organizationId,
+        `SELECT id, organization_id, opening_operator_id FROM kiosk_shift_sessions WHERE id = $1 LIMIT 1;`,
+        [sessionId]
+      );
+      if (sessRes.rows.length === 0) {
+        throw new DomainValidationError(
+          `Shift session '${sessionId}' does not exist in tenant database.`,
+          'INVALID_SESSION'
+        );
+      }
+      if (String(sessRes.rows[0]!.organization_id || '').toLowerCase() !== organizationId.toLowerCase()) {
+        throw new ForbiddenTenantError(
+          `Cross-tenant shift session '${sessionId}' does not belong to organization '${organizationId}'.`
+        );
+      }
+      if (!resolvedOperatorId) {
+        resolvedOperatorId = sessRes.rows[0]!.opening_operator_id;
+      }
+    }
+
+    if (!resolvedOperatorId || !UUID_REGEX.test(resolvedOperatorId)) {
+      throw new DomainValidationError(
+        'Valid authoritative operator ID is required for collection persistence.',
+        'INVALID_OPERATOR'
+      );
+    }
+
+    const opRes = await this.queryTenant<{ id: string; organization_id: string | null; role: string | null; user_role: string | null; status: string }>(
+      client,
+      organizationId,
+      `SELECT id, organization_id, role, user_role, status FROM users WHERE id = $1 LIMIT 1;`,
+      [resolvedOperatorId]
+    );
+    if (opRes.rows.length === 0) {
+      throw new DomainValidationError(
+        `Authoritative operator '${resolvedOperatorId}' does not exist in tenant database.`,
+        'INVALID_OPERATOR'
+      );
+    }
+    const op = opRes.rows[0]!;
+    const effRole = String(op.user_role || op.role || '').trim().toUpperCase();
+    if (effRole === 'FARMER_CUSTOMER' || effRole === 'GUEST_FARMER' || effRole === 'CUSTOMER') {
+      throw new ForbiddenError(`User '${resolvedOperatorId}' is not authorized to record collections.`, 'UNAUTHORIZED_OPERATOR');
+    }
+    if (String(op.status || '').toUpperCase() !== 'ACTIVE') {
+      throw new ForbiddenError(`Operator '${resolvedOperatorId}' is not ACTIVE.`, 'OPERATOR_INACTIVE');
+    }
+    if (
+      effRole !== 'SUPER_ADMIN' &&
+      effRole !== 'PLATFORM_OPERATOR' &&
+      String(op.organization_id || '').toLowerCase() !== organizationId.toLowerCase()
+    ) {
+      throw new ForbiddenTenantError(
+        `Cross-tenant operator '${resolvedOperatorId}' does not belong to organization '${organizationId}'.`
+      );
+    }
+
+    return resolvedOperatorId;
   }
 
   public async save(transaction: MilkCollectionTransaction): Promise<void> {
     const t = transaction.toJSON();
-    const tenantDb = await this.getDb(t.dairyId);
+    const { orgId, tenantDb } = await this.getAuthorizedTenantDb(t.dairyId);
 
     await tenantDb.withTransaction(async (client) => {
-      // 0. Guarantee organization, center, and operator exist in tenant operational database
-      await client.query(
-        `INSERT INTO organizations (id, name, code, status)
-         VALUES ($1, 'Registered Cooperative Dairy', $2, 'ACTIVE')
-         ON CONFLICT (id) DO NOTHING;`,
-        [t.dairyId, `D-${t.dairyId.slice(0, 6).toUpperCase()}`]
-      );
+      const opId = await this.validateOperationalContext(client, {
+        organizationId: orgId,
+        centerId: t.centerId,
+        customerId: t.customerId,
+        sessionId: t.sessionId,
+      });
 
-      if (t.centerId) {
-        await client.query(
-          `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
-           VALUES ($1, $2, 'C-01', 'Main Collection Center', 'Center Road', 'Local', 'District', 'State', '400001', '+919876543210', 'ACTIVE')
-           ON CONFLICT (id) DO NOTHING;`,
-          [t.centerId, t.dairyId]
-        );
-      }
-
-      // 1. Ensure shift exists in collection_shifts for center & shift
-      const shiftRes = await client.query(
+      // 1. Ensure shift exists in collection_shifts for verified center & shift
+      const shiftRes = await this.queryTenant<{ id: string }>(
+        client,
+        orgId,
         `INSERT INTO collection_shifts (center_id, shift_type, start_time, end_time, grace_period_minutes, is_active)
          VALUES ($1, $2, '05:00:00'::time, '21:00:00'::time, 30, TRUE)
          ON CONFLICT (center_id, shift_type) DO UPDATE SET is_active = EXCLUDED.is_active
          RETURNING id`,
         [t.centerId, t.shift]
       );
-      const shiftId = shiftRes.rows[0].id;
+      const shiftId = shiftRes.rows[0]!.id;
 
-      // 2. Generate unique individual intake session ID for this transaction
-      const intakeSessionId = crypto.randomUUID();
-      const opRes = await client.query(`SELECT opening_operator_id FROM kiosk_shift_sessions WHERE id = $1 LIMIT 1`, [t.sessionId]);
-      const opId = opRes.rows[0]?.opening_operator_id || '00000000-0000-0000-0000-000000000011';
-
-      // Ensure operator exists in tenant users table
-      const opUsername = `op_${String(opId).replace(/[^a-zA-Z0-9]/g, '').slice(0, 16)}`;
-      try {
-        await client.query(
-          `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
-           VALUES ($1, $2, $3, $4, '+919822114477', 'COLLECTION_OPERATOR', 'ACTIVE')
-           ON CONFLICT (id) DO NOTHING;`,
-          [opId, t.dairyId, opUsername, t.operatorName || 'Counter Operator']
-        );
-      } catch {}
-
-      // Cleanly map identification method conforming to chk_session_id_method (FACE, RFID, SUPERVISOR_MANUAL)
+      // 2. Cleanly map identification method conforming to chk_session_id_method (FACE, RFID, SUPERVISOR_MANUAL)
       const methodStr = String(t.identificationMethod || '');
       const mappedIdMethod =
         methodStr === 'FACE_YUNET_SFACE' || methodStr === 'FACE' || methodStr === 'FACE_RECOGNITION'
@@ -106,8 +313,10 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
             ? 'RFID'
             : 'SUPERVISOR_MANUAL');
 
-      // Ensure collection_sessions row exists
-      await client.query(
+      const intakeSessionId = crypto.randomUUID();
+      await this.queryTenant(
+        client,
+        orgId,
         `INSERT INTO collection_sessions (
           id, center_id, customer_id, business_date, shift_id, shift_type,
           selected_milk_category, identification_method, session_state,
@@ -133,24 +342,40 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
         ]
       );
 
-      // 3. Insert or ignore milk_collections (enforcing idempotency_key)
+      // 3. Resolve tenant-scoped rate chart version
       let rcvId: string;
-      const rcvRes = await client.query(`SELECT id FROM rate_chart_versions ORDER BY created_at DESC LIMIT 1`);
+      const rcvRes = await this.queryTenant<{ id: string }>(
+        client,
+        orgId,
+        `SELECT rcv.id
+         FROM rate_chart_versions rcv
+         JOIN rate_charts rc ON rc.id = rcv.rate_chart_id
+         WHERE rc.organization_id = $1
+         ORDER BY rcv.created_at DESC
+         LIMIT 1;`,
+        [orgId]
+      );
       if (rcvRes.rows.length > 0) {
-        rcvId = rcvRes.rows[0].id;
+        rcvId = rcvRes.rows[0]!.id;
       } else {
-        const chartRes = await client.query(`
-          INSERT INTO rate_charts (organization_id, center_id, name, milk_category, pricing_type, is_active)
-          VALUES ($1, $2, 'Standard Cow Rate Chart', 'COW', 'GRID', TRUE)
-          RETURNING id;
-        `, [t.dairyId, t.centerId]);
-        const chartId = chartRes.rows[0].id;
-        const verRes = await client.query(`
-          INSERT INTO rate_chart_versions (rate_chart_id, version_number, effective_from, base_fat, base_snf, base_rate, is_approved)
-          VALUES ($1, 1, NOW(), 3.5, 8.5, 38.0, TRUE)
-          RETURNING id;
-        `, [chartId]);
-        rcvId = verRes.rows[0].id;
+        const chartRes = await this.queryTenant<{ id: string }>(
+          client,
+          orgId,
+          `INSERT INTO rate_charts (organization_id, center_id, name, milk_category, pricing_type, is_active)
+           VALUES ($1, $2, 'Standard Cow Rate Chart', 'COW', 'GRID', TRUE)
+           RETURNING id;`,
+          [orgId, t.centerId]
+        );
+        const chartId = chartRes.rows[0]!.id;
+        const verRes = await this.queryTenant<{ id: string }>(
+          client,
+          orgId,
+          `INSERT INTO rate_chart_versions (rate_chart_id, version_number, effective_from, base_fat, base_snf, base_rate, is_approved)
+           VALUES ($1, 1, NOW(), 3.5, 8.5, 38.0, TRUE)
+           RETURNING id;`,
+          [chartId]
+        );
+        rcvId = verRes.rows[0]!.id;
       }
 
       const insertSql = `
@@ -161,18 +386,17 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
           client_intake_uuid, idempotency_key, created_at, synced_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7,
-          $8, 'LITERS', $9, $10,
-          $11,
-          $12, $13, 'COMPLETED',
-          gen_random_uuid(), $14, NOW(), NOW()
+          $8, $9, 'LITERS', $10, $11,
+          $12, $13, $14, 'COMPLETED',
+          gen_random_uuid(), $15, NOW(), NOW()
         )
         ON CONFLICT (organization_id, idempotency_key) DO NOTHING;
       `;
 
-      await client.query(insertSql, [
+      await this.queryTenant(client, orgId, insertSql, [
         t.id,
         intakeSessionId,
-        t.dairyId,
+        orgId,
         t.centerId,
         t.customerId,
         t.date,
@@ -187,8 +411,10 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
         t.idempotencyKey || `TXN-${t.id}`,
       ]);
 
-      // 4. Update kiosk_shift_sessions totals atomically
-      await client.query(
+      // 4. Update kiosk_shift_sessions totals atomically within organization scope
+      await this.queryTenant(
+        client,
+        orgId,
         `UPDATE kiosk_shift_sessions SET
           total_liters = total_liters + $2::numeric,
           cow_liters = cow_liters + (CASE WHEN $3 = 'COW' THEN $2::numeric ELSE 0.0 END),
@@ -196,51 +422,45 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
           transaction_count = transaction_count + 1,
           total_amount = total_amount + $4::numeric,
           updated_at = NOW()
-        WHERE id = $1`,
-        [t.sessionId, t.weightLiters, t.milkCategory, t.totalAmount]
+        WHERE id = $1 AND organization_id = $5`,
+        [t.sessionId, t.weightLiters, t.milkCategory, t.totalAmount, orgId]
       );
     });
+  }
 
-    // Try synchronizing to control plane DB as well if reachable
-    try {
-      await db.withTransaction(async (client) => {
-        const insertSql = `
-          INSERT INTO milk_collections (
-            id, session_id, organization_id, center_id, customer_id, business_date, shift_type,
-            milk_category, net_weight, measurement_unit, fat_percentage, snf_percentage,
-            applied_rate_per_unit, total_amount, transaction_status,
-            client_intake_uuid, idempotency_key, created_at, synced_at
-          ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7,
-            $8, 'LITERS', $9, $10,
-            $11, $12, 'COMPLETED',
-            gen_random_uuid(), $13, NOW(), NOW()
-          )
-          ON CONFLICT (organization_id, idempotency_key) DO NOTHING;
-        `;
-        await client.query(insertSql, [
-          t.id,
-          t.sessionId,
-          t.dairyId,
-          t.centerId,
-          t.customerId,
-          t.date,
-          t.shift,
-          t.milkCategory,
-          t.weightLiters,
-          t.fatPercentage,
-          t.snfPercentage,
-          t.appliedRatePerLiter,
-          t.totalAmount,
-          t.idempotencyKey || `TXN-${t.id}`,
-        ]);
-      });
-    } catch {}
+  public async findById(id: string, organizationId: string): Promise<MilkCollectionTransaction | null> {
+    const { orgId, tenantDb } = await this.getAuthorizedTenantDb(organizationId);
+    if (!id || !UUID_REGEX.test(id.trim())) {
+      return null;
+    }
+
+    const sql = `
+      SELECT 
+        mc.*,
+        c.farmer_code,
+        c.full_name,
+        c.organization_id,
+        cs.device_id,
+        cs.identification_method,
+        u.full_name AS operator_name
+      FROM milk_collections mc
+      JOIN customers c ON c.id = mc.customer_id
+      LEFT JOIN collection_sessions cs ON cs.id = mc.session_id
+      LEFT JOIN users u ON u.id = cs.operator_id
+      WHERE mc.id = $1
+        AND mc.organization_id = $2
+        AND c.organization_id = $2
+      LIMIT 1;
+    `;
+    const result = await this.queryTenant(tenantDb, orgId, sql, [id.trim(), orgId]);
+    if (result.rows.length === 0) return null;
+    return this.mapRowToTransaction(result.rows[0]);
   }
 
   public async findByIdempotencyKey(key: string, organizationId: string): Promise<MilkCollectionTransaction | null> {
-    if (!organizationId || !organizationId.trim()) {
-      throw new Error('organizationId is strictly required for scoped idempotency key lookup');
+    const { orgId, tenantDb } = await this.getAuthorizedTenantDb(organizationId);
+    if (!key || !key.trim()) {
+      return null;
     }
 
     const sqlWithOrg = `
@@ -257,15 +477,13 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
       LEFT JOIN collection_sessions cs ON cs.id = mc.session_id
       LEFT JOIN users u ON u.id = cs.operator_id
       WHERE mc.idempotency_key = $1
-        AND (mc.organization_id = $2 OR c.organization_id = $2)
+        AND mc.organization_id = $2
+        AND c.organization_id = $2
       LIMIT 1;
     `;
-    try {
-      const client = await this.getDb(organizationId);
-      const result = await client.query(sqlWithOrg, [key, organizationId]);
-      if (result.rows.length > 0) return this.mapRowToTransaction(result.rows[0]);
-    } catch {}
-    return null;
+    const result = await this.queryTenant(tenantDb, orgId, sqlWithOrg, [key, orgId]);
+    if (result.rows.length === 0) return null;
+    return this.mapRowToTransaction(result.rows[0]);
   }
 
   private async resolveExistingReplay(
@@ -274,8 +492,10 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
     orgId: string,
     incomingTxn?: any
   ): Promise<AtomicMilkIntakeResult> {
-    const existingRes = await client.query(`
-      SELECT 
+    const existingRes = await this.queryTenant(
+      client,
+      orgId,
+      `SELECT 
         mc.*,
         c.farmer_code,
         c.full_name,
@@ -288,9 +508,11 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
       LEFT JOIN collection_sessions cs ON cs.id = mc.session_id
       LEFT JOIN users u ON u.id = cs.operator_id
       WHERE mc.idempotency_key = $1
-        AND (mc.organization_id = $2 OR c.organization_id = $2)
-      LIMIT 1;
-    `, [idempotencyKey, orgId]);
+        AND mc.organization_id = $2
+        AND c.organization_id = $2
+      LIMIT 1;`,
+      [idempotencyKey, orgId]
+    );
 
     if (existingRes.rows.length === 0) {
       throw new Error(`Conflict detected for idempotency key ${idempotencyKey}, but existing canonical record could not be resolved.`);
@@ -299,9 +521,6 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
     const row = existingRes.rows[0];
     const existingTxn = this.mapRowToTransaction(row);
 
-    // Idempotency Key Payload Integrity Check:
-    // If incoming transaction is provided, verify whether it represents the EXACT same intake transaction.
-    // Reusing the same idempotency key with conflicting parameters must throw IDEMPOTENCY_PAYLOAD_MISMATCH (409)
     if (incomingTxn) {
       const mismatches: string[] = [];
 
@@ -337,9 +556,12 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
       }
     }
 
-    const ledgerRes = await client.query(`
-      SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1 AND organization_id = $2 LIMIT 1;
-    `, [existingTxn.customerId, orgId]);
+    const ledgerRes = await this.queryTenant(
+      client,
+      orgId,
+      `SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1 AND organization_id = $2 LIMIT 1;`,
+      [existingTxn.customerId, orgId]
+    );
 
     return {
       transaction: existingTxn,
@@ -351,13 +573,18 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
 
   public async saveAtomicIntake(params: AtomicMilkIntakeParams): Promise<AtomicMilkIntakeResult> {
     const t = params.transaction.toJSON();
-    const orgId = params.organizationId || t.dairyId;
-    const tenantDb = await this.getDb(orgId);
+    const orgId = this.assertValidOrganizationId(params.organizationId || t.dairyId);
+    if (params.organizationId && t.dairyId && params.organizationId.trim().toLowerCase() !== t.dairyId.trim().toLowerCase()) {
+      throw new ForbiddenTenantError('Transaction organization mismatch in atomic milk intake.');
+    }
+    const { tenantDb } = await this.getAuthorizedTenantDb(orgId);
 
     return await tenantDb.withTransaction(async (client) => {
       // 0. Pre-check: If this idempotency key was already recorded in this organization, return existing canonical record
       const idempotencyKey = t.idempotencyKey || `TXN-${t.id}`;
-      const preCheck = await client.query(
+      const preCheck = await this.queryTenant(
+        client,
+        orgId,
         `SELECT id FROM milk_collections WHERE idempotency_key = $1 AND organization_id = $2 LIMIT 1;`,
         [idempotencyKey, orgId]
       );
@@ -365,44 +592,26 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
         return await this.resolveExistingReplay(client, idempotencyKey, orgId, t);
       }
 
-      // 0.1 Guarantee organization, center, and operator exist in tenant operational database
-      await client.query(
-        `INSERT INTO organizations (id, name, code, status)
-         VALUES ($1, 'Registered Cooperative Dairy', $2, 'ACTIVE')
-         ON CONFLICT (id) DO NOTHING;`,
-        [orgId, `D-${orgId.slice(0, 6).toUpperCase()}`]
-      );
+      // 0.1 Validate organization, center, customer, session, and operator strictly in tenant DB (zero fabricated entities)
+      const opId = await this.validateOperationalContext(client, {
+        organizationId: orgId,
+        centerId: t.centerId,
+        customerId: t.customerId,
+        operatorId: params.operatorId,
+        sessionId: t.sessionId,
+      });
 
-      if (t.centerId) {
-        await client.query(
-          `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
-           VALUES ($1, $2, 'C-01', 'Main Collection Center', 'Center Road', 'Local', 'District', 'State', '400001', '+919876543210', 'ACTIVE')
-           ON CONFLICT (id) DO NOTHING;`,
-          [t.centerId, orgId]
-        );
-      }
-
-      // 1. Ensure shift exists in collection_shifts for center & shift
-      const shiftRes = await client.query(
+      // 1. Ensure shift exists in collection_shifts for verified center & shift
+      const shiftRes = await this.queryTenant<{ id: string }>(
+        client,
+        orgId,
         `INSERT INTO collection_shifts (center_id, shift_type, start_time, end_time, grace_period_minutes, is_active)
          VALUES ($1, $2, '05:00:00'::time, '21:00:00'::time, 30, TRUE)
          ON CONFLICT (center_id, shift_type) DO UPDATE SET is_active = EXCLUDED.is_active
          RETURNING id`,
         [t.centerId, t.shift]
       );
-      const shiftId = shiftRes.rows[0].id;
-
-      // 2. Resolve operator
-      const opId = params.operatorId || '00000000-0000-0000-0000-000000000011';
-      const opUsername = `op_${String(opId).replace(/[^a-zA-Z0-9]/g, '').slice(0, 16)}`;
-      try {
-        await client.query(
-          `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
-           VALUES ($1, $2, $3, $4, '+919822114477', 'COLLECTION_OPERATOR', 'ACTIVE')
-           ON CONFLICT (id) DO NOTHING;`,
-          [opId, orgId, opUsername, params.operatorName || 'Counter Operator']
-        );
-      } catch {}
+      const shiftId = shiftRes.rows[0]!.id;
 
       // 3. Map identification method conforming to chk_session_id_method
       const methodStr = String(t.identificationMethod || '');
@@ -415,7 +624,9 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
 
       // 4. Ensure collection_sessions row exists
       const intakeSessionId = crypto.randomUUID();
-      await client.query(
+      await this.queryTenant(
+        client,
+        orgId,
         `INSERT INTO collection_sessions (
           id, center_id, customer_id, business_date, shift_id, shift_type,
           selected_milk_category, identification_method, session_state,
@@ -441,24 +652,40 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
         ]
       );
 
-      // 5. Ensure rate chart version exists
+      // 5. Resolve tenant-scoped rate chart version
       let rcvId: string;
-      const rcvRes = await client.query(`SELECT id FROM rate_chart_versions ORDER BY created_at DESC LIMIT 1`);
+      const rcvRes = await this.queryTenant<{ id: string }>(
+        client,
+        orgId,
+        `SELECT rcv.id
+         FROM rate_chart_versions rcv
+         JOIN rate_charts rc ON rc.id = rcv.rate_chart_id
+         WHERE rc.organization_id = $1
+         ORDER BY rcv.created_at DESC
+         LIMIT 1;`,
+        [orgId]
+      );
       if (rcvRes.rows.length > 0) {
-        rcvId = rcvRes.rows[0].id;
+        rcvId = rcvRes.rows[0]!.id;
       } else {
-        const chartRes = await client.query(`
-          INSERT INTO rate_charts (organization_id, center_id, name, milk_category, pricing_type, is_active)
-          VALUES ($1, $2, 'Standard Cow Rate Chart', 'COW', 'GRID', TRUE)
-          RETURNING id;
-        `, [orgId, t.centerId]);
-        const chartId = chartRes.rows[0].id;
-        const verRes = await client.query(`
-          INSERT INTO rate_chart_versions (rate_chart_id, version_number, effective_from, base_fat, base_snf, base_rate, is_approved)
-          VALUES ($1, 1, NOW(), 3.5, 8.5, 38.0, TRUE)
-          RETURNING id;
-        `, [chartId]);
-        rcvId = verRes.rows[0].id;
+        const chartRes = await this.queryTenant<{ id: string }>(
+          client,
+          orgId,
+          `INSERT INTO rate_charts (organization_id, center_id, name, milk_category, pricing_type, is_active)
+           VALUES ($1, $2, 'Standard Cow Rate Chart', 'COW', 'GRID', TRUE)
+           RETURNING id;`,
+          [orgId, t.centerId]
+        );
+        const chartId = chartRes.rows[0]!.id;
+        const verRes = await this.queryTenant<{ id: string }>(
+          client,
+          orgId,
+          `INSERT INTO rate_chart_versions (rate_chart_id, version_number, effective_from, base_fat, base_snf, base_rate, is_approved)
+           VALUES ($1, 1, NOW(), 3.5, 8.5, 38.0, TRUE)
+           RETURNING id;`,
+          [chartId]
+        );
+        rcvId = verRes.rows[0]!.id;
       }
 
       // 6. Insert into milk_collections with composite organization_id + idempotency_key uniqueness
@@ -478,84 +705,42 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
         RETURNING id;
       `;
 
-      let insertRes;
-      try {
-        insertRes = await client.query(insertSql, [
-          t.id,
-          intakeSessionId,
-          orgId,
-          t.centerId,
-          t.customerId,
-          t.date,
-          t.shift,
-          t.milkCategory,
-          t.weightLiters,
-          t.fatPercentage,
-          t.snfPercentage,
-          rcvId,
-          t.appliedRatePerLiter,
-          t.totalAmount,
-          idempotencyKey,
-        ]);
-      } catch (err: any) {
-        // Fallback only if organization_id column does not exist on legacy database schemas
-        if (err?.message && err.message.includes('column "organization_id" does not exist')) {
-          const fallbackInsertSql = `
-            INSERT INTO milk_collections (
-              id, session_id, center_id, customer_id, business_date, shift_type,
-              milk_category, net_weight, measurement_unit, fat_percentage, snf_percentage,
-              rate_chart_version_id, applied_rate_per_unit, total_amount, transaction_status,
-              client_intake_uuid, idempotency_key, created_at, synced_at
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6,
-              $7, $8, 'LITERS', $9, $10,
-              $11, $12, $13, 'COMPLETED',
-              gen_random_uuid(), $14, NOW(), NOW()
-            )
-            ON CONFLICT (idempotency_key) DO NOTHING
-            RETURNING id;
-          `;
-          insertRes = await client.query(fallbackInsertSql, [
-            t.id,
-            intakeSessionId,
-            t.centerId,
-            t.customerId,
-            t.date,
-            t.shift,
-            t.milkCategory,
-            t.weightLiters,
-            t.fatPercentage,
-            t.snfPercentage,
-            rcvId,
-            t.appliedRatePerLiter,
-            t.totalAmount,
-            idempotencyKey,
-          ]);
-        } else {
-          throw err;
-        }
-      }
+      const insertRes = await this.queryTenant<{ id: string }>(client, orgId, insertSql, [
+        t.id,
+        intakeSessionId,
+        orgId,
+        t.centerId,
+        t.customerId,
+        t.date,
+        t.shift,
+        t.milkCategory,
+        t.weightLiters,
+        t.fatPercentage,
+        t.snfPercentage,
+        rcvId,
+        t.appliedRatePerLiter,
+        t.totalAmount,
+        idempotencyKey,
+      ]);
 
-      // Check whether an actual row was inserted
-      // In PostgreSQL: insertRes.rows.length === 0 when ON CONFLICT DO NOTHING activates
-      // In pg-mem: insertRes.rows[0]?.id !== t.id on conflict
       const wasInserted = Boolean(insertRes && insertRes.rows.length > 0 && insertRes.rows[0]?.id === t.id);
       const ledgerKey = `LEDGER-COLL-${orgId}-${idempotencyKey}`;
-      const existingLedger = await client.query(
-        `SELECT id FROM ledger_transactions WHERE idempotency_key = $1 LIMIT 1;`,
-        [ledgerKey]
+      const existingLedger = await this.queryTenant(
+        client,
+        orgId,
+        `SELECT id FROM ledger_transactions WHERE idempotency_key = $1 AND organization_id = $2 LIMIT 1;`,
+        [ledgerKey, orgId]
       );
 
       if (!wasInserted || existingLedger.rows.length > 0) {
-        // CONFLICT / DUPLICATE DETECTED:
-        // Another concurrent request created the canonical collection or it was already committed.
-        // DO NOT update session totals. DO NOT post farmer ledger credit.
         return await this.resolveExistingReplay(client, idempotencyKey, orgId, t);
       }
 
       // 7. Resolve customer_ledger_accounts row lock (FOR UPDATE)
       let currentBalance = 0;
-      const accountRes = await client.query(
+      const accountRes = await this.queryTenant<{ id: string; current_balance: string | number }>(
+        client,
+        orgId,
         `SELECT id, current_balance FROM customer_ledger_accounts
          WHERE customer_id = $1 AND organization_id = $2
          FOR UPDATE;`,
@@ -564,18 +749,24 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
 
       let ledgerAccountId: string;
       if (accountRes.rows.length > 0) {
-        ledgerAccountId = accountRes.rows[0].id;
-        currentBalance = Number(accountRes.rows[0].current_balance || 0);
+        ledgerAccountId = accountRes.rows[0]!.id;
+        currentBalance = Number(accountRes.rows[0]!.current_balance || 0);
       } else {
-        const createAccRes = await client.query(
+        const createAccRes = await this.queryTenant<{ id: string; current_balance: string | number }>(
+          client,
+          orgId,
           `INSERT INTO customer_ledger_accounts (customer_id, organization_id, currency, current_balance)
            VALUES ($1, $2, 'INR', 0.00)
            ON CONFLICT (customer_id) DO UPDATE SET updated_at = NOW()
+           WHERE customer_ledger_accounts.organization_id = EXCLUDED.organization_id
            RETURNING id, current_balance;`,
           [t.customerId, orgId]
         );
-        ledgerAccountId = createAccRes.rows[0].id;
-        currentBalance = Number(createAccRes.rows[0].current_balance || 0);
+        if (createAccRes.rows.length === 0) {
+          throw new ForbiddenTenantError(`Cross-tenant ledger account conflict for customer '${t.customerId}'.`);
+        }
+        ledgerAccountId = createAccRes.rows[0]!.id;
+        currentBalance = Number(createAccRes.rows[0]!.current_balance || 0);
       }
 
       const newBalance = Math.round((currentBalance + t.totalAmount + Number.EPSILON) * 100) / 100;
@@ -583,7 +774,9 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
       // 8. WINNER DETERMINATION: Insert deterministic ledger_transactions row
       const ledgerEntryId = crypto.randomUUID();
       const ledgerIdempotencyKey = `LEDGER-COLL-${orgId}-${idempotencyKey}`;
-      const ledgerTxnRes = await client.query(
+      const ledgerTxnRes = await this.queryTenant<{ id: string }>(
+        client,
+        orgId,
         `INSERT INTO ledger_transactions (
           id, organization_id, center_id, customer_id, transaction_type,
           direction, amount, balance_after, reference_entity, reference_id,
@@ -610,20 +803,23 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
       );
 
       if (!ledgerTxnRes || ledgerTxnRes.rows.length === 0 || ledgerTxnRes.rows[0]?.id !== ledgerEntryId) {
-        // Concurrently inserted by parallel intake!
         return await this.resolveExistingReplay(client, idempotencyKey, orgId);
       }
 
       // 9. WINNER: Update customer_ledger_accounts running balance
-      await client.query(
+      await this.queryTenant(
+        client,
+        orgId,
         `UPDATE customer_ledger_accounts
          SET current_balance = $1, last_transaction_at = NOW(), updated_at = NOW()
-         WHERE id = $2;`,
-        [newBalance, ledgerAccountId]
+         WHERE id = $2 AND organization_id = $3;`,
+        [newBalance, ledgerAccountId, orgId]
       );
 
       // 10. WINNER: Update session cumulative totals in the EXACT SAME transaction
-      await client.query(
+      await this.queryTenant(
+        client,
+        orgId,
         `UPDATE kiosk_shift_sessions SET
           total_liters = total_liters + $2::numeric,
           cow_liters = cow_liters + (CASE WHEN $3 = 'COW' THEN $2::numeric ELSE 0.0 END),
@@ -631,12 +827,14 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
           transaction_count = transaction_count + 1,
           total_amount = total_amount + $4::numeric,
           updated_at = NOW()
-        WHERE id = $1`,
-        [t.sessionId, t.weightLiters, t.milkCategory, t.totalAmount]
+        WHERE id = $1 AND organization_id = $5`,
+        [t.sessionId, t.weightLiters, t.milkCategory, t.totalAmount, orgId]
       );
 
       // 11. WINNER: Insert balanced double-entry ledger line
-      await client.query(
+      await this.queryTenant(
+        client,
+        orgId,
         `INSERT INTO ledger_entries (
           transaction_id, account_id, account_type, entry_type, amount
         ) VALUES ($1, $2, 'CUSTOMER_PAYABLE', 'CREDIT', $3);`,
@@ -680,8 +878,8 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
             JSON.stringify(outboxPayload),
           ]
         );
-      } catch (outboxErr: any) {
-        // Log silently if table is not yet created in legacy mock environments
+      } catch {
+        // Outbox schema alignment tracked separately under DF-021 (RESTART-09)
       }
 
       return {
@@ -694,17 +892,22 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
   }
 
   public async listRecentBySession(sessionId: string, limit = 20, organizationId?: string): Promise<MilkCollectionTransaction[]> {
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId);
+    const { orgId, tenantDb } = await this.getAuthorizedTenantDb(organizationId);
+    if (!sessionId || !sessionId.trim()) {
+      return [];
+    }
+    const cleanSessionId = sessionId.trim();
+    const isUuid = UUID_REGEX.test(cleanSessionId);
     const sessionWhere = isUuid
       ? `(mc.session_id = $1 OR (
-          mc.center_id = (SELECT center_id FROM kiosk_shift_sessions WHERE id = $1 LIMIT 1)
-          AND mc.business_date = (SELECT business_date FROM kiosk_shift_sessions WHERE id = $1 LIMIT 1)
-          AND mc.shift_type = (SELECT shift FROM kiosk_shift_sessions WHERE id = $1 LIMIT 1)
+          mc.center_id = (SELECT center_id FROM kiosk_shift_sessions WHERE id = $1 AND organization_id = $3 LIMIT 1)
+          AND mc.business_date = (SELECT business_date FROM kiosk_shift_sessions WHERE id = $1 AND organization_id = $3 LIMIT 1)
+          AND mc.shift_type = (SELECT shift FROM kiosk_shift_sessions WHERE id = $1 AND organization_id = $3 LIMIT 1)
         ))`
-      : `(mc.session_id IN (SELECT id FROM kiosk_shift_sessions WHERE session_code = $1) OR (
-          mc.center_id = (SELECT center_id FROM kiosk_shift_sessions WHERE session_code = $1 LIMIT 1)
-          AND mc.business_date = (SELECT business_date FROM kiosk_shift_sessions WHERE session_code = $1 LIMIT 1)
-          AND mc.shift_type = (SELECT shift FROM kiosk_shift_sessions WHERE session_code = $1 LIMIT 1)
+      : `(mc.session_id IN (SELECT id FROM kiosk_shift_sessions WHERE session_code = $1 AND organization_id = $3) OR (
+          mc.center_id = (SELECT center_id FROM kiosk_shift_sessions WHERE session_code = $1 AND organization_id = $3 LIMIT 1)
+          AND mc.business_date = (SELECT business_date FROM kiosk_shift_sessions WHERE session_code = $1 AND organization_id = $3 LIMIT 1)
+          AND mc.shift_type = (SELECT shift FROM kiosk_shift_sessions WHERE session_code = $1 AND organization_id = $3 LIMIT 1)
         ))`;
 
     const sql = `
@@ -721,36 +924,22 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
       LEFT JOIN collection_sessions cs ON cs.id = mc.session_id
       LEFT JOIN users u ON u.id = cs.operator_id
       WHERE ${sessionWhere}
+        AND mc.organization_id = $3
+        AND c.organization_id = $3
       ORDER BY mc.created_at DESC
       LIMIT $2;
     `;
 
-    if (organizationId) {
-      try {
-        const client = await this.getDb(organizationId);
-        const result = await client.query(sql, [sessionId, limit]);
-        return result.rows.map((row: any) => this.mapRowToTransaction(row));
-      } catch {}
-    }
-
-    for (const tenantDb of tenantDbManager.getAllTenantDbs()) {
-      try {
-        const result = await tenantDb.query(sql, [sessionId, limit]);
-        if (result.rows.length > 0) {
-          return result.rows.map((row: any) => this.mapRowToTransaction(row));
-        }
-      } catch {}
-    }
-
-    try {
-      const result = await db.query(sql, [sessionId, limit]);
-      return result.rows.map((row: any) => this.mapRowToTransaction(row));
-    } catch {
-      return [];
-    }
+    const result = await this.queryTenant(tenantDb, orgId, sql, [cleanSessionId, limit, orgId]);
+    return result.rows.map((row: any) => this.mapRowToTransaction(row));
   }
 
   public async listByCustomer(customerId: string, limit = 50, offset = 0, organizationId?: string): Promise<MilkCollectionTransaction[]> {
+    const { orgId, tenantDb } = await this.getAuthorizedTenantDb(organizationId);
+    if (!customerId || !UUID_REGEX.test(customerId.trim())) {
+      return [];
+    }
+
     const sql = `
       SELECT 
         mc.*,
@@ -765,33 +954,100 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
       LEFT JOIN collection_sessions cs ON cs.id = mc.session_id
       LEFT JOIN users u ON u.id = cs.operator_id
       WHERE (mc.customer_id = $1 OR c.global_customer_id = $1)
+        AND mc.organization_id = $4
+        AND c.organization_id = $4
       ORDER BY mc.business_date DESC, mc.created_at DESC
       LIMIT $2 OFFSET $3;
     `;
 
-    if (organizationId) {
-      try {
-        const client = await this.getDb(organizationId);
-        const result = await client.query(sql, [customerId, limit, offset]);
-        return result.rows.map((row: any) => this.mapRowToTransaction(row));
-      } catch {}
+    const result = await this.queryTenant(tenantDb, orgId, sql, [customerId.trim(), limit, offset, orgId]);
+    return result.rows.map((row: any) => this.mapRowToTransaction(row));
+  }
+
+  public async listConsolidatedForMemberships(params: {
+    memberships: AuthorizedMembershipRef[];
+    limit?: number;
+    offset?: number;
+  }): Promise<ConsolidatedHistoryResult> {
+    const limit = Math.max(1, Math.min(200, Number(params.limit || 50)));
+    const offset = Math.max(0, Number(params.offset || 0));
+    const perTenantLimit = limit + offset;
+
+    if (!Array.isArray(params.memberships) || params.memberships.length === 0) {
+      return { transactions: [], partial: false, unavailableDairies: [] };
     }
 
-    for (const tenantDb of tenantDbManager.getAllTenantDbs()) {
+    const allTransactions: MilkCollectionTransaction[] = [];
+    const unavailableDairies: ConsolidatedHistoryUnavailableDairy[] = [];
+    const seenOrgs = new Set<string>();
+
+    for (const membership of params.memberships) {
+      const cleanOrgId = membership.organizationId?.trim();
+      const cleanCustId = membership.tenantCustomerId?.trim();
+      if (!cleanOrgId || !UUID_REGEX.test(cleanOrgId) || !cleanCustId || !UUID_REGEX.test(cleanCustId)) {
+        continue;
+      }
+      if (seenOrgs.has(cleanOrgId.toLowerCase())) {
+        continue;
+      }
+      seenOrgs.add(cleanOrgId.toLowerCase());
+
       try {
-        const result = await tenantDb.query(sql, [customerId, limit, offset]);
-        if (result.rows.length > 0) {
-          return result.rows.map((row: any) => this.mapRowToTransaction(row));
+        const tenantDb = await tenantDbManager.getStrictTenantDb(cleanOrgId);
+        const sql = `
+          SELECT 
+            mc.*,
+            c.farmer_code,
+            c.full_name,
+            c.organization_id,
+            cs.device_id,
+            cs.identification_method,
+            u.full_name AS operator_name
+          FROM milk_collections mc
+          JOIN customers c ON c.id = mc.customer_id
+          LEFT JOIN collection_sessions cs ON cs.id = mc.session_id
+          LEFT JOIN users u ON u.id = cs.operator_id
+          WHERE mc.customer_id = $1
+            AND mc.organization_id = $2
+            AND c.organization_id = $2
+          ORDER BY mc.business_date DESC, mc.created_at DESC
+          LIMIT $3;
+        `;
+        const res = await this.queryTenant(tenantDb, cleanOrgId, sql, [cleanCustId, cleanOrgId, perTenantLimit]);
+        for (const row of res.rows) {
+          allTransactions.push(this.mapRowToTransaction(row));
         }
-      } catch {}
+      } catch (err: any) {
+        unavailableDairies.push({
+          organizationId: cleanOrgId,
+          dairyName: membership.dairyName,
+          code: err?.code || 'TENANT_DATABASE_UNAVAILABLE',
+          message: err?.message || 'Authorized dairy tenant database unavailable',
+        });
+      }
     }
 
-    try {
-      const result = await db.query(sql, [customerId, limit, offset]);
-      return result.rows.map((row: any) => this.mapRowToTransaction(row));
-    } catch {
-      return [];
+    if (allTransactions.length === 0 && unavailableDairies.length === seenOrgs.size && seenOrgs.size > 0) {
+      throw new TenantDatabaseUnavailableError(
+        unavailableDairies[0]!.organizationId,
+        unavailableDairies[0]!.code,
+        'All authorized dairy tenant databases are currently unavailable'
+      );
     }
+
+    allTransactions.sort((a, b) => {
+      const aJson = a.toJSON();
+      const bJson = b.toJSON();
+      const dateCmp = String(bJson.date || '').localeCompare(String(aJson.date || ''));
+      if (dateCmp !== 0) return dateCmp;
+      return String(bJson.timestamp || '').localeCompare(String(aJson.timestamp || ''));
+    });
+
+    return {
+      transactions: allTransactions.slice(offset, offset + limit),
+      partial: unavailableDairies.length > 0,
+      unavailableDairies,
+    };
   }
 
   public async getMonthlySummary(customerId: string, monthYear: string, organizationId?: string): Promise<{
@@ -804,6 +1060,20 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
     totalAmount: number;
     transactionCount: number;
   }> {
+    const { orgId, tenantDb } = await this.getAuthorizedTenantDb(organizationId);
+    if (!customerId || !UUID_REGEX.test(customerId.trim())) {
+      return {
+        monthYear,
+        totalLiters: 0,
+        cowLiters: 0,
+        buffaloLiters: 0,
+        avgFat: 0,
+        avgSnf: 0,
+        totalAmount: 0,
+        transactionCount: 0,
+      };
+    }
+
     const parts = (monthYear || '').split('-');
     const year = parseInt(parts[0] || '2026', 10);
     const month = parseInt(parts[1] || '1', 10);
@@ -822,75 +1092,25 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
         COUNT(mc.id) AS transaction_count
       FROM milk_collections mc
       JOIN customers c ON c.id = mc.customer_id
-      WHERE (mc.customer_id = $1 OR c.global_customer_id = $1) 
+      WHERE (mc.customer_id = $1 OR c.global_customer_id = $1)
+        AND mc.organization_id = $4
+        AND c.organization_id = $4
         AND mc.business_date >= $2
         AND mc.business_date <= $3
         AND mc.transaction_status = 'COMPLETED';
     `;
 
-    if (organizationId) {
-      try {
-        const client = await this.getDb(organizationId);
-        const result = await client.query(sql, [customerId, startDate, endDate]);
-        if (result.rows.length > 0) {
-          const row = result.rows[0];
-          return {
-            monthYear,
-            totalLiters: Math.round((Number(row.total_liters) + Number.EPSILON) * 100) / 100,
-            cowLiters: Math.round((Number(row.cow_liters) + Number.EPSILON) * 100) / 100,
-            buffaloLiters: Math.round((Number(row.buffalo_liters) + Number.EPSILON) * 100) / 100,
-            avgFat: Math.round((Number(row.avg_fat) + Number.EPSILON) * 100) / 100,
-            avgSnf: Math.round((Number(row.avg_snf) + Number.EPSILON) * 100) / 100,
-            totalAmount: Math.round((Number(row.total_amount) + Number.EPSILON) * 100) / 100,
-            transactionCount: Number(row.transaction_count),
-          };
-        }
-      } catch {}
-    }
-
-    for (const tenantDb of tenantDbManager.getAllTenantDbs()) {
-      try {
-        const result = await tenantDb.query(sql, [customerId, startDate, endDate]);
-        if (result.rows.length > 0 && Number(result.rows[0].transaction_count) > 0) {
-          const row = result.rows[0];
-          return {
-            monthYear,
-            totalLiters: Math.round((Number(row.total_liters) + Number.EPSILON) * 100) / 100,
-            cowLiters: Math.round((Number(row.cow_liters) + Number.EPSILON) * 100) / 100,
-            buffaloLiters: Math.round((Number(row.buffalo_liters) + Number.EPSILON) * 100) / 100,
-            avgFat: Math.round((Number(row.avg_fat) + Number.EPSILON) * 100) / 100,
-            avgSnf: Math.round((Number(row.avg_snf) + Number.EPSILON) * 100) / 100,
-            totalAmount: Math.round((Number(row.total_amount) + Number.EPSILON) * 100) / 100,
-            transactionCount: Number(row.transaction_count),
-          };
-        }
-      } catch {}
-    }
-
-    try {
-      const result = await db.query(sql, [customerId, startDate, endDate]);
-      const row = result.rows[0];
-      return {
-        monthYear,
-        totalLiters: Math.round((Number(row?.total_liters || 0) + Number.EPSILON) * 100) / 100,
-        cowLiters: Math.round((Number(row?.cow_liters || 0) + Number.EPSILON) * 100) / 100,
-        buffaloLiters: Math.round((Number(row?.buffalo_liters || 0) + Number.EPSILON) * 100) / 100,
-        avgFat: Math.round((Number(row?.avg_fat || 0) + Number.EPSILON) * 100) / 100,
-        avgSnf: Math.round((Number(row?.avg_snf || 0) + Number.EPSILON) * 100) / 100,
-        totalAmount: Math.round((Number(row?.total_amount || 0) + Number.EPSILON) * 100) / 100,
-        transactionCount: Number(row?.transaction_count || 0),
-      };
-    } catch {
-      return {
-        monthYear,
-        totalLiters: 0,
-        cowLiters: 0,
-        buffaloLiters: 0,
-        avgFat: 0,
-        avgSnf: 0,
-        totalAmount: 0,
-        transactionCount: 0,
-      };
-    }
+    const result = await this.queryTenant(tenantDb, orgId, sql, [customerId.trim(), startDate, endDate, orgId]);
+    const row = result.rows[0];
+    return {
+      monthYear,
+      totalLiters: Math.round((Number(row?.total_liters || 0) + Number.EPSILON) * 100) / 100,
+      cowLiters: Math.round((Number(row?.cow_liters || 0) + Number.EPSILON) * 100) / 100,
+      buffaloLiters: Math.round((Number(row?.buffalo_liters || 0) + Number.EPSILON) * 100) / 100,
+      avgFat: Math.round((Number(row?.avg_fat || 0) + Number.EPSILON) * 100) / 100,
+      avgSnf: Math.round((Number(row?.avg_snf || 0) + Number.EPSILON) * 100) / 100,
+      totalAmount: Math.round((Number(row?.total_amount || 0) + Number.EPSILON) * 100) / 100,
+      transactionCount: Number(row?.transaction_count || 0),
+    };
   }
 }

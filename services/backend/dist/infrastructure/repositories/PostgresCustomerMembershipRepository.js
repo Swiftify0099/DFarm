@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { CustomerMembership } from '../../domain/entities/CustomerMembership.js';
 import { GlobalCustomerIdentity } from '../../domain/entities/GlobalCustomerIdentity.js';
-import { tenantDbManager } from '../database/TenantDatabaseManager.js';
+import { tenantDbManager, TenantDatabaseUnavailableError } from '../database/TenantDatabaseManager.js';
 import { db } from '../database/PostgresPool.js';
 export class PostgresCustomerMembershipRepository {
     getDb() {
@@ -29,8 +29,7 @@ export class PostgresCustomerMembershipRepository {
             });
         }
         catch (err) {
-            // If table doesn't exist yet, return null
-            return null;
+            throw new TenantDatabaseUnavailableError('CONTROL_PLANE', 'CONTROL_PLANE_UNAVAILABLE', err?.message || 'Control-plane customer identity lookup failed');
         }
     }
     async createGlobalIdentity(phoneE164) {
@@ -104,8 +103,8 @@ export class PostgresCustomerMembershipRepository {
                 lastSynchronizedAt: row.last_synchronized_at,
             }));
         }
-        catch {
-            return [];
+        catch (err) {
+            throw new TenantDatabaseUnavailableError('CONTROL_PLANE', 'CONTROL_PLANE_UNAVAILABLE', err?.message || 'Control-plane customer membership query failed');
         }
     }
     async findMembership(globalCustomerId, organizationId) {
@@ -156,8 +155,8 @@ export class PostgresCustomerMembershipRepository {
                 lastSynchronizedAt: row.last_synchronized_at,
             });
         }
-        catch {
-            return null;
+        catch (err) {
+            throw new TenantDatabaseUnavailableError('CONTROL_PLANE', 'CONTROL_PLANE_UNAVAILABLE', err?.message || 'Control-plane membership lookup failed');
         }
     }
     async saveMembership(membership) {
@@ -198,22 +197,17 @@ export class PostgresCustomerMembershipRepository {
     }
     async updateMembershipStatus(organizationId, tenantCustomerId, status, farmerCode, customerName) {
         const client = this.getDb();
-        try {
-            const sql = `
-        UPDATE customer_dairy_memberships
-        SET 
-          membership_status = $1,
-          farmer_code = COALESCE($2, farmer_code),
-          customer_name = COALESCE($3, customer_name),
-          updated_at = NOW(),
-          last_synchronized_at = NOW()
-        WHERE organization_id = $4 AND tenant_customer_id = $5;
-      `;
-            await client.query(sql, [status, farmerCode || null, customerName || null, organizationId, tenantCustomerId]);
-        }
-        catch {
-            // Ignore if table not present in test doubles
-        }
+        const sql = `
+      UPDATE customer_dairy_memberships
+      SET 
+        membership_status = $1,
+        farmer_code = COALESCE($2, farmer_code),
+        customer_name = COALESCE($3, customer_name),
+        updated_at = NOW(),
+        last_synchronized_at = NOW()
+      WHERE organization_id = $4 AND tenant_customer_id = $5;
+    `;
+        await client.query(sql, [status, farmerCode || null, customerName || null, organizationId, tenantCustomerId]);
     }
     async getMembershipCount(globalCustomerId) {
         const client = this.getDb();
@@ -222,8 +216,8 @@ export class PostgresCustomerMembershipRepository {
             const res = await client.query(sql, [globalCustomerId]);
             return Number(res.rows[0]?.cnt || 0);
         }
-        catch {
-            return 0;
+        catch (err) {
+            throw new TenantDatabaseUnavailableError('CONTROL_PLANE', 'CONTROL_PLANE_UNAVAILABLE', err?.message || 'Control-plane membership count failed');
         }
     }
 }

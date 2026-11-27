@@ -181,14 +181,32 @@ router.get('/memberships', authenticate, async (req: Request, res: Response, nex
     const requestedPhone = (req.query['phone'] as string) || (req.query['mobileNumber'] as string);
 
     if (!isStaff) {
-      if (requestedGlobalId && req.user?.globalCustomerId && requestedGlobalId !== req.user.globalCustomerId) {
+      if (requestedGlobalId && (!req.user?.globalCustomerId || requestedGlobalId !== req.user.globalCustomerId)) {
         res.status(403).json({ success: false, error: 'Cross-customer membership lookup blocked.' });
         return;
       }
-      if (requestedPhone && tokenPhone && requestedPhone !== tokenPhone) {
-        res.status(403).json({ success: false, error: 'Cross-customer phone membership lookup blocked.' });
-        return;
+      if (requestedPhone) {
+        let normalizedReqPhone = requestedPhone.trim();
+        let normalizedTokPhone = (tokenPhone || '').trim();
+        try {
+          normalizedReqPhone = new PhoneNumber(requestedPhone).e164;
+        } catch {}
+        if (normalizedTokPhone) {
+          try {
+            normalizedTokPhone = new PhoneNumber(normalizedTokPhone).e164;
+          } catch {}
+        }
+        if (!normalizedTokPhone || normalizedReqPhone !== normalizedTokPhone) {
+          res.status(403).json({ success: false, error: 'Cross-customer phone membership lookup blocked.' });
+          return;
+        }
       }
+    } else if (
+      req.user?.role !== 'SUPER_ADMIN' &&
+      !hasPermission(req.user?.role || '', 'customers:read')
+    ) {
+      res.status(403).json({ success: false, error: 'Forbidden: Staff role lacks customer read permission.' });
+      return;
     }
 
     const userPhone = isStaff ? (requestedPhone || tokenPhone) : tokenPhone;
@@ -199,7 +217,7 @@ router.get('/memberships', authenticate, async (req: Request, res: Response, nex
     const result = await getMembershipsUseCase.execute({
       globalCustomerId,
       phone: userPhone,
-      customerId: req.user?.userId,
+      customerId: isStaff ? undefined : req.user?.userId,
       organizationId: req.user?.organizationId,
     });
 
@@ -224,11 +242,27 @@ router.post('/switch-dairy', authenticate, async (req: Request, res: Response, n
       return;
     }
 
+    const isCustomer = req.user?.actorType === 'CUSTOMER' || req.user?.role === 'FARMER_CUSTOMER' || req.user?.role === 'GUEST_FARMER';
+    if (isCustomer) {
+      if (req.body.globalCustomerId && (!req.user?.globalCustomerId || req.body.globalCustomerId !== req.user.globalCustomerId)) {
+        res.status(403).json({ success: false, error: 'Cross-customer dairy switch blocked.' });
+        return;
+      }
+      if (req.body.tenantCustomerId && req.body.tenantCustomerId !== req.user?.userId) {
+        res.status(403).json({ success: false, error: 'Cross-customer dairy switch blocked.' });
+        return;
+      }
+      if (req.body.phone && req.user?.phoneNumber && req.body.phone !== req.user.phoneNumber) {
+        res.status(403).json({ success: false, error: 'Cross-customer phone dairy switch blocked.' });
+        return;
+      }
+    }
+
     const result = await selectDairyMembershipUseCase.execute({
-      globalCustomerId: req.user?.globalCustomerId || req.body.globalCustomerId,
+      globalCustomerId: isCustomer ? req.user?.globalCustomerId : (req.user?.globalCustomerId || req.body.globalCustomerId),
       dairyId,
-      tenantCustomerId: req.user?.userId || req.body.tenantCustomerId,
-      phone: req.user?.phoneNumber || req.body.phone,
+      tenantCustomerId: isCustomer ? req.user?.userId : (req.user?.userId || req.body.tenantCustomerId),
+      phone: isCustomer ? req.user?.phoneNumber : (req.user?.phoneNumber || req.body.phone),
     });
 
     res.json({
@@ -914,10 +948,10 @@ const handleSoftDeleteCustomer = async (req: Request, res: Response, next: NextF
       return;
     }
 
-    const tenantDb = await tenantDbManager.getTenantDb(customer.organizationId);
+    const tenantDb = await tenantDbManager.getStrictTenantDb(customer.organizationId);
     await tenantDb.query(
-      `UPDATE customers SET is_deleted = TRUE, deletion_reason = $1, updated_at = NOW() WHERE id = $2;`,
-      [reason, customerId]
+      `UPDATE customers SET is_deleted = TRUE, deletion_reason = $1, updated_at = NOW() WHERE id = $2 AND organization_id = $3;`,
+      [reason, customerId, customer.organizationId]
     );
     res.json({ success: true, message: 'Customer account marked as soft-deleted in audit records.' });
   } catch (err) {
@@ -943,10 +977,10 @@ router.post('/:id/restore', authenticate, authorizePermission('customers:update'
       return;
     }
 
-    const tenantDb = await tenantDbManager.getTenantDb(customer.organizationId);
+    const tenantDb = await tenantDbManager.getStrictTenantDb(customer.organizationId);
     await tenantDb.query(
-      `UPDATE customers SET is_deleted = FALSE, deletion_reason = NULL, updated_at = NOW() WHERE id = $1;`,
-      [customerId]
+      `UPDATE customers SET is_deleted = FALSE, deletion_reason = NULL, updated_at = NOW() WHERE id = $1 AND organization_id = $2;`,
+      [customerId, customer.organizationId]
     );
     res.json({ success: true, message: 'Customer account successfully restored to active status.' });
   } catch (err) {

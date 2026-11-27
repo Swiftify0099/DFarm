@@ -1038,10 +1038,18 @@ export class TenantDatabaseManager {
         catch { }
         const adapter = db.adapters.createPg();
         const pool = new adapter.Pool();
+        let txMutex = Promise.resolve();
         return {
             query: (text, params) => pool.query(text, params),
             withTransaction: async (callback) => {
+                const previous = txMutex;
+                let releaseMutex;
+                txMutex = new Promise((resolve) => {
+                    releaseMutex = resolve;
+                });
+                await previous;
                 const client = await pool.connect();
+                const backup = db.backup();
                 try {
                     await client.query('BEGIN');
                     const result = await callback(client);
@@ -1049,11 +1057,13 @@ export class TenantDatabaseManager {
                     return result;
                 }
                 catch (err) {
-                    await client.query('ROLLBACK');
+                    await client.query('ROLLBACK').catch(() => { });
+                    backup.restore();
                     throw err;
                 }
                 finally {
                     client.release();
+                    releaseMutex();
                 }
             },
             close: async () => pool.end(),
