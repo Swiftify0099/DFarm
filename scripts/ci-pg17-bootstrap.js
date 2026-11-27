@@ -1,37 +1,19 @@
 import pg from 'pg';
 import crypto from 'node:crypto';
+import { assertDisposablePg17Cluster } from './pg17-safety-guard.js';
 
 const { Pool } = pg;
 
 const TEST_PG_URL = process.env['TEST_POSTGRES_URL'] || '';
 
-if (!TEST_PG_URL) {
-  console.error('ERROR: TEST_POSTGRES_URL is required for CI PostgreSQL 17 role bootstrap.');
-  process.exit(1);
-}
-
-if (process.env['NODE_ENV'] === 'production') {
-  console.error('ERROR: Refusing to run disposable CI role bootstrap when NODE_ENV=production.');
-  process.exit(1);
-}
-
-let parsedUrl;
-try {
-  parsedUrl = new URL(TEST_PG_URL);
-} catch {
-  console.error('ERROR: TEST_POSTGRES_URL is not a valid URL.');
-  process.exit(1);
-}
-
-const allowedLocalHosts = new Set(['127.0.0.1', 'localhost', 'postgres', 'postgres17']);
-if (!allowedLocalHosts.has(parsedUrl.hostname)) {
-  console.error(
-    `ERROR: Refusing to bootstrap roles against non-disposable host '${parsedUrl.hostname}'.`
-  );
-  process.exit(1);
-}
-
 async function main() {
+  const preflight = await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
+  console.log(`PostgreSQL server version: ${preflight.versionText}`);
+  console.log(`PostgreSQL server_version_num: ${preflight.serverVersionNum}`);
+  console.log(
+    `Verified disposable PG17 target (db=${preflight.activeDb}, user=${preflight.activeUser}, opt-in=enabled).`
+  );
+
   const pool = new Pool({
     connectionString: TEST_PG_URL,
     connectionTimeoutMillis: 5000,
@@ -41,20 +23,7 @@ async function main() {
   const probeDbName = `dfarm_bootstrap_probe_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
 
   try {
-    // 1. Validate PostgreSQL 17.x server version
-    const verRes = await pool.query(
-      `SELECT version() AS version_text, current_setting('server_version_num')::int AS server_version_num;`
-    );
-    const versionText = String(verRes.rows[0]?.version_text || '');
-    const versionNum = Number(verRes.rows[0]?.server_version_num || 0);
-    console.log(`PostgreSQL server version: ${versionText}`);
-    console.log(`PostgreSQL server_version_num: ${versionNum}`);
-
-    if (versionNum < 170000 || versionNum >= 180000) {
-      throw new Error(`Expected PostgreSQL 17.x (170000..179999), got ${versionNum}`);
-    }
-
-    // 2. Verify primary bootstrap role (postgres) exists and has superuser + createdb
+    // 1. Verify primary bootstrap role (postgres) exists and has superuser + createdb
     const pgRoleRes = await pool.query(
       `SELECT rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin, rolbypassrls
        FROM pg_roles

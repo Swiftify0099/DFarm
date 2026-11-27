@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 import pg from 'pg';
 import crypto from 'node:crypto';
-import { MigrationRunner } from '../dist/infrastructure/database/MigrationRunner.js';
+import { assertDisposablePg17Cluster } from '../../../scripts/pg17-safety-guard.js';
 
 const { Pool } = pg;
 
@@ -43,6 +43,8 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
     return;
   }
 
+  await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
+
   const suffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
   const dbNameCtrl = `dfarm_l12_ctrl_${suffix}`;
   const dbNameOrg1 = `dfarm_l12_org1_${suffix}`;
@@ -73,14 +75,7 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
     const verNum = Number(verRes.rows[0]?.ver_num || 0);
     assert.ok(verNum >= 170000 && verNum < 180000, `Expected PostgreSQL 17.x, got ${verNum}`);
 
-    const ctrlMigs = await MigrationRunner.runControlPlaneMigrations(poolCtrl);
-    const org1Migs = await MigrationRunner.runTenantMigrations(poolOrg1, org1Id);
-    const org2Migs = await MigrationRunner.runTenantMigrations(poolOrg2, org2Id);
-    assert.ok(ctrlMigs.every((m) => m.status === 'APPLIED'));
-    assert.ok(org1Migs.every((m) => m.status === 'APPLIED'));
-    assert.ok(org2Migs.every((m) => m.status === 'APPLIED'));
-
-    // Point backend singletons to disposable control-plane DB BEFORE importing app/db/manager
+    // Point backend singletons to disposable control-plane DB BEFORE importing any dist/ module (config/env.js)
     process.env['NODE_ENV'] = 'test';
     process.env['TEST_REAL_POSTGRES'] = '1';
     process.env['DATABASE_TLS_MODE'] = 'disable';
@@ -89,6 +84,14 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
     process.env['DATABASE_PROVISIONER_URL'] = ctrlUrl;
     process.env['TENANT_POOL_CONNECTION_TIMEOUT_MS'] = '5000';
 
+    const { MigrationRunner } = await import('../dist/infrastructure/database/MigrationRunner.js');
+    const ctrlMigs = await MigrationRunner.runControlPlaneMigrations(poolCtrl);
+    const org1Migs = await MigrationRunner.runTenantMigrations(poolOrg1, org1Id);
+    const org2Migs = await MigrationRunner.runTenantMigrations(poolOrg2, org2Id);
+    assert.ok(ctrlMigs.every((m) => m.status === 'APPLIED'));
+    assert.ok(org1Migs.every((m) => m.status === 'APPLIED'));
+    assert.ok(org2Migs.every((m) => m.status === 'APPLIED'));
+
     const { createApp } = await import('../dist/app.js');
     const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
     const { tenantDbManager } = await import('../dist/infrastructure/database/TenantDatabaseManager.js');
@@ -96,6 +99,25 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
     const { HmacJwtTokenService } = await import('../dist/infrastructure/security/HmacJwtTokenService.js');
     const { PostgresLedgerRepository } = await import('../dist/infrastructure/repositories/PostgresLedgerRepository.js');
     const { CustomerLedgerAccount } = await import('../dist/domain/entities/CustomerLedgerAccount.js');
+
+    const controlPlaneAdapter = {
+      query: (text, params) => poolCtrl.query(text, params),
+      withTransaction: async (callback) => {
+        const client = await poolCtrl.connect();
+        try {
+          await client.query('BEGIN');
+          const result = await callback(client);
+          await client.query('COMMIT');
+          return result;
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw err;
+        } finally {
+          client.release();
+        }
+      },
+    };
+    tenantDbManager.setControlPlaneDb(controlPlaneAdapter);
 
     const app = createApp();
     const tokenService = new HmacJwtTokenService();
@@ -153,7 +175,14 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
         ]
       );
 
-      await tenantDbManager.initialize();
+      await tenantDbManager.initialize(controlPlaneAdapter);
+      assert.equal(tenantDbManager.getControlPlaneDb(), controlPlaneAdapter);
+      assert.equal(tenantDbManager.getTenantMapping(org1Id)?.databaseName, dbNameOrg1);
+      assert.equal(tenantDbManager.getTenantMapping(org2Id)?.databaseName, dbNameOrg2);
+      const strictDb1 = await tenantDbManager.getStrictTenantDb(org1Id);
+      const strictDb2 = await tenantDbManager.getStrictTenantDb(org2Id);
+      assert.equal((await strictDb1.query('SELECT current_database() AS d;')).rows[0].d, dbNameOrg1);
+      assert.equal((await strictDb2.query('SELECT current_database() AS d;')).rows[0].d, dbNameOrg2);
 
       // Seed tenant DB A & control plane mirrors for auth verification
       for (const targetPool of [poolCtrl, poolOrg1]) {
@@ -241,12 +270,12 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
 
       await poolCtrl.query(
         `INSERT INTO customer_dairy_memberships (
-           id, global_customer_id, organization_id, tenant_customer_id, farmer_code, customer_name,
+           id, global_customer_id, organization_id, tenant_customer_id, farmer_code,
            membership_status, dairy_name, dairy_code, center_id, center_name
          ) VALUES
-           ($1, $2, $3, $4, 'FC-L12-01', 'Ramesh L12', 'APPROVED', 'L12 Isolated Dairy A', $5, $6, 'L12 Center A'),
-           ($7, $8, $3, $9, 'FC-L12-02', 'Suresh L12', 'APPROVED', 'L12 Isolated Dairy A', $5, $6, 'L12 Center A'),
-           ($10, $11, $12, $13, 'FC-L12-03', 'Anand L12', 'APPROVED', 'L12 Isolated Dairy B', $14, $15, 'L12 Center B');`,
+           ($1, $2, $3, $4, 'FC-L12-01', 'APPROVED', 'L12 Isolated Dairy A', $5, $6, 'L12 Center A'),
+           ($7, $8, $3, $9, 'FC-L12-02', 'APPROVED', 'L12 Isolated Dairy A', $5, $6, 'L12 Center A'),
+           ($10, $11, $12, $13, 'FC-L12-03', 'APPROVED', 'L12 Isolated Dairy B', $14, $15, 'L12 Center B');`,
         [
           crypto.randomUUID(), globalCust1Id, org1Id, customer1Id, org1Code, center1Id,
           crypto.randomUUID(), globalCust2Id, customer2Id,
@@ -498,20 +527,55 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
       assert.equal(unbalanced.rows.length, 0);
     });
 
-    await t.test('8. Unbalanced journal rejection: direct insertion of invalid/negative entries is rejected by constraints', async () => {
-      await assert.rejects(() =>
-        poolOrg1.query(
-          `INSERT INTO ledger_entries (transaction_id, account_id, account_type, entry_type, amount)
-           VALUES ($1, $2, 'CUSTOMER_PAYABLE', 'INVALID_TYPE', 100.00);`,
-          [crypto.randomUUID(), customer1Id]
-        )
+    await t.test('8. Unbalanced journal rejection: direct insertion of invalid/negative/oversized entries is rejected with exact SQLSTATEs', async () => {
+      const existingTxnRes = await poolOrg1.query(
+        `SELECT id FROM ledger_transactions WHERE customer_id = $1 LIMIT 1;`,
+        [customer1Id]
       );
-      await assert.rejects(() =>
-        poolOrg1.query(
-          `INSERT INTO ledger_entries (transaction_id, account_id, account_type, entry_type, amount)
-           VALUES ($1, $2, 'CUSTOMER_PAYABLE', 'DEBIT', -50.00);`,
-          [crypto.randomUUID(), customer1Id]
-        )
+      assert.equal(existingTxnRes.rows.length, 1);
+      const validTxnId = existingTxnRes.rows[0].id;
+
+      // 8a. entry_type exceeding VARCHAR(10) fails with SQLSTATE 22001 (string_data_right_truncation)
+      await assert.rejects(
+        () =>
+          poolOrg1.query(
+            `INSERT INTO ledger_entries (transaction_id, account_id, account_type, entry_type, amount)
+             VALUES ($1, $2, 'CUSTOMER_PAYABLE', 'INVALID_TYPE', 100.00);`,
+            [validTxnId, customer1Id]
+          ),
+        (err) => err.code === '22001'
+      );
+
+      // 8b. entry_type <= 10 chars violating chk_entry_type fails with SQLSTATE 23514
+      await assert.rejects(
+        () =>
+          poolOrg1.query(
+            `INSERT INTO ledger_entries (transaction_id, account_id, account_type, entry_type, amount)
+             VALUES ($1, $2, 'CUSTOMER_PAYABLE', 'BOGUS', 100.00);`,
+            [validTxnId, customer1Id]
+          ),
+        (err) => err.code === '23514' && /chk_entry_type/i.test(String(err.constraint || err.message))
+      );
+
+      // 8c. negative amount violating chk_entry_positive_amount fails with SQLSTATE 23514
+      await assert.rejects(
+        () =>
+          poolOrg1.query(
+            `INSERT INTO ledger_entries (transaction_id, account_id, account_type, entry_type, amount)
+             VALUES ($1, $2, 'CUSTOMER_PAYABLE', 'DEBIT', -50.00);`,
+            [validTxnId, customer1Id]
+          ),
+        (err) => err.code === '23514' && /chk_entry_positive_amount/i.test(String(err.constraint || err.message))
+      );
+
+      // 8d. empty string passed as UUID fails with SQLSTATE 22P02 (invalid_text_representation)
+      await assert.rejects(
+        () =>
+          poolOrg1.query(
+            `SELECT * FROM customer_ledger_accounts WHERE customer_id = $1::uuid;`,
+            ['']
+          ),
+        (err) => err.code === '22P02'
       );
     });
 

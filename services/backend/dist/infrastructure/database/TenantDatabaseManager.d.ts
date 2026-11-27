@@ -42,6 +42,7 @@ export declare class TenantDatabaseManager {
     private isInitialized;
     private constructor();
     static getInstance(): TenantDatabaseManager;
+    private isRealPostgresRequired;
     private isTestEnvironment;
     private getSslConfig;
     getControlPlaneDb(): IDatabaseClient;

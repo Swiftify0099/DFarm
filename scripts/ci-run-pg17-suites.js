@@ -1,8 +1,6 @@
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
-import pg from 'pg';
-
-const { Pool } = pg;
+import { assertDisposablePg17Cluster } from './pg17-safety-guard.js';
 
 const TEST_PG_URL = process.env['TEST_POSTGRES_URL'] || '';
 
@@ -28,24 +26,6 @@ const REQUIRED_SUITES = [
     path: 'services/backend/tests/concurrent-idempotency-financial.test.js',
   },
 ];
-
-async function queryPostgresVersion() {
-  if (!TEST_PG_URL) {
-    throw new Error('TEST_POSTGRES_URL must be set for PG17 suite gate.');
-  }
-  const pool = new Pool({ connectionString: TEST_PG_URL, connectionTimeoutMillis: 5000, max: 1 });
-  try {
-    const res = await pool.query(
-      `SELECT current_setting('server_version') AS server_version,
-              current_setting('server_version_num')::int AS server_version_num;`
-    );
-    const serverVersion = String(res.rows[0]?.server_version || 'unknown');
-    const serverVersionNum = Number(res.rows[0]?.server_version_num || 0);
-    return { serverVersion, serverVersionNum };
-  } finally {
-    await pool.end().catch(() => {});
-  }
-}
 
 function parseTapStats(output) {
   const testsMatch = output.match(/^# tests\s+(\d+)/m);
@@ -74,6 +54,7 @@ function runSuite(suitePath) {
           NODE_ENV: 'test',
           REQUIRE_REAL_POSTGRES: '1',
           TEST_REAL_POSTGRES: '1',
+          DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS: process.env['DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS'] || '',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       }
@@ -104,13 +85,11 @@ function runSuite(suitePath) {
 }
 
 async function main() {
-  const { serverVersion, serverVersionNum } = await queryPostgresVersion();
-  const validPg17 = serverVersionNum >= 170000 && serverVersionNum < 180000;
-
-  if (!validPg17) {
-    console.error(`ERROR: Expected PostgreSQL 17.x, observed ${serverVersion} (${serverVersionNum})`);
-    process.exit(1);
-  }
+  const { serverVersion, serverVersionNum, activeDb, activeUser } =
+    await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
+  console.log(
+    `Verified disposable PG17 target (version=${serverVersion}, num=${serverVersionNum}, db=${activeDb}, user=${activeUser}).`
+  );
 
   const results = [];
   for (const suite of REQUIRED_SUITES) {

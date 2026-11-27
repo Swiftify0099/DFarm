@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import pg from 'pg';
-import { MigrationRunner } from '../dist/infrastructure/database/MigrationRunner.js';
+import { assertDisposablePg17Cluster } from '../../../scripts/pg17-safety-guard.js';
 
 const { Pool } = pg;
 
@@ -41,6 +41,8 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
     return;
   }
 
+  await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
+
   const suffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
   const dbNameCtrl = `dfarm_r33_ctrl_${suffix}`;
   const dbNameA = `dfarm_r33_a_${suffix}`;
@@ -67,11 +69,7 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
     poolA = new Pool({ connectionString: urlA, max: 15 });
     poolB = new Pool({ connectionString: urlB, max: 10 });
 
-    const ctrlMigrations = await MigrationRunner.runControlPlaneMigrations(poolCtrl);
-    const tenantAMigrations = await MigrationRunner.runTenantMigrations(poolA, orgA);
-    const tenantBMigrations = await MigrationRunner.runTenantMigrations(poolB, orgB);
-
-    // Point backend singletons to disposable control-plane DB BEFORE importing app/db/manager
+    // Point backend singletons to disposable control-plane DB BEFORE importing any dist/ module (config/env.js)
     process.env['NODE_ENV'] = 'test';
     process.env['TEST_REAL_POSTGRES'] = '1';
     process.env['DATABASE_TLS_MODE'] = 'disable';
@@ -79,6 +77,11 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
     process.env['DATABASE_URL'] = ctrlUrl;
     process.env['DATABASE_PROVISIONER_URL'] = ctrlUrl;
     process.env['TENANT_POOL_CONNECTION_TIMEOUT_MS'] = '5000';
+
+    const { MigrationRunner } = await import('../dist/infrastructure/database/MigrationRunner.js');
+    const ctrlMigrations = await MigrationRunner.runControlPlaneMigrations(poolCtrl);
+    const tenantAMigrations = await MigrationRunner.runTenantMigrations(poolA, orgA);
+    const tenantBMigrations = await MigrationRunner.runTenantMigrations(poolB, orgB);
 
     const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
     const { tenantDbManager } = await import('../dist/infrastructure/database/TenantDatabaseManager.js');
@@ -91,6 +94,25 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
     const { MilkCollectionTransaction } = await import('../dist/domain/entities/MilkCollectionTransaction.js');
     const { KioskShiftSession } = await import('../dist/domain/entities/KioskShiftSession.js');
     const { CustomerLedgerAccount } = await import('../dist/domain/entities/CustomerLedgerAccount.js');
+
+    const controlPlaneAdapter = {
+      query: (text, params) => poolCtrl.query(text, params),
+      withTransaction: async (callback) => {
+        const client = await poolCtrl.connect();
+        try {
+          await client.query('BEGIN');
+          const result = await callback(client);
+          await client.query('COMMIT');
+          return result;
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw err;
+        } finally {
+          client.release();
+        }
+      },
+    };
+    tenantDbManager.setControlPlaneDb(controlPlaneAdapter);
 
     suite.after(async () => {
       await tenantDbManager.closeAllPools().catch(() => {});
@@ -127,7 +149,10 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
       ]
     );
 
-    await tenantDbManager.initialize();
+    await tenantDbManager.initialize(controlPlaneAdapter);
+    assert.equal(tenantDbManager.getControlPlaneDb(), controlPlaneAdapter);
+    assert.equal(tenantDbManager.getTenantMapping(orgA)?.databaseName, dbNameA);
+    assert.equal(tenantDbManager.getTenantMapping(orgB)?.databaseName, dbNameB);
 
     // Seed Dairy A tenant DB (003_user_identity_foundation.sql uses role column)
     await poolA.query(`INSERT INTO organizations (id, name, code, status) VALUES ($1, 'PG17 Repo Dairy A', $2, 'ACTIVE');`, [orgA, `R33_A_${suffix}`]);

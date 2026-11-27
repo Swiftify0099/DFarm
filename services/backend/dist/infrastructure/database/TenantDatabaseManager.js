@@ -39,6 +39,9 @@ export class TenantDatabaseManager {
         }
         return TenantDatabaseManager.instance;
     }
+    isRealPostgresRequired() {
+        return process.env['REQUIRE_REAL_POSTGRES'] === '1';
+    }
     isTestEnvironment() {
         return (process.env.NODE_ENV === 'test' ||
             process.execArgv.includes('--test') ||
@@ -115,7 +118,10 @@ export class TenantDatabaseManager {
         }
         catch (err) {
             logger.error({ error: err.message }, 'Error initializing TenantDatabaseManager mappings');
-            // In test mode, allow initialization to proceed
+            if (this.isRealPostgresRequired()) {
+                throw new Error(`CRITICAL: TenantDatabaseManager control-plane initialization failed while REQUIRE_REAL_POSTGRES=1: ${err.message}`);
+            }
+            // In offline unit test mode, allow initialization to proceed
             if (process.env.NODE_ENV === 'test') {
                 this.isInitialized = true;
             }
@@ -216,6 +222,9 @@ export class TenantDatabaseManager {
             return this.tenantMemDbs.get(dairyId);
         }
         if (mapping.resourceType === 'ISOLATED_TEST_INSTANCE') {
+            if (this.isRealPostgresRequired()) {
+                throw new TenantDatabaseUnavailableError(dairyId, 'ISOLATED_TEST_INSTANCE_FORBIDDEN', 'In-memory tenant database is strictly prohibited when REQUIRE_REAL_POSTGRES=1');
+            }
             const memClient = this.createIsolatedMemoryDatabase(dairyId);
             this.tenantMemDbs.set(dairyId, memClient);
             return memClient;
@@ -351,7 +360,7 @@ export class TenantDatabaseManager {
             catch (err) {
                 await adminPool.end().catch(() => { });
                 // If physical Postgres is unreachable and running in test or development mode, allow isolated test double
-                if ((this.isTestEnvironment() || config.NODE_ENV === 'development') && !process.env.TEST_REAL_POSTGRES) {
+                if ((this.isTestEnvironment() || config.NODE_ENV === 'development') && !process.env.TEST_REAL_POSTGRES && !this.isRealPostgresRequired()) {
                     logger.warn({ error: err.message }, 'Physical Postgres unavailable in development/test mode. Provisioning isolated test/development memory double.');
                     isTestDouble = true;
                     currentMapping.resourceType = 'ISOLATED_TEST_INSTANCE';
@@ -504,7 +513,7 @@ export class TenantDatabaseManager {
                 logger.warn({ dairyId, error: err.message }, 'Failed to query dairy_database_mappings from control plane');
             }
         }
-        if (!mapping && (this.isTestEnvironment() || config.NODE_ENV === 'development')) {
+        if (!mapping && !this.isRealPostgresRequired() && !process.env.TEST_REAL_POSTGRES && (this.isTestEnvironment() || config.NODE_ENV === 'development')) {
             const testMapping = {
                 id: crypto.randomUUID(),
                 dairyId,
@@ -529,6 +538,9 @@ export class TenantDatabaseManager {
             if (this.isPlatformFederationDairy(dairyId)) {
                 return this.getControlPlaneDb();
             }
+            if (this.isRealPostgresRequired()) {
+                throw new TenantDatabaseUnavailableError(dairyId, mapping?.provisioningStatus || 'UNMAPPED', 'Active physical tenant database mapping is required when REQUIRE_REAL_POSTGRES=1');
+            }
             // If registered organization exists in control plane, serve via partitioned control plane database
             const controlDb = this.getControlPlaneDb();
             try {
@@ -549,6 +561,9 @@ export class TenantDatabaseManager {
         }
         // 4. Initialize bounded tenant pool from encrypted connection string
         if (mapping.resourceType === 'ISOLATED_TEST_INSTANCE') {
+            if (this.isRealPostgresRequired()) {
+                throw new TenantDatabaseUnavailableError(dairyId, 'ISOLATED_TEST_INSTANCE_FORBIDDEN', 'In-memory tenant database is strictly prohibited when REQUIRE_REAL_POSTGRES=1');
+            }
             let memClient = this.tenantMemDbs.get(dairyId);
             if (!memClient) {
                 memClient = this.createIsolatedMemoryDatabase(dairyId);
@@ -557,11 +572,14 @@ export class TenantDatabaseManager {
             return memClient;
         }
         if (!mapping.connectionUriEncrypted) {
-            if (config.NODE_ENV === 'development' ||
+            if (!this.isRealPostgresRequired() && (config.NODE_ENV === 'development' ||
                 process.env.NODE_ENV !== 'production' ||
                 this.isPlatformFederationDairy(dairyId) ||
                 mapping.databaseName === 'postgres' ||
-                mapping.databaseName === 'dfarm_control_plane') {
+                mapping.databaseName === 'dfarm_control_plane')) {
+                return this.getControlPlaneDb();
+            }
+            if (this.isPlatformFederationDairy(dairyId)) {
                 return this.getControlPlaneDb();
             }
             throw new Error(`Tenant database connection credentials missing for dairy: ${dairyId}`);
@@ -789,6 +807,9 @@ export class TenantDatabaseManager {
         }
     }
     createIsolatedMemoryDatabase(_dairyId) {
+        if (this.isRealPostgresRequired()) {
+            throw new Error('CRITICAL: In-memory pg-mem tenant database is strictly prohibited when REQUIRE_REAL_POSTGRES=1.');
+        }
         const db = newDb();
         db.public.registerFunction({
             name: 'gen_random_uuid',

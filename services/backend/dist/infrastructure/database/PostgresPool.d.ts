@@ -15,11 +15,12 @@ export declare class PostgresDatabase {
         idleCount: number;
         waitingCount: number;
     };
+    private isRealPostgresRequired;
     private isTestEnvironment;
     /**
      * Explicit In-Memory Test Double: Allowed in unit tests and development fallback
      * when physical PostgreSQL cluster is unreachable.
-     * STRICTLY prohibited in production server runtime.
+     * STRICTLY prohibited in production server runtime and when REQUIRE_REAL_POSTGRES=1.
      */
     private getOrCreateTestMemDb;
     query<T extends pg.QueryResultRow = any>(text: string, params?: any[]): Promise<pg.QueryResult<T>>;

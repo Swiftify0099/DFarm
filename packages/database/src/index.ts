@@ -61,6 +61,7 @@ export const MIGRATION_MANIFEST: MigrationManifestEntry[] = [
   { version: '043', filename: '043_distributed_sse_tickets_and_retention.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Distributed SSE tickets and event retention' },
   { version: '044', filename: '044_revoked_tokens_durable_revocation.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Durable token revocation table for distributed fail-closed JWT invalidation (RESTART-02.1)' },
   { version: '045', filename: '045_kiosk_shift_session_concurrency_and_ownership.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Atomic partial unique index for active kiosk shift sessions and tenant-scoped lookup indexes (RESTART-03)' },
+  { version: '046', filename: '046_complete_milk_collection_session_organization_id.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Include organization_id in complete_milk_collection_session milk_collections insert after 039 NOT NULL constraint' },
 ];
 
 export const MIGRATION_FILES = MIGRATION_MANIFEST

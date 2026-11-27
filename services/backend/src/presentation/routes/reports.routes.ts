@@ -23,6 +23,12 @@ function resolveAuthorizedOrgId(req: Request, res: Response): string | undefined
 }
 
 const getTenantDb = async (organizationId?: string) => {
+  if (process.env['REQUIRE_REAL_POSTGRES'] === '1') {
+    if (!organizationId) {
+      throw new Error('Organization ID is required for tenant reports query when REQUIRE_REAL_POSTGRES=1');
+    }
+    return await tenantDbManager.getStrictTenantDb(organizationId);
+  }
   if (organizationId) {
     try {
       return await tenantDbManager.getTenantDb(organizationId);

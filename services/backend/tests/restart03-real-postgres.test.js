@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import pg from 'pg';
+import { assertDisposablePg17Cluster } from '../../../scripts/pg17-safety-guard.js';
 import {
   MigrationRunner,
   MIGRATION_MANIFEST,
@@ -54,6 +55,8 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
     suite.skip(msg);
     return;
   }
+
+  await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
 
   const adminPool = new pg.Pool({ connectionString: TEST_PG_URL, connectionTimeoutMillis: 3000 });
   const suffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
@@ -131,10 +134,37 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
       assert.equal(ctrlChecks.rows[0].tenant_tbl, null, 'Control-plane DB must NOT have tenant-only kiosk_shift_sessions');
 
       const idxRes = await poolA.query(
-        `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'kiosk_shift_sessions' AND indexname = 'uq_kiosk_shift_sessions_active_open';`
+        `SELECT
+           c.relname AS indexname,
+           i.indisunique AS is_unique,
+           pg_get_expr(i.indpred, i.indrelid) AS predicate_expr,
+           pg_get_indexdef(i.indexrelid) AS indexdef,
+           ARRAY(
+             SELECT a.attname
+             FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+             JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
+             ORDER BY k.ord
+           ) AS columns
+         FROM pg_index i
+         JOIN pg_class c ON c.oid = i.indexrelid
+         JOIN pg_class t ON t.oid = i.indrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+         WHERE n.nspname = 'public'
+           AND t.relname = 'kiosk_shift_sessions'
+           AND c.relname = 'uq_kiosk_shift_sessions_active_open';`
       );
       assert.equal(idxRes.rows.length, 1);
-      assert.match(String(idxRes.rows[0].indexdef), /WHERE\s+\(status.*OPEN/i);
+      const idxRow = idxRes.rows[0];
+      assert.equal(idxRow.indexname, 'uq_kiosk_shift_sessions_active_open');
+      assert.equal(idxRow.is_unique, true);
+      assert.deepEqual(idxRow.columns, ['organization_id', 'center_id', 'device_identifier']);
+      const predicate = String(idxRow.predicate_expr || '');
+      assert.ok(predicate.length > 0, 'Expected partial index predicate on uq_kiosk_shift_sessions_active_open');
+      assert.match(predicate, /\bstatus\b/i);
+      assert.match(predicate, /=/);
+      assert.match(predicate, /'OPEN'/);
+      assert.doesNotMatch(predicate, /CLOSED|<>|!=/i);
+      assert.match(String(idxRow.indexdef), /CREATE UNIQUE INDEX/i);
     });
 
     await suite.test('2. Real PG foreign keys & joins reject unseeded fake entities and isolate Tenant A from Tenant B', async () => {

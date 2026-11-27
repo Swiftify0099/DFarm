@@ -1,5 +1,8 @@
 # DFARM RESTART-03.4 — Final CI & Regression Matrix
 
+> [!NOTE]
+> **Superseded by RESTART-03.5:** After RESTART-03.4 was committed and pushed at `436b18835324ab754d10bb58d8b91931dc6cf214`, GitHub Actions PG17 Run [`45935084366`](https://github.com/Swiftify0099/DFarm/actions/runs/45935084366) (Job [`140296326116`](https://github.com/Swiftify0099/DFarm/actions/runs/45935084366/job/140296326116)) executed on PostgreSQL `17.12` (`server_version_num=170012`) and reported `restart03` `3/5` (regex mismatch), `restart032` `4/4` PASS, and `0/5`, `6/24`, `0/1` on `restart033`, `customer-ledger-accounting`, and `concurrent-idempotency-financial` (`ECONNREFUSED 127.0.0.1:54322` / missing tenant DB wiring + fixture/schema defects). See [DFARM_RESTART_03_5_REAL_POSTGRES17_FAILURE_REMEDIATION_REPORT.md](./DFARM_RESTART_03_5_REAL_POSTGRES17_FAILURE_REMEDIATION_REPORT.md) for current local remediations.
+
 ## 1. Executive Summary & Final Classification
 
 - **Repository:** `Swiftify0099/DFarm` (`fix/cloudflare-pages-production-deploy`)

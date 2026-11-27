@@ -222,7 +222,7 @@ export class AccountAuthorityService {
 
       const memRes = await db.query(
         `SELECT m.tenant_customer_id, m.global_customer_id, m.organization_id, m.center_id,
-                m.farmer_code, m.customer_name, m.membership_status, o.status AS org_status
+                m.farmer_code, m.membership_status, o.status AS org_status
          FROM customer_dairy_memberships m
          LEFT JOIN organizations o ON o.id = m.organization_id
          WHERE m.tenant_customer_id::text = $1
@@ -333,7 +333,7 @@ export class AccountAuthorityService {
         membershipRow?.global_customer_id ||
         params.globalCustomerId,
       role: 'FARMER_CUSTOMER',
-      fullName: customerRow?.full_name || membershipRow?.customer_name || undefined,
+      fullName: customerRow?.full_name || undefined,
       phoneNumber: customerRow?.normalized_mobile_number || undefined,
       farmerCode: customerRow?.farmer_code || membershipRow?.farmer_code || undefined,
       registrationStatus: regStatus || undefined,

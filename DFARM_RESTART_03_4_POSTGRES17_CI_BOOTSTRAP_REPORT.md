@@ -1,5 +1,8 @@
 # DFARM RESTART-03.4 — PostgreSQL 17 CI Bootstrap Report
 
+> [!NOTE]
+> **Updated in RESTART-03.5:** GitHub Actions Run [`45935084366`](https://github.com/Swiftify0099/DFarm/actions/runs/45935084366) / Job [`140296326116`](https://github.com/Swiftify0099/DFarm/actions/runs/45935084366/job/140296326116) on `436b18835324ab754d10bb58d8b91931dc6cf214` confirmed RESTART-03.4's CI role bootstrap (`postgres`, `anon`, `authenticated`, `service_role`) succeeded on PG `17.12` (`server_version_num=170012`). Subsequent suite failures and RESTART-03.5 disposable-cluster safety hardening (`DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1`) are documented in [DFARM_RESTART_03_5_REAL_POSTGRES17_FAILURE_REMEDIATION_REPORT.md](./DFARM_RESTART_03_5_REAL_POSTGRES17_FAILURE_REMEDIATION_REPORT.md).
+
 ## 1. Executive Summary & Classification
 
 - **Repository:** `Swiftify0099/DFarm` (`fix/cloudflare-pages-production-deploy`)

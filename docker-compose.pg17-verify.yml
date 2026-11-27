@@ -1,6 +1,10 @@
 # Isolated, disposable PostgreSQL 17 instance for RESTART-03 / DFarm verification tests.
 # Usage:
 #   docker compose -f docker-compose.pg17-verify.yml up -d --wait
+#   $env:NODE_ENV="test"
+#   $env:DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS="1"
+#   $env:REQUIRE_REAL_POSTGRES="1"
+#   $env:TEST_REAL_POSTGRES="1"
 #   $env:TEST_POSTGRES_URL="postgresql://postgres:placeholder_ci_pg17_test_password@127.0.0.1:55432/dfarm_central"
 #   node scripts/ci-pg17-bootstrap.js
 #   node scripts/ci-run-pg17-suites.js

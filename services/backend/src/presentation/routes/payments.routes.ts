@@ -9,6 +9,12 @@ import { paymentRouter } from '../../modules/payments/payment.routes.js';
 const router = Router();
 
 const getTenantDb = async (organizationId?: string) => {
+  if (process.env['REQUIRE_REAL_POSTGRES'] === '1') {
+    if (!organizationId) {
+      throw new Error('Organization ID is required for tenant payments query when REQUIRE_REAL_POSTGRES=1');
+    }
+    return await tenantDbManager.getStrictTenantDb(organizationId);
+  }
   if (organizationId) {
     try {
       return await tenantDbManager.getTenantDb(organizationId);
@@ -65,10 +71,14 @@ router.get('/', authenticate, authorizePermission('billing:read', 'billing:manag
 
     const client = await getTenantDb(organizationId);
     let result;
-    try {
+    if (process.env['REQUIRE_REAL_POSTGRES'] === '1') {
       result = await client.query(query, params);
-    } catch {
-      result = await db.query(query, params);
+    } else {
+      try {
+        result = await client.query(query, params);
+      } catch {
+        result = await db.query(query, params);
+      }
     }
     const payments = result.rows.map((p: any) => ({
       id: p.id,

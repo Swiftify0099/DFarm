@@ -95,13 +95,17 @@ export class PostgresDatabase {
     const isConnected = this.isPostgresConnected === true;
     return {
       status: isConnected ? 'CONNECTED' : 'DISCONNECTED',
-      databaseMode: isConnected
+      databaseMode: isConnected || this.isRealPostgresRequired()
         ? 'PHYSICAL_POSTGRES'
         : (this.isTestEnvironment() ? 'TEST_ISOLATED_MEM_DB' : 'PHYSICAL_POSTGRES'),
       poolSize: this.pool.totalCount,
       idleCount: this.pool.idleCount,
       waitingCount: this.pool.waitingCount,
     };
+  }
+
+  private isRealPostgresRequired(): boolean {
+    return process.env['REQUIRE_REAL_POSTGRES'] === '1';
   }
 
   private isTestEnvironment(): boolean {
@@ -115,9 +119,14 @@ export class PostgresDatabase {
   /**
    * Explicit In-Memory Test Double: Allowed in unit tests and development fallback
    * when physical PostgreSQL cluster is unreachable.
-   * STRICTLY prohibited in production server runtime.
+   * STRICTLY prohibited in production server runtime and when REQUIRE_REAL_POSTGRES=1.
    */
   private getOrCreateTestMemDb(): any {
+    if (this.isRealPostgresRequired()) {
+      throw new Error(
+        'CRITICAL: In-memory pg-mem database is strictly prohibited when REQUIRE_REAL_POSTGRES=1. Real PostgreSQL cluster connection required.'
+      );
+    }
     if (!this.isTestEnvironment() && config.NODE_ENV !== 'development') {
       throw new Error(
         'CRITICAL: In-memory pg-mem database is strictly prohibited in production runtime environments. Real PostgreSQL cluster connection required.'
@@ -565,6 +574,13 @@ export class PostgresDatabase {
           err.message?.includes('timed out') ||
           err.message?.includes('socket hang up');
 
+        if (isConnErr && this.isRealPostgresRequired()) {
+          this.isPostgresConnected = false;
+          throw new Error(
+            `CRITICAL: Physical PostgreSQL connection failed while REQUIRE_REAL_POSTGRES=1 (pg-mem fallback disabled): ${err.message}`
+          );
+        }
+
         if (isConnErr && (this.isTestEnvironment() || config.NODE_ENV === 'development')) {
           if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.message?.includes('timeout') || err.message?.includes('timed out')) {
             this.isPostgresConnected = false;
@@ -580,7 +596,7 @@ export class PostgresDatabase {
     }
 
     // 2. Fallback to isolated test double in unit test mode or development
-    if (this.isTestEnvironment() || config.NODE_ENV === 'development') {
+    if (!this.isRealPostgresRequired() && (this.isTestEnvironment() || config.NODE_ENV === 'development')) {
       const adapter = this.getOrCreateTestMemDb();
       const pool = new adapter.Pool();
       return await pool.query(text, params);
@@ -612,6 +628,11 @@ export class PostgresDatabase {
           if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.message?.includes('timeout') || err.message?.includes('timed out')) {
             this.isPostgresConnected = false;
           }
+          if (this.isRealPostgresRequired()) {
+            throw new Error(
+              `CRITICAL: Physical PostgreSQL connection failed while REQUIRE_REAL_POSTGRES=1 (pg-mem fallback disabled): ${err.message}`
+            );
+          }
           if (!this.isTestEnvironment() && config.NODE_ENV !== 'development') {
             throw err;
           }
@@ -621,7 +642,7 @@ export class PostgresDatabase {
       }
     }
 
-    if (this.isTestEnvironment() || config.NODE_ENV === 'development') {
+    if (!this.isRealPostgresRequired() && (this.isTestEnvironment() || config.NODE_ENV === 'development')) {
       const adapter = this.getOrCreateTestMemDb();
       const memPool = new adapter.Pool();
       return await memPool.connect();
@@ -652,6 +673,11 @@ export class PostgresDatabase {
       } catch (err: any) {
         if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.message?.includes('timeout') || err.message?.includes('timed out')) {
           this.isPostgresConnected = false;
+          if (this.isRealPostgresRequired()) {
+            throw new Error(
+              `CRITICAL: Physical PostgreSQL transaction connect failed while REQUIRE_REAL_POSTGRES=1 (pg-mem fallback disabled): ${err.message}`
+            );
+          }
           if (!this.isTestEnvironment() && config.NODE_ENV !== 'development') {
             throw err;
           }
@@ -661,7 +687,7 @@ export class PostgresDatabase {
       }
     }
 
-    if (this.isTestEnvironment() || config.NODE_ENV === 'development') {
+    if (!this.isRealPostgresRequired() && (this.isTestEnvironment() || config.NODE_ENV === 'development')) {
       const adapter = this.getOrCreateTestMemDb();
       const pool = new adapter.Pool();
       const client = await pool.connect();

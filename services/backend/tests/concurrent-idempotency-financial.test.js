@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import pg from 'pg';
-import { MigrationRunner } from '../dist/infrastructure/database/MigrationRunner.js';
+import { assertDisposablePg17Cluster } from '../../../scripts/pg17-safety-guard.js';
 
 const { Pool } = pg;
 
@@ -40,6 +40,8 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
     return;
   }
 
+  await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
+
   const suffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
   const dbNameCtrl = `dfarm_conc_ctrl_${suffix}`;
   const dbNameAlpha = `dfarm_conc_a_${suffix}`;
@@ -70,13 +72,6 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
     const verNum = Number(verRes.rows[0]?.ver_num || 0);
     assert.ok(verNum >= 170000 && verNum < 180000, `Expected PostgreSQL 17.x, got ${verNum}`);
 
-    const ctrlMigs = await MigrationRunner.runControlPlaneMigrations(poolCtrl);
-    const alphaMigs = await MigrationRunner.runTenantMigrations(poolAlpha, orgAlpha);
-    const betaMigs = await MigrationRunner.runTenantMigrations(poolBeta, orgBeta);
-    assert.ok(ctrlMigs.every((m) => m.status === 'APPLIED'));
-    assert.ok(alphaMigs.every((m) => m.status === 'APPLIED'));
-    assert.ok(betaMigs.every((m) => m.status === 'APPLIED'));
-
     process.env['NODE_ENV'] = 'test';
     process.env['TEST_REAL_POSTGRES'] = '1';
     process.env['DATABASE_TLS_MODE'] = 'disable';
@@ -84,6 +79,14 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
     process.env['DATABASE_URL'] = ctrlUrl;
     process.env['DATABASE_PROVISIONER_URL'] = ctrlUrl;
     process.env['TENANT_POOL_CONNECTION_TIMEOUT_MS'] = '5000';
+
+    const { MigrationRunner } = await import('../dist/infrastructure/database/MigrationRunner.js');
+    const ctrlMigs = await MigrationRunner.runControlPlaneMigrations(poolCtrl);
+    const alphaMigs = await MigrationRunner.runTenantMigrations(poolAlpha, orgAlpha);
+    const betaMigs = await MigrationRunner.runTenantMigrations(poolBeta, orgBeta);
+    assert.ok(ctrlMigs.every((m) => m.status === 'APPLIED'));
+    assert.ok(alphaMigs.every((m) => m.status === 'APPLIED'));
+    assert.ok(betaMigs.every((m) => m.status === 'APPLIED'));
 
     const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
     const { tenantDbManager } = await import('../dist/infrastructure/database/TenantDatabaseManager.js');
@@ -94,6 +97,25 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
     const { PostgresRateChartRepository } = await import('../dist/infrastructure/repositories/PostgresRateChartRepository.js');
     const { PostgresLedgerRepository } = await import('../dist/infrastructure/repositories/PostgresLedgerRepository.js');
     const { ProcessMilkIntakeUseCase } = await import('../dist/application/use-cases/collections/MilkIntakeUseCases.js');
+
+    const controlPlaneAdapter = {
+      query: (text, params) => poolCtrl.query(text, params),
+      withTransaction: async (callback) => {
+        const client = await poolCtrl.connect();
+        try {
+          await client.query('BEGIN');
+          const result = await callback(client);
+          await client.query('COMMIT');
+          return result;
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw err;
+        } finally {
+          client.release();
+        }
+      },
+    };
+    tenantDbManager.setControlPlaneDb(controlPlaneAdapter);
 
     suite.after(async () => {
       await tenantDbManager.closeAllPools().catch(() => {});
@@ -118,7 +140,14 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
         crypto.randomUUID(), orgBeta, `ORG_B_${suffix}`, dbNameBeta, CredentialEncryption.encrypt(betaUrl),
       ]
     );
-    await tenantDbManager.initialize();
+    await tenantDbManager.initialize(controlPlaneAdapter);
+    assert.equal(tenantDbManager.getControlPlaneDb(), controlPlaneAdapter);
+    assert.equal(tenantDbManager.getTenantMapping(orgAlpha)?.databaseName, dbNameAlpha);
+    assert.equal(tenantDbManager.getTenantMapping(orgBeta)?.databaseName, dbNameBeta);
+    const verifyTenantA = await tenantDbManager.getStrictTenantDb(orgAlpha);
+    const verifyTenantB = await tenantDbManager.getStrictTenantDb(orgBeta);
+    assert.equal((await verifyTenantA.query('SELECT current_database() AS d;')).rows[0].d, dbNameAlpha);
+    assert.equal((await verifyTenantB.query('SELECT current_database() AS d;')).rows[0].d, dbNameBeta);
 
     const centerAlpha = crypto.randomUUID();
     const centerBeta = crypto.randomUUID();
