@@ -4,7 +4,7 @@ export interface IDatabaseClient {
     withTransaction<T>(callback: (client: pg.PoolClient) => Promise<T>): Promise<T>;
     close?(): Promise<void>;
 }
-export type ProvisioningStatus = 'PENDING' | 'PROVISIONING' | 'DATABASE_CREATED' | 'MIGRATING' | 'VERIFYING' | 'ACTIVE' | 'FAILED' | 'RETRY_REQUIRED' | 'ORPHANED_RESOURCE';
+export type ProvisioningStatus = 'PENDING' | 'PROVISIONING' | 'DATABASE_CREATED' | 'MIGRATING' | 'VERIFYING' | 'ACTIVE' | 'FAILED' | 'RETRY_REQUIRED' | 'ORPHANED_RESOURCE' | 'DEPROVISIONING' | 'DEPROVISION_FAILED';
 export interface TenantDatabaseMapping {
     id: string;
     dairyId: string;
@@ -47,12 +47,20 @@ export declare class TenantDatabaseManager {
      */
     private readonly poolShutdownPromises;
     private readonly closingTenantPools;
+    private readonly deprovisioningTenants;
+    private readonly inFlightAcquisitionsByDairy;
+    private closingAllPoolsPromise;
     private constructor();
     static getInstance(): TenantDatabaseManager;
     private isRealPostgresRequired;
     private isTestEnvironment;
     private getSslConfig;
     private createTenantPool;
+    private createAdminPool;
+    private trackAcquisition;
+    private assertTenantLifecycleAvailable;
+    private awaitPendingTenantClose;
+    private ensureExistingPoolUsableOrEvict;
     private endPoolSafely;
     getTenantPool(dairyId: string): pg.Pool | undefined;
     getControlPlaneDb(): IDatabaseClient;
@@ -108,14 +116,13 @@ export declare class TenantDatabaseManager {
     closeAllPools(): Promise<void>;
     /**
      * Permanently deprovisions a dairy tenant:
-     * 1. Closes and evicts active connection pools.
-     * 2. Drops physical PostgreSQL database (or evicts test in-memory instance).
-     * 3. Cleans up customer_dairy_memberships for this organization from central control-plane DB.
-     * 4. Deletes entry from central dairy_database_mappings.
-     * 5. Marks dairy organization status = 'DELETED' (and is_deleted = TRUE).
-     * 6. Deletes dairy-scoped users from central users table.
+     * 1. Marks tenant DEPROVISIONING and awaits any in-flight acquisitions before closing pools.
+     * 2. Closes and evicts active connection pools.
+     * 3. Drops physical PostgreSQL database cleanly (without FORCE or pg_terminate_backend).
+     * 4. Cleans up customer_dairy_memberships, dairy_database_mappings, users, and organizations.
+     * 5. On failure, records DEPROVISION_FAILED so partial tenants are never reopened and rethrows.
      */
-    deprovisionTenantDatabase(dairyId: string, options?: {
+    deprovisionTenantDatabase(dairyId: string, _options?: {
         force?: boolean;
     }): Promise<{
         success: boolean;

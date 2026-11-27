@@ -61,6 +61,9 @@ jobs:
       - name: Validate database migration manifests
         run: npm run db:validate
 
+      - name: Execute offline pool lifecycle suite and publish summary
+        run: node scripts/ci-run-offline-lifecycle-suite.js
+
       - name: Bootstrap and validate PostgreSQL 17 compatibility roles
         run: node scripts/ci-pg17-bootstrap.js
 

@@ -25,7 +25,9 @@ export type ProvisioningStatus =
   | 'ACTIVE'
   | 'FAILED'
   | 'RETRY_REQUIRED'
-  | 'ORPHANED_RESOURCE';
+  | 'ORPHANED_RESOURCE'
+  | 'DEPROVISIONING'
+  | 'DEPROVISION_FAILED';
 
 export interface TenantDatabaseMapping {
   id: string;
@@ -76,6 +78,9 @@ export class TenantDatabaseManager {
    */
   private readonly poolShutdownPromises = new WeakMap<pg.Pool, Promise<void>>();
   private readonly closingTenantPools = new Map<string, Promise<void>>();
+  private readonly deprovisioningTenants = new Map<string, Promise<any>>();
+  private readonly inFlightAcquisitionsByDairy = new Map<string, Set<Promise<void>>>();
+  private closingAllPoolsPromise: Promise<void> | null = null;
 
   private constructor() {}
 
@@ -135,6 +140,105 @@ export class TenantDatabaseManager {
       );
     });
     return tenantPool;
+  }
+
+  private createAdminPool(adminUri: string): pg.Pool {
+    return new pg.Pool({
+      connectionString: adminUri,
+      connectionTimeoutMillis: config.TENANT_POOL_CONNECTION_TIMEOUT_MS || 30000,
+      ssl: this.getSslConfig(adminUri),
+    });
+  }
+
+  private async trackAcquisition<T>(dairyId: string, fn: () => Promise<T>): Promise<T> {
+    let bucket = this.inFlightAcquisitionsByDairy.get(dairyId);
+    if (!bucket) {
+      bucket = new Set();
+      this.inFlightAcquisitionsByDairy.set(dairyId, bucket);
+    }
+    let resolveTrack!: () => void;
+    const marker = new Promise<void>((resolve) => {
+      resolveTrack = resolve;
+    });
+    bucket.add(marker);
+    try {
+      return await fn();
+    } finally {
+      resolveTrack();
+      bucket.delete(marker);
+      if (bucket.size === 0 && this.inFlightAcquisitionsByDairy.get(dairyId) === bucket) {
+        this.inFlightAcquisitionsByDairy.delete(dairyId);
+      }
+    }
+  }
+
+  private assertTenantLifecycleAvailable(dairyId: string): void {
+    if (this.closingAllPoolsPromise) {
+      throw new TenantDatabaseUnavailableError(
+        dairyId,
+        'SHUTTING_DOWN',
+        'Tenant database manager is currently shutting down all pools'
+      );
+    }
+    if (this.deprovisioningTenants.has(dairyId)) {
+      throw new TenantDatabaseUnavailableError(
+        dairyId,
+        'DEPROVISIONING',
+        'Tenant database is currently being deprovisioned'
+      );
+    }
+    const cached = this.tenantMappings.get(dairyId);
+    if (
+      cached &&
+      (cached.provisioningStatus === 'DEPROVISIONING' || cached.provisioningStatus === 'DEPROVISION_FAILED')
+    ) {
+      throw new TenantDatabaseUnavailableError(
+        dairyId,
+        cached.provisioningStatus,
+        cached.provisioningError || `Tenant database is unavailable (status: ${cached.provisioningStatus})`
+      );
+    }
+  }
+
+  private async awaitPendingTenantClose(dairyId: string): Promise<void> {
+    while (true) {
+      this.assertTenantLifecycleAvailable(dairyId);
+      const pendingClose = this.closingTenantPools.get(dairyId);
+      if (!pendingClose) {
+        break;
+      }
+      try {
+        await pendingClose;
+      } catch (err: any) {
+        throw new TenantDatabaseUnavailableError(
+          dairyId,
+          'POOL_SHUTDOWN_FAILED',
+          err?.message || 'Tenant pool shutdown failed; retry close before acquiring a replacement pool'
+        );
+      }
+    }
+  }
+
+  private async ensureExistingPoolUsableOrEvict(dairyId: string): Promise<pg.Pool | undefined> {
+    const existingPool = this.tenantPools.get(dairyId);
+    if (!existingPool) {
+      return undefined;
+    }
+    const anyPool = existingPool as any;
+    if (!anyPool.ending && !anyPool.ended) {
+      return existingPool;
+    }
+    try {
+      await this.closeTenantPool(dairyId);
+    } catch (err: any) {
+      throw new TenantDatabaseUnavailableError(
+        dairyId,
+        'POOL_SHUTDOWN_FAILED',
+        err?.message || 'Existing tenant pool is ending or unhealthy and could not be closed cleanly'
+      );
+    }
+    await this.awaitPendingTenantClose(dairyId);
+    return undefined;
   }
 
   private async endPoolSafely(pool: pg.Pool): Promise<void> {
@@ -305,6 +409,14 @@ export class TenantDatabaseManager {
         [dairyId]
       );
       if (res.rows.length > 0) {
+        const currentCached = this.tenantMappings.get(dairyId);
+        if (
+          this.deprovisioningTenants.has(dairyId) ||
+          currentCached?.provisioningStatus === 'DEPROVISIONING' ||
+          currentCached?.provisioningStatus === 'DEPROVISION_FAILED'
+        ) {
+          return currentCached || null;
+        }
         const row = res.rows[0];
         const mapping: TenantDatabaseMapping = {
           id: row.id,
@@ -344,71 +456,100 @@ export class TenantDatabaseManager {
       return this.getControlPlaneDb();
     }
 
-    const mapping = await this.resolveTenantMapping(dairyId);
-    if (!mapping) {
-      throw new TenantDatabaseUnavailableError(
-        dairyId,
-        'UNMAPPED',
-        'No tenant database mapping found for this organization'
-      );
-    }
+    return this.trackAcquisition(dairyId, async () => {
+      await this.awaitPendingTenantClose(dairyId);
 
-    if (mapping.provisioningStatus !== 'ACTIVE') {
-      throw new TenantDatabaseUnavailableError(
-        dairyId,
-        mapping.provisioningStatus,
-        mapping.provisioningError || `Tenant database provisioning status is ${mapping.provisioningStatus}`
-      );
-    }
+      let mapping = await this.resolveTenantMapping(dairyId);
+      await this.awaitPendingTenantClose(dairyId);
+      mapping = this.tenantMappings.get(dairyId) || mapping;
 
-    const existingPool = this.tenantPools.get(dairyId);
-    if (existingPool && !(existingPool as any).ending && !(existingPool as any).ended) {
-      return this.wrapPgPool(existingPool, dairyId);
-    }
-    if (this.tenantMemDbs.has(dairyId)) {
-      return this.tenantMemDbs.get(dairyId)!;
-    }
-
-    if (mapping.resourceType === 'ISOLATED_TEST_INSTANCE') {
-      if (this.isRealPostgresRequired()) {
+      if (!mapping) {
         throw new TenantDatabaseUnavailableError(
           dairyId,
-          'ISOLATED_TEST_INSTANCE_FORBIDDEN',
-          'In-memory tenant database is strictly prohibited when REQUIRE_REAL_POSTGRES=1'
+          'UNMAPPED',
+          'No tenant database mapping found for this organization'
         );
       }
-      const memClient = this.createIsolatedMemoryDatabase(dairyId);
-      this.tenantMemDbs.set(dairyId, memClient);
-      return memClient;
-    }
 
-    if (!mapping.connectionUriEncrypted) {
-      if (mapping.databaseName === 'postgres' || mapping.databaseName === 'dfarm_control_plane') {
-        return this.getControlPlaneDb();
+      if (mapping.provisioningStatus !== 'ACTIVE') {
+        throw new TenantDatabaseUnavailableError(
+          dairyId,
+          mapping.provisioningStatus,
+          mapping.provisioningError || `Tenant database provisioning status is ${mapping.provisioningStatus}`
+        );
       }
-      throw new TenantDatabaseUnavailableError(
-        dairyId,
-        'CREDENTIALS_MISSING',
-        'Tenant database connection credentials are missing'
-      );
-    }
 
-    try {
-      const decryptedUri = CredentialEncryption.decrypt(mapping.connectionUriEncrypted);
-      const concurrentPool = this.tenantPools.get(dairyId);
-      if (concurrentPool && !(concurrentPool as any).ending && !(concurrentPool as any).ended) {
-        return this.wrapPgPool(concurrentPool, dairyId);
+      const usablePool = await this.ensureExistingPoolUsableOrEvict(dairyId);
+      if (usablePool) {
+        return this.wrapPgPool(usablePool, dairyId);
       }
-      const tenantPool = this.createTenantPool(dairyId, decryptedUri);
-      this.tenantPools.set(dairyId, tenantPool);
-      return this.wrapPgPool(tenantPool, dairyId);
-    } catch (err: any) {
-      throw new TenantDatabaseUnavailableError(
-        dairyId,
-        'CONNECTION_FAILED',
-        err?.message || 'Failed to initialize tenant database pool'
-      );
-    }
+
+      const latestMapping = this.tenantMappings.get(dairyId);
+      if (!latestMapping || latestMapping.provisioningStatus !== 'ACTIVE') {
+        throw new TenantDatabaseUnavailableError(
+          dairyId,
+          latestMapping?.provisioningStatus || 'UNMAPPED',
+          latestMapping?.provisioningError || 'Tenant database is no longer ACTIVE'
+        );
+      }
+      mapping = latestMapping;
+
+      if (this.tenantMemDbs.has(dairyId)) {
+        return this.tenantMemDbs.get(dairyId)!;
+      }
+
+      if (mapping.resourceType === 'ISOLATED_TEST_INSTANCE') {
+        if (this.isRealPostgresRequired()) {
+          throw new TenantDatabaseUnavailableError(
+            dairyId,
+            'ISOLATED_TEST_INSTANCE_FORBIDDEN',
+            'In-memory tenant database is strictly prohibited when REQUIRE_REAL_POSTGRES=1'
+          );
+        }
+        const memClient = this.createIsolatedMemoryDatabase(dairyId);
+        this.tenantMemDbs.set(dairyId, memClient);
+        return memClient;
+      }
+
+      if (!mapping.connectionUriEncrypted) {
+        if (mapping.databaseName === 'postgres' || mapping.databaseName === 'dfarm_control_plane') {
+          return this.getControlPlaneDb();
+        }
+        throw new TenantDatabaseUnavailableError(
+          dairyId,
+          'CREDENTIALS_MISSING',
+          'Tenant database connection credentials are missing'
+        );
+      }
+
+      try {
+        const decryptedUri = CredentialEncryption.decrypt(mapping.connectionUriEncrypted);
+        this.assertTenantLifecycleAvailable(dairyId);
+        const concurrentPool = this.tenantPools.get(dairyId);
+        if (concurrentPool) {
+          if ((concurrentPool as any).ending || (concurrentPool as any).ended) {
+            throw new TenantDatabaseUnavailableError(
+              dairyId,
+              'POOL_CLOSING',
+              'Tenant database pool is currently closing'
+            );
+          }
+          return this.wrapPgPool(concurrentPool, dairyId);
+        }
+        const tenantPool = this.createTenantPool(dairyId, decryptedUri);
+        this.tenantPools.set(dairyId, tenantPool);
+        return this.wrapPgPool(tenantPool, dairyId);
+      } catch (err: any) {
+        if (err instanceof TenantDatabaseUnavailableError) {
+          throw err;
+        }
+        throw new TenantDatabaseUnavailableError(
+          dairyId,
+          'CONNECTION_FAILED',
+          err?.message || 'Failed to initialize tenant database pool'
+        );
+      }
+    });
   }
 
   public getAllMappings(): TenantDatabaseMapping[] {
@@ -465,14 +606,18 @@ export class TenantDatabaseManager {
 
     logger.info({ dairyId, dairyCode: code, dairyName: name, dbName }, 'Starting separate tenant database provisioning...');
 
-    // 1. Check idempotency: If already ACTIVE, return existing mapping
+    // 1. Check lifecycle availability before provisioning
+    this.assertTenantLifecycleAvailable(dairyId);
+    await this.awaitPendingTenantClose(dairyId);
+
+    // 2. Check idempotency: If already ACTIVE, return existing mapping
     const existing = this.tenantMappings.get(dairyId);
     if (existing && existing.provisioningStatus === 'ACTIVE') {
       logger.info({ dairyId, dbName }, 'Tenant database already active and provisioned. Returning existing mapping.');
       return existing;
     }
 
-    // 2. Register initial PROVISIONING state in central database
+    // 3. Register initial PROVISIONING state in central database
     const mappingId = existing?.id || crypto.randomUUID();
     let currentMapping: TenantDatabaseMapping = {
       id: mappingId,
@@ -501,7 +646,7 @@ export class TenantDatabaseManager {
 
     await this.persistMappingStatus(controlDb, currentMapping);
 
-    // 3. Physical Database Creation
+    // 4. Physical Database Creation
     let tenantUri = '';
     let isTestDouble = false;
 
@@ -510,11 +655,7 @@ export class TenantDatabaseManager {
 
       // Connect to cluster maintenance database ('postgres')
       const adminUri = this.deriveAdminDatabaseUri(baseUri);
-      const adminPool = new pg.Pool({
-        connectionString: adminUri,
-        connectionTimeoutMillis: config.TENANT_POOL_CONNECTION_TIMEOUT_MS || 30000,
-        ssl: this.getSslConfig(adminUri),
-      });
+      const adminPool = this.createAdminPool(adminUri);
       adminPool.on('error', (poolErr: any) => {
         logger.error(
           { dairyId, dbName, code: poolErr?.code, error: poolErr?.message || String(poolErr) },
@@ -576,6 +717,8 @@ export class TenantDatabaseManager {
     currentMapping.provisioningStatus = 'MIGRATING';
     await this.persistMappingStatus(controlDb, currentMapping);
 
+    await this.awaitPendingTenantClose(dairyId);
+
     let tenantClient: IDatabaseClient;
 
     if (isTestDouble) {
@@ -584,7 +727,7 @@ export class TenantDatabaseManager {
     } else {
       const tenantPool = this.createTenantPool(dairyId, tenantUri);
       this.tenantPools.set(dairyId, tenantPool);
-      tenantClient = this.wrapPgPool(tenantPool);
+      tenantClient = this.wrapPgPool(tenantPool, dairyId);
     }
 
     try {
@@ -657,17 +800,29 @@ export class TenantDatabaseManager {
     } catch (err: any) {
       // Close and evict any partially initialized tenant pool or test double
       // created before migration/verification failed so connections do not leak.
+      // Preserve both the original migration error and any cleanup error.
+      let cleanupErr: Error | null = null;
       try {
         await this.closeTenantPool(dairyId);
       } catch (closeErr: any) {
+        cleanupErr = closeErr instanceof Error ? closeErr : new Error(String(closeErr));
         logger.error(
-          { dairyId, dbName, error: closeErr?.message || String(closeErr) },
+          { dairyId, dbName, error: cleanupErr.message },
           'Error closing partially initialized tenant pool after provisioning failure'
         );
       }
       currentMapping.provisioningStatus = 'FAILED';
-      currentMapping.provisioningError = `Tenant migration or verification failed: ${err.message}`;
+      currentMapping.provisioningError = cleanupErr
+        ? `Tenant migration or verification failed: ${err.message}; pool cleanup failed: ${cleanupErr.message}`
+        : `Tenant migration or verification failed: ${err.message}`;
       await this.persistMappingStatus(controlDb, currentMapping);
+      if (cleanupErr) {
+        const origErr = err instanceof Error ? err : new Error(String(err));
+        throw new AggregateError(
+          [origErr, cleanupErr],
+          `${origErr.message} (cleanup also failed: ${cleanupErr.message})`
+        );
+      }
       throw err;
     }
   }
@@ -681,150 +836,190 @@ export class TenantDatabaseManager {
       return this.getControlPlaneDb();
     }
 
-    // 1. Check active pool cache
-    const cachedPool = this.tenantPools.get(dairyId);
-    if (cachedPool && !(cachedPool as any).ending && !(cachedPool as any).ended) {
-      return this.wrapPgPool(cachedPool, dairyId);
-    }
+    return this.trackAcquisition(dairyId, async () => {
+      await this.awaitPendingTenantClose(dairyId);
 
-    // 2. Check memory test DB cache (test mode only)
-    if (this.tenantMemDbs.has(dairyId)) {
-      return this.tenantMemDbs.get(dairyId)!;
-    }
-
-    // 3. Resolve mapping from memory or central DB
-    let mapping = this.tenantMappings.get(dairyId);
-    if (!mapping) {
-      const controlDb = this.getControlPlaneDb();
-      try {
-        const res = await controlDb.query(
-          'SELECT * FROM dairy_database_mappings WHERE dairy_id = $1;',
-          [dairyId]
-        );
-        if (res.rows.length > 0) {
-          const row = res.rows[0];
-          mapping = {
-            id: row.id,
-            dairyId: row.dairy_id,
-            dairyCode: row.dairy_code,
-            databaseName: row.database_name,
-            resourceType: row.resource_type === 'ISOLATED_TEST_INSTANCE' ? 'ISOLATED_TEST_INSTANCE' : 'PHYSICAL_DATABASE',
-            connectionUriEncrypted: row.connection_uri_encrypted,
-            schemaVersion: row.schema_version,
-            provisioningStatus: row.provisioning_status,
-            provisioningError: row.provisioning_error,
-            provisionedAt: row.provisioned_at?.toISOString?.() || row.provisioned_at,
-            lastVerifiedAt: row.last_verified_at?.toISOString?.() || row.last_verified_at,
-          };
-          this.tenantMappings.set(dairyId, mapping);
+      // 1. Resolve mapping from memory or central DB
+      let mapping = this.tenantMappings.get(dairyId);
+      if (!mapping) {
+        const controlDb = this.getControlPlaneDb();
+        try {
+          const res = await controlDb.query(
+            'SELECT * FROM dairy_database_mappings WHERE dairy_id = $1;',
+            [dairyId]
+          );
+          const currentCached = this.tenantMappings.get(dairyId);
+          if (
+            this.deprovisioningTenants.has(dairyId) ||
+            currentCached?.provisioningStatus === 'DEPROVISIONING' ||
+            currentCached?.provisioningStatus === 'DEPROVISION_FAILED'
+          ) {
+            mapping = currentCached;
+          } else if (res.rows.length > 0) {
+            const row = res.rows[0];
+            mapping = {
+              id: row.id,
+              dairyId: row.dairy_id,
+              dairyCode: row.dairy_code,
+              databaseName: row.database_name,
+              resourceType: row.resource_type === 'ISOLATED_TEST_INSTANCE' ? 'ISOLATED_TEST_INSTANCE' : 'PHYSICAL_DATABASE',
+              connectionUriEncrypted: row.connection_uri_encrypted,
+              schemaVersion: row.schema_version,
+              provisioningStatus: row.provisioning_status,
+              provisioningError: row.provisioning_error,
+              provisionedAt: row.provisioned_at?.toISOString?.() || row.provisioned_at,
+              lastVerifiedAt: row.last_verified_at?.toISOString?.() || row.last_verified_at,
+            };
+            this.tenantMappings.set(dairyId, mapping);
+          }
+        } catch (err: any) {
+          logger.warn({ dairyId, error: err.message }, 'Failed to query dairy_database_mappings from control plane');
         }
-      } catch (err: any) {
-        logger.warn({ dairyId, error: err.message }, 'Failed to query dairy_database_mappings from control plane');
-      }
-    }
-
-    if (!mapping && !this.isRealPostgresRequired() && !process.env.TEST_REAL_POSTGRES && (this.isTestEnvironment() || config.NODE_ENV === 'development')) {
-      const testMapping: TenantDatabaseMapping = {
-        id: crypto.randomUUID(),
-        dairyId,
-        dairyCode: `DEV-${dairyId.slice(0, 4)}`,
-        databaseName: `dfarm_tenant_${dairyId.slice(0, 8)}`,
-        resourceType: 'ISOLATED_TEST_INSTANCE',
-        schemaVersion: 'v1.0.0',
-        provisioningStatus: 'ACTIVE',
-        provisionedAt: new Date().toISOString(),
-        lastVerifiedAt: new Date().toISOString(),
-      };
-      this.tenantMappings.set(dairyId, testMapping);
-      mapping = testMapping;
-    }
-
-    if (mapping && mapping.provisioningStatus === 'FAILED') {
-      throw new TenantDatabaseUnavailableError(dairyId, 'FAILED', mapping.provisioningError || 'Tenant database provisioning failed');
-    }
-
-    if (!mapping || mapping.provisioningStatus !== 'ACTIVE') {
-      if (mapping?.provisioningStatus === 'PROVISIONING' || mapping?.provisioningStatus === 'MIGRATING' || mapping?.provisioningStatus === 'VERIFYING') {
-        throw new TenantDatabaseUnavailableError(dairyId, mapping.provisioningStatus, 'Tenant database is currently being provisioned');
-      }
-      if (this.isPlatformFederationDairy(dairyId)) {
-        return this.getControlPlaneDb();
       }
 
-      if (this.isRealPostgresRequired()) {
+      await this.awaitPendingTenantClose(dairyId);
+      mapping = this.tenantMappings.get(dairyId) || mapping;
+
+      if (!mapping && !this.isRealPostgresRequired() && !process.env.TEST_REAL_POSTGRES && (this.isTestEnvironment() || config.NODE_ENV === 'development')) {
+        const testMapping: TenantDatabaseMapping = {
+          id: crypto.randomUUID(),
+          dairyId,
+          dairyCode: `DEV-${dairyId.slice(0, 4)}`,
+          databaseName: `dfarm_tenant_${dairyId.slice(0, 8)}`,
+          resourceType: 'ISOLATED_TEST_INSTANCE',
+          schemaVersion: 'v1.0.0',
+          provisioningStatus: 'ACTIVE',
+          provisionedAt: new Date().toISOString(),
+          lastVerifiedAt: new Date().toISOString(),
+        };
+        this.tenantMappings.set(dairyId, testMapping);
+        mapping = testMapping;
+      }
+
+      if (mapping && (mapping.provisioningStatus === 'FAILED' || mapping.provisioningStatus === 'DEPROVISIONING' || mapping.provisioningStatus === 'DEPROVISION_FAILED')) {
         throw new TenantDatabaseUnavailableError(
           dairyId,
-          mapping?.provisioningStatus || 'UNMAPPED',
-          'Active physical tenant database mapping is required when REQUIRE_REAL_POSTGRES=1'
+          mapping.provisioningStatus,
+          mapping.provisioningError || `Tenant database is unavailable (status: ${mapping.provisioningStatus})`
         );
       }
 
-      // If registered organization exists in control plane, serve via partitioned control plane database
-      const controlDb = this.getControlPlaneDb();
-      try {
-        const orgCheck = await controlDb.query(
-          'SELECT id, name, code, status FROM organizations WHERE id = $1;',
-          [dairyId]
-        );
-        if (orgCheck.rows.length > 0 && orgCheck.rows[0].status === 'ACTIVE') {
-          logger.info({ dairyId, dairyName: orgCheck.rows[0].name }, 'Registered organization has no isolated tenant database; serving via partitioned control plane database.');
+      if (!mapping || mapping.provisioningStatus !== 'ACTIVE') {
+        if (mapping?.provisioningStatus === 'PROVISIONING' || mapping?.provisioningStatus === 'MIGRATING' || mapping?.provisioningStatus === 'VERIFYING') {
+          throw new TenantDatabaseUnavailableError(dairyId, mapping.provisioningStatus, 'Tenant database is currently being provisioned');
+        }
+        if (this.isPlatformFederationDairy(dairyId)) {
           return this.getControlPlaneDb();
         }
-      } catch (checkErr: any) {
-        logger.warn({ dairyId, error: checkErr.message }, 'Failed to check organization existence in control plane');
+
+        if (this.isRealPostgresRequired()) {
+          throw new TenantDatabaseUnavailableError(
+            dairyId,
+            mapping?.provisioningStatus || 'UNMAPPED',
+            'Active physical tenant database mapping is required when REQUIRE_REAL_POSTGRES=1'
+          );
+        }
+
+        // If registered organization exists in control plane, serve via partitioned control plane database
+        const controlDb = this.getControlPlaneDb();
+        try {
+          const orgCheck = await controlDb.query(
+            'SELECT id, name, code, status FROM organizations WHERE id = $1;',
+            [dairyId]
+          );
+          await this.awaitPendingTenantClose(dairyId);
+          if (orgCheck.rows.length > 0 && orgCheck.rows[0].status === 'ACTIVE') {
+            logger.info({ dairyId, dairyName: orgCheck.rows[0].name }, 'Registered organization has no isolated tenant database; serving via partitioned control plane database.');
+            return this.getControlPlaneDb();
+          }
+        } catch (checkErr: any) {
+          if (checkErr instanceof TenantDatabaseUnavailableError) {
+            throw checkErr;
+          }
+          logger.warn({ dairyId, error: checkErr.message }, 'Failed to check organization existence in control plane');
+        }
+
+        if (config.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production') {
+          logger.info({ dairyId }, 'No isolated tenant database found; using control plane database fallback in development.');
+          return this.getControlPlaneDb();
+        }
+        throw new Error(`No active persistent database mapping found for dairy: ${dairyId}`);
       }
 
-      if (config.NODE_ENV === 'development' || process.env.NODE_ENV !== 'production') {
-        logger.info({ dairyId }, 'No isolated tenant database found; using control plane database fallback in development.');
-        return this.getControlPlaneDb();
+      // 2. Check active pool cache (never returning ending/ended pools)
+      const usablePool = await this.ensureExistingPoolUsableOrEvict(dairyId);
+      if (usablePool) {
+        return this.wrapPgPool(usablePool, dairyId);
       }
-      throw new Error(`No active persistent database mapping found for dairy: ${dairyId}`);
-    }
 
-    // 4. Initialize bounded tenant pool from encrypted connection string
-    if (mapping.resourceType === 'ISOLATED_TEST_INSTANCE') {
-      if (this.isRealPostgresRequired()) {
+      const latestMapping = this.tenantMappings.get(dairyId);
+      if (!latestMapping || latestMapping.provisioningStatus !== 'ACTIVE') {
         throw new TenantDatabaseUnavailableError(
           dairyId,
-          'ISOLATED_TEST_INSTANCE_FORBIDDEN',
-          'In-memory tenant database is strictly prohibited when REQUIRE_REAL_POSTGRES=1'
+          latestMapping?.provisioningStatus || 'UNMAPPED',
+          latestMapping?.provisioningError || 'Tenant database is no longer ACTIVE'
         );
       }
-      let memClient = this.tenantMemDbs.get(dairyId);
-      if (!memClient) {
-        memClient = this.createIsolatedMemoryDatabase(dairyId);
-        this.tenantMemDbs.set(dairyId, memClient);
-      }
-      return memClient;
-    }
+      mapping = latestMapping;
 
-    if (!mapping.connectionUriEncrypted) {
-      if (
-        !this.isRealPostgresRequired() && (
-          config.NODE_ENV === 'development' ||
-          process.env.NODE_ENV !== 'production' ||
-          this.isPlatformFederationDairy(dairyId) ||
-          mapping.databaseName === 'postgres' ||
-          mapping.databaseName === 'dfarm_control_plane'
-        )
-      ) {
-        return this.getControlPlaneDb();
+      // 3. Check memory test DB cache (test mode only)
+      if (this.tenantMemDbs.has(dairyId)) {
+        return this.tenantMemDbs.get(dairyId)!;
       }
-      if (this.isPlatformFederationDairy(dairyId)) {
-        return this.getControlPlaneDb();
+
+      // 4. Initialize bounded tenant pool from encrypted connection string
+      if (mapping.resourceType === 'ISOLATED_TEST_INSTANCE') {
+        if (this.isRealPostgresRequired()) {
+          throw new TenantDatabaseUnavailableError(
+            dairyId,
+            'ISOLATED_TEST_INSTANCE_FORBIDDEN',
+            'In-memory tenant database is strictly prohibited when REQUIRE_REAL_POSTGRES=1'
+          );
+        }
+        let memClient = this.tenantMemDbs.get(dairyId);
+        if (!memClient) {
+          memClient = this.createIsolatedMemoryDatabase(dairyId);
+          this.tenantMemDbs.set(dairyId, memClient);
+        }
+        return memClient;
       }
-      throw new Error(`Tenant database connection credentials missing for dairy: ${dairyId}`);
-    }
 
-    const decryptedUri = CredentialEncryption.decrypt(mapping.connectionUriEncrypted);
-    const concurrentPool = this.tenantPools.get(dairyId);
-    if (concurrentPool && !(concurrentPool as any).ending && !(concurrentPool as any).ended) {
-      return this.wrapPgPool(concurrentPool, dairyId);
-    }
-    const tenantPool = this.createTenantPool(dairyId, decryptedUri);
+      if (!mapping.connectionUriEncrypted) {
+        if (
+          !this.isRealPostgresRequired() && (
+            config.NODE_ENV === 'development' ||
+            process.env.NODE_ENV !== 'production' ||
+            this.isPlatformFederationDairy(dairyId) ||
+            mapping.databaseName === 'postgres' ||
+            mapping.databaseName === 'dfarm_control_plane'
+          )
+        ) {
+          return this.getControlPlaneDb();
+        }
+        if (this.isPlatformFederationDairy(dairyId)) {
+          return this.getControlPlaneDb();
+        }
+        throw new Error(`Tenant database connection credentials missing for dairy: ${dairyId}`);
+      }
 
-    this.tenantPools.set(dairyId, tenantPool);
-    return this.wrapPgPool(tenantPool, dairyId);
+      const decryptedUri = CredentialEncryption.decrypt(mapping.connectionUriEncrypted);
+      this.assertTenantLifecycleAvailable(dairyId);
+      const concurrentPool = this.tenantPools.get(dairyId);
+      if (concurrentPool) {
+        if ((concurrentPool as any).ending || (concurrentPool as any).ended) {
+          throw new TenantDatabaseUnavailableError(
+            dairyId,
+            'POOL_CLOSING',
+            'Tenant database pool is currently closing'
+          );
+        }
+        return this.wrapPgPool(concurrentPool, dairyId);
+      }
+      const tenantPool = this.createTenantPool(dairyId, decryptedUri);
+
+      this.tenantPools.set(dairyId, tenantPool);
+      return this.wrapPgPool(tenantPool, dairyId);
+    });
   }
 
   public async verifyTenantDatabase(dairyId: string): Promise<{
@@ -893,46 +1088,88 @@ export class TenantDatabaseManager {
   }
 
   public async closeAllPools(): Promise<void> {
-    const dairyIds = new Set<string>([
-      ...this.tenantPools.keys(),
-      ...this.tenantMemDbs.keys(),
-      ...this.closingTenantPools.keys(),
-    ]);
+    if (this.closingAllPoolsPromise) {
+      return this.closingAllPoolsPromise;
+    }
 
-    const errors: Error[] = [];
-    const results = await Promise.allSettled(
-      Array.from(dairyIds, (dairyId) => this.closeTenantPool(dairyId))
-    );
-    for (const res of results) {
-      if (res.status === 'rejected') {
-        const err = res.reason instanceof Error ? res.reason : new Error(String(res.reason));
-        logger.error({ error: err.message }, 'Error closing tenant pool');
-        errors.push(err);
+    const closeAllOp = (async () => {
+      const errors: Error[] = [];
+      const failedDairyIds = new Set<string>();
+
+      // Iteratively drain all existing pools, in-flight closes, and in-flight acquisitions
+      // so no concurrently created pool escapes global shutdown.
+      while (true) {
+        const inFlightPromises: Promise<void>[] = [];
+        for (const bucket of this.inFlightAcquisitionsByDairy.values()) {
+          for (const p of bucket) {
+            inFlightPromises.push(p);
+          }
+        }
+
+        const dairyIds = Array.from(
+          new Set<string>([
+            ...this.tenantPools.keys(),
+            ...this.tenantMemDbs.keys(),
+            ...this.closingTenantPools.keys(),
+          ])
+        ).filter((id) => !failedDairyIds.has(id));
+
+        if (dairyIds.length === 0 && inFlightPromises.length === 0) {
+          break;
+        }
+
+        const closeResults = await Promise.allSettled(
+          dairyIds.map((dairyId) => this.closeTenantPool(dairyId))
+        );
+        closeResults.forEach((res, idx) => {
+          if (res.status === 'rejected') {
+            const failedId = dairyIds[idx];
+            if (failedId) {
+              failedDairyIds.add(failedId);
+            }
+            const err = res.reason instanceof Error ? res.reason : new Error(String(res.reason));
+            logger.error({ error: err.message, dairyId: failedId }, 'Error closing tenant pool');
+            errors.push(err);
+          }
+        });
+
+        if (inFlightPromises.length > 0) {
+          await Promise.allSettled(inFlightPromises);
+        }
       }
-    }
-    if (errors.length === 1) {
-      throw errors[0];
-    }
-    if (errors.length > 1) {
-      throw new AggregateError(
-        errors,
-        `Failed to close ${errors.length} tenant pool(s): ${errors.map((e) => e.message).join('; ')}`
-      );
+
+      if (errors.length === 1) {
+        throw errors[0];
+      }
+      if (errors.length > 1) {
+        throw new AggregateError(
+          errors,
+          `Failed to close ${errors.length} tenant pool(s): ${errors.map((e) => e.message).join('; ')}`
+        );
+      }
+    })();
+
+    this.closingAllPoolsPromise = closeAllOp;
+    try {
+      await closeAllOp;
+    } finally {
+      if (this.closingAllPoolsPromise === closeAllOp) {
+        this.closingAllPoolsPromise = null;
+      }
     }
   }
 
   /**
    * Permanently deprovisions a dairy tenant:
-   * 1. Closes and evicts active connection pools.
-   * 2. Drops physical PostgreSQL database (or evicts test in-memory instance).
-   * 3. Cleans up customer_dairy_memberships for this organization from central control-plane DB.
-   * 4. Deletes entry from central dairy_database_mappings.
-   * 5. Marks dairy organization status = 'DELETED' (and is_deleted = TRUE).
-   * 6. Deletes dairy-scoped users from central users table.
+   * 1. Marks tenant DEPROVISIONING and awaits any in-flight acquisitions before closing pools.
+   * 2. Closes and evicts active connection pools.
+   * 3. Drops physical PostgreSQL database cleanly (without FORCE or pg_terminate_backend).
+   * 4. Cleans up customer_dairy_memberships, dairy_database_mappings, users, and organizations.
+   * 5. On failure, records DEPROVISION_FAILED so partial tenants are never reopened and rethrows.
    */
   public async deprovisionTenantDatabase(
     dairyId: string,
-    options: { force?: boolean } = {}
+    _options: { force?: boolean } = {}
   ): Promise<{
     success: boolean;
     dairyId: string;
@@ -940,115 +1177,178 @@ export class TenantDatabaseManager {
     deprovisionedAt: string;
     details: string;
   }> {
-    const mapping = this.tenantMappings.get(dairyId);
-    const dbName = mapping?.databaseName || this.generateTenantDatabaseName(dairyId, mapping?.dairyCode || 'TEN');
-    const now = new Date().toISOString();
-
-    logger.warn({ dairyId, dbName }, 'Starting permanent tenant database deprovisioning...');
-
-    // 1. Evict and close active pool
-    await this.closeTenantPool(dairyId);
-    this.tenantMemDbs.delete(dairyId);
-
-    // 2. Physical Database Drop
-    if (mapping?.resourceType === 'PHYSICAL_DATABASE' && !this.isTestEnvironment()) {
-      let maintenanceClient: pg.Client | null = null;
-      try {
-        const adminConn = config.DATABASE_URL;
-        const parsed = new URL(adminConn);
-        parsed.pathname = '/postgres';
-        const maintenanceUrl = parsed.toString();
-
-        maintenanceClient = new pg.Client({
-          connectionString: maintenanceUrl,
-          ssl: this.getSslConfig(maintenanceUrl),
-        });
-        await maintenanceClient.connect();
-
-        // Terminate existing connections to this database
-        await maintenanceClient.query(
-          `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
-          [dbName]
-        );
-
-        // Drop physical database with FORCE
-        await maintenanceClient.query(`DROP DATABASE IF EXISTS "${dbName}" WITH (FORCE);`);
-        logger.info({ dairyId, dbName }, 'Physical tenant database dropped successfully.');
-      } catch (err: any) {
-        logger.error({ dairyId, dbName, error: err.message }, 'Failed to drop physical tenant database');
-        if (!options.force) {
-          throw new Error(`Failed to drop physical tenant database ${dbName}: ${err.message}`);
-        }
-      } finally {
-        if (maintenanceClient) {
-          try {
-            await maintenanceClient.end();
-          } catch {}
-        }
-      }
+    const existingDeprovision = this.deprovisioningTenants.get(dairyId);
+    if (existingDeprovision) {
+      return existingDeprovision;
     }
 
-    // 3. Central Control-Plane Database Cleanup
-    const controlDb = this.getControlPlaneDb();
-    try {
-      // Remove central memberships for this dairy (preserves global customer identities and other memberships)
-      await controlDb.query(
-        `DELETE FROM customer_dairy_memberships WHERE organization_id = $1;`,
-        [dairyId]
-      );
+    const deprovisionOp = (async () => {
+      const mapping = this.tenantMappings.get(dairyId);
+      const dbName = mapping?.databaseName || this.generateTenantDatabaseName(dairyId, mapping?.dairyCode || 'TEN');
+      const now = new Date().toISOString();
 
-      // Remove dairy database mapping
-      await controlDb.query(
-        `DELETE FROM dairy_database_mappings WHERE dairy_id = $1;`,
-        [dairyId]
-      );
+      logger.warn({ dairyId, dbName }, 'Starting permanent tenant database deprovisioning...');
 
-      // Remove dairy users
-      await controlDb.query(
-        `DELETE FROM users WHERE organization_id = $1;`,
-        [dairyId]
-      );
+      // Transition in-memory state immediately so new acquisitions fail closed with DEPROVISIONING
+      const deprovisioningMapping: TenantDatabaseMapping = mapping
+        ? { ...mapping, provisioningStatus: 'DEPROVISIONING', lastVerifiedAt: now }
+        : {
+            id: crypto.randomUUID(),
+            dairyId,
+            dairyCode: 'DEPROVISIONING',
+            databaseName: dbName,
+            resourceType: 'PHYSICAL_DATABASE',
+            schemaVersion: 'v1.0.0',
+            provisioningStatus: 'DEPROVISIONING',
+            lastVerifiedAt: now,
+          };
+      this.tenantMappings.set(dairyId, deprovisioningMapping);
 
-      // Mark organization as INACTIVE and release unique code so new dairy can reuse the code
-      const releasedCode = `DEL_${dairyId.replace(/-/g, '').slice(0, 16)}`;
       try {
-        await controlDb.query(
-          `UPDATE organizations SET status = 'INACTIVE', code = $2, updated_at = NOW() WHERE id = $1;`,
-          [dairyId, releasedCode]
-        );
-      } catch {
+        // Wait for any already-in-flight acquisitions for this dairy to settle before closing pools
+        const inFlight = this.inFlightAcquisitionsByDairy.get(dairyId);
+        if (inFlight && inFlight.size > 0) {
+          await Promise.allSettled(Array.from(inFlight));
+        }
+
+        // 1. Evict and close active pool
+        await this.closeTenantPool(dairyId);
+
+        // 2. Physical Database Drop (no pg_terminate_backend, no DROP DATABASE ... WITH (FORCE))
+        if (
+          mapping?.resourceType === 'PHYSICAL_DATABASE' &&
+          (!this.isTestEnvironment() || process.env['TEST_REAL_POSTGRES'] === '1')
+        ) {
+          let maintenanceClient: pg.Client | null = null;
+          try {
+            const adminConn =
+              config.DATABASE_PROVISIONER_URL ||
+              config.CENTRAL_DATABASE_URL ||
+              config.DATABASE_URL;
+            const parsed = new URL(adminConn);
+            parsed.pathname = '/postgres';
+            const maintenanceUrl = parsed.toString();
+
+            maintenanceClient = new pg.Client({
+              connectionString: maintenanceUrl,
+              ssl: this.getSslConfig(maintenanceUrl),
+            });
+            await maintenanceClient.connect();
+
+            const activityRes = await maintenanceClient.query(
+              `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+              [dbName]
+            );
+            const activeCount = Number(activityRes.rows[0]?.cnt || 0);
+            if (activeCount > 0) {
+              throw new Error(
+                `Physical tenant database '${dbName}' still has ${activeCount} active connection(s); refusing drop`
+              );
+            }
+
+            await maintenanceClient.query(`DROP DATABASE IF EXISTS "${dbName}";`);
+            logger.info({ dairyId, dbName }, 'Physical tenant database dropped successfully.');
+          } catch (err: any) {
+            logger.error({ dairyId, dbName, error: err.message }, 'Failed to drop physical tenant database');
+            throw new Error(`Failed to drop physical tenant database ${dbName}: ${err.message}`);
+          } finally {
+            if (maintenanceClient) {
+              try {
+                await maintenanceClient.end();
+              } catch {}
+            }
+          }
+        }
+
+        // 3. Central Control-Plane Database Cleanup
+        const controlDb = this.getControlPlaneDb();
         try {
           await controlDb.query(
-            `UPDATE organizations SET status = 'INACTIVE', code = $2 WHERE id = $1;`,
-            [dairyId, releasedCode]
-          );
-        } catch {
-          await controlDb.query(
-            `UPDATE organizations SET status = 'INACTIVE' WHERE id = $1;`,
+            `DELETE FROM customer_dairy_memberships WHERE organization_id = $1;`,
             [dairyId]
           );
+          await controlDb.query(
+            `DELETE FROM dairy_database_mappings WHERE dairy_id = $1;`,
+            [dairyId]
+          );
+          await controlDb.query(
+            `DELETE FROM users WHERE organization_id = $1;`,
+            [dairyId]
+          );
+
+          const releasedCode = `DEL_${dairyId.replace(/-/g, '').slice(0, 16)}`;
+          try {
+            await controlDb.query(
+              `UPDATE organizations SET status = 'INACTIVE', code = $2, updated_at = NOW() WHERE id = $1;`,
+              [dairyId, releasedCode]
+            );
+          } catch {
+            try {
+              await controlDb.query(
+                `UPDATE organizations SET status = 'INACTIVE', code = $2 WHERE id = $1;`,
+                [dairyId, releasedCode]
+              );
+            } catch {
+              await controlDb.query(
+                `UPDATE organizations SET status = 'INACTIVE' WHERE id = $1;`,
+                [dairyId]
+              );
+            }
+          }
+        } catch (err: any) {
+          logger.error({ dairyId, error: err.message }, 'Error updating central database during deprovisioning');
+          throw new Error(`Error updating central database during deprovisioning: ${err.message}`);
         }
+
+        // 4. Clean in-memory tracking only after full deprovisioning succeeded
+        this.tenantMappings.delete(dairyId);
+        inMemoryDairies.delete(dairyId);
+
+        logger.info({ dairyId, dbName }, 'Tenant database deprovisioning completed successfully.');
+
+        return {
+          success: true,
+          dairyId,
+          databaseName: dbName,
+          deprovisionedAt: now,
+          details: `Physical database ${dbName} dropped and central memberships cleaned up.`,
+        };
+      } catch (err: any) {
+        const failedMapping: TenantDatabaseMapping = {
+          ...deprovisioningMapping,
+          provisioningStatus: 'DEPROVISION_FAILED',
+          provisioningError: err?.message || 'Tenant database deprovisioning failed',
+          lastVerifiedAt: new Date().toISOString(),
+        };
+        this.tenantMappings.set(dairyId, failedMapping);
+        try {
+          const controlDb = this.getControlPlaneDb();
+          await controlDb.query(
+            `UPDATE dairy_database_mappings
+             SET provisioning_status = 'DEPROVISION_FAILED',
+                 provisioning_error = $2,
+                 last_verified_at = NOW()
+             WHERE dairy_id = $1;`,
+            [dairyId, failedMapping.provisioningError]
+          );
+        } catch (persistErr: any) {
+          logger.warn(
+            { dairyId, error: persistErr?.message },
+            'Failed to persist DEPROVISION_FAILED status to control plane'
+          );
+        }
+        throw err;
       }
-    } catch (err: any) {
-      logger.error({ dairyId, error: err.message }, 'Error updating central database during deprovisioning');
-      if (!options.force) {
-        throw new Error(`Error updating central database during deprovisioning: ${err.message}`);
+    })();
+
+    this.deprovisioningTenants.set(dairyId, deprovisionOp);
+    try {
+      return await deprovisionOp;
+    } finally {
+      if (this.deprovisioningTenants.get(dairyId) === deprovisionOp) {
+        this.deprovisioningTenants.delete(dairyId);
       }
     }
-
-    // 4. Clean in-memory tracking
-    this.tenantMappings.delete(dairyId);
-    inMemoryDairies.delete(dairyId);
-
-    logger.info({ dairyId, dbName }, 'Tenant database deprovisioning completed successfully.');
-
-    return {
-      success: true,
-      dairyId,
-      databaseName: dbName,
-      deprovisionedAt: now,
-      details: `Physical database ${dbName} dropped and central memberships cleaned up.`,
-    };
   }
 
   public async getSafeHealthStatus(): Promise<{
@@ -1096,12 +1396,12 @@ export class TenantDatabaseManager {
         if (dairyId && this.tenantPools.get(dairyId) === pool) {
           return this.closeTenantPool(dairyId);
         }
-        await this.endPoolSafely(pool);
         for (const [id, mappedPool] of this.tenantPools.entries()) {
           if (mappedPool === pool) {
-            this.tenantPools.delete(id);
+            return this.closeTenantPool(id);
           }
         }
+        await this.endPoolSafely(pool);
       },
     };
   }

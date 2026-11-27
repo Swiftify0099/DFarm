@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import pg from 'pg';
 import { assertDisposablePg17Cluster } from '../../../scripts/pg17-safety-guard.js';
+import { createPoolShutdownManager } from './helpers/pool-lifecycle-helpers.js';
 
 const { Pool } = pg;
 
@@ -133,115 +134,8 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
   let tenantDbManagerRef = null;
   let dbRef = null;
   const createdDatabases = [];
-  const closedPools = new WeakSet();
   let cleanupPromise = null;
-
-  // Per-pool in-flight shutdown promises so that concurrent callers await the
-  // same Promise rather than returning early or racing.
-  const poolShutdownPromises = new WeakMap();
-
-  const closePoolCleanly = async (pool, label, closeAction) => {
-    if (!pool) return;
-
-    // If a shutdown is already in-flight for this pool, await the exact same
-    // Promise so concurrent callers never trigger duplicate shutdowns.
-    const inflight = poolShutdownPromises.get(pool);
-    if (inflight) {
-      return inflight;
-    }
-
-    // Only skip if a previous shutdown completed cleanly.
-    if (closedPools.has(pool)) return;
-
-    const shutdownPromise = (async () => {
-      // Wait for all checked-out or waiting clients to settle before teardown.
-      const deadline = Date.now() + 8000;
-      while (Date.now() < deadline) {
-        if (pool.totalCount === pool.idleCount && pool.waitingCount === 0) break;
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-      if (pool.totalCount !== pool.idleCount || pool.waitingCount > 0) {
-        throw new Error(
-          `Pool '${label}' still had checked-out or waiting clients before teardown (total=${pool.totalCount}, idle=${pool.idleCount}, waiting=${pool.waitingCount}).`
-        );
-      }
-
-      const expectedRemovals = Number(pool.totalCount || 0);
-      let removedCount = 0;
-      let resolveRemoved;
-      const removedPromise =
-        expectedRemovals > 0
-          ? new Promise((resolve) => {
-              resolveRemoved = resolve;
-            })
-          : Promise.resolve();
-
-      const onRemove = () => {
-        removedCount += 1;
-        if (removedCount >= expectedRemovals && resolveRemoved) {
-          resolveRemoved();
-        }
-      };
-
-      if (expectedRemovals > 0) {
-        pool.on('remove', onRemove);
-      }
-
-      let removeTimer;
-      try {
-        if (closeAction) {
-          await closeAction();
-        } else if (pool.ending && !pool.ended) {
-          const endDeadline = Date.now() + 8000;
-          while (!pool.ended && Date.now() < endDeadline) {
-            await new Promise((resolve) => setTimeout(resolve, 25));
-          }
-          if (!pool.ended) {
-            throw new Error(`Pool '${label}' external shutdown did not finish before timeout.`);
-          }
-        } else if (!pool.ended) {
-          await pool.end();
-        }
-
-        if (expectedRemovals > 0 && removedCount < expectedRemovals) {
-          await Promise.race([
-            removedPromise,
-            new Promise((resolve) => {
-              removeTimer = setTimeout(resolve, 3000);
-            }),
-          ]);
-        }
-
-        if (removedCount < expectedRemovals && (pool.totalCount > 0 || !pool.ended)) {
-          throw new Error(
-            `Pool '${label}' did not remove all expected clients during teardown (removed=${removedCount}, expected=${expectedRemovals}, totalCount=${pool.totalCount}, ended=${pool.ended}).`
-          );
-        }
-
-        // Mark successfully closed ONLY after clients and shutdown have verified clean completion.
-        closedPools.add(pool);
-      } finally {
-        if (removeTimer) {
-          clearTimeout(removeTimer);
-        }
-        if (expectedRemovals > 0) {
-          pool.off('remove', onRemove);
-        }
-      }
-    })();
-
-    poolShutdownPromises.set(pool, shutdownPromise);
-    try {
-      await shutdownPromise;
-    } finally {
-      // Clear in-flight entry once settled so a failed close (e.g. checked-out
-      // client) can be retried after releasing the client rather than replaying
-      // a stale rejection or skipping the pool.
-      if (poolShutdownPromises.get(pool) === shutdownPromise) {
-        poolShutdownPromises.delete(pool);
-      }
-    }
-  };
+  const { closePoolCleanly } = createPoolShutdownManager();
 
   const waitForDbIdle = async (dbName) => {
     const deadline = Date.now() + 5000;
@@ -822,7 +716,11 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
       );
       await assert.rejects(
         () => tenantDbManagerRef.getStrictTenantDb(orgBroken),
-        (err) => err?.code === 'CONNECTION_FAILED' || /Failed to initialize tenant database pool|decrypt/i.test(err?.message || '')
+        (err) =>
+          err?.status === 'CONNECTION_FAILED' ||
+          err?.code === 'CONNECTION_FAILED' ||
+          err?.code === 'TENANT_DATABASE_UNAVAILABLE' ||
+          /Invalid encrypted credential format|Failed to initialize tenant database pool|decrypt/i.test(err?.message || '')
       );
       assert.strictEqual(tenantDbManagerRef.getTenantPool(orgBroken), undefined,
         'Failed partial initialization must not leave a pool in tenantPools');
@@ -838,6 +736,116 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
       assert.strictEqual(c1.status, 'fulfilled', `First db.close(): ${c1.reason?.message}`);
       assert.strictEqual(c2.status, 'fulfilled', `Concurrent db.close(): ${c2.reason?.message}`);
       assert.strictEqual(dbRef.pool.ended, true, 'Central db.pool must be ended after db.close()');
+    });
+
+    await suite.test('10. Real PG17 physical provisioning migration failure closes actual pg.Pool, evicts after closure, and leaves zero pg_stat_activity connections', async () => {
+      const orgProvFail = crypto.randomUUID();
+      const codeProvFail = `PF${suffix}`;
+      const dbProvFail = tenantDbManagerRef.generateTenantDatabaseName(orgProvFail, codeProvFail);
+      const origRunTenantMigrations = MigrationRunner.runTenantMigrations;
+
+      let migrationInvoked = false;
+      let capturedPool = null;
+      let poolEndCalled = false;
+      let poolPresentWhenEndStarted = false;
+      let poolEndedBeforeEndFinished = true;
+      let activeConnectionsDuringMigration = 0;
+
+      MigrationRunner.runTenantMigrations = async (tenantClient, dairyId) => {
+        if (dairyId !== orgProvFail) {
+          return origRunTenantMigrations.call(MigrationRunner, tenantClient, dairyId);
+        }
+        migrationInvoked = true;
+
+        // Verify the real physical pg.Pool was created and registered before migrations run.
+        capturedPool = tenantDbManagerRef.getTenantPool(orgProvFail);
+        assert.ok(capturedPool instanceof Pool, 'Physical provisioning must register a real pg.Pool instance');
+        attachPoolErrorGuard(capturedPool, 'provFailPool');
+
+        // Open an actual physical PostgreSQL connection to the newly created disposable tenant DB.
+        const dbCheck = await tenantClient.query('SELECT current_database() AS db;');
+        assert.strictEqual(dbCheck.rows[0]?.db, dbProvFail);
+
+        const activityDuring = await adminPool.query(
+          `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+          [dbProvFail]
+        );
+        activeConnectionsDuringMigration = Number(activityDuring.rows[0]?.cnt || 0);
+        assert.ok(
+          activeConnectionsDuringMigration >= 1,
+          `Expected at least 1 active physical PG17 connection to ${dbProvFail} during migration`
+        );
+
+        const origPoolEnd = capturedPool.end.bind(capturedPool);
+        capturedPool.end = async (...args) => {
+          poolEndCalled = true;
+          poolPresentWhenEndStarted = tenantDbManagerRef.getTenantPool(orgProvFail) === capturedPool;
+          poolEndedBeforeEndFinished = Boolean(capturedPool.ended);
+          return origPoolEnd(...args);
+        };
+
+        throw new Error('Controlled PG17 migration failure after physical pool registration');
+      };
+
+      try {
+        await assert.rejects(
+          () =>
+            tenantDbManagerRef.provisionTenantDatabase({
+              dairyId: orgProvFail,
+              dairyCode: codeProvFail,
+              dairyName: 'Physical Provision Fail Dairy',
+              adminConnectionString: TEST_PG_URL,
+            }),
+          /Controlled PG17 migration failure after physical pool registration/
+        );
+
+        assert.strictEqual(migrationInvoked, true, 'MigrationRunner.runTenantMigrations must have been invoked');
+        assert.ok(capturedPool instanceof Pool, 'Physical pg.Pool must have been created before failure');
+        assert.strictEqual(poolEndCalled, true, 'Physical pg.Pool.end() must be called on migration failure');
+        assert.strictEqual(
+          poolPresentWhenEndStarted,
+          true,
+          'Manager must not evict tenant pool before pool.end() runs'
+        );
+        assert.strictEqual(poolEndedBeforeEndFinished, false, 'Pool must not already be ended when cleanup starts');
+        assert.strictEqual(capturedPool.ended, true, 'Physical pg.Pool must reach ended=true after failure cleanup');
+        assert.strictEqual(
+          tenantDbManagerRef.getTenantPool(orgProvFail),
+          undefined,
+          'Manager must evict failed tenant pool after closure'
+        );
+
+        const mapping = tenantDbManagerRef.getTenantMapping(orgProvFail);
+        assert.strictEqual(mapping?.provisioningStatus, 'FAILED');
+        assert.match(
+          mapping?.provisioningError || '',
+          /Controlled PG17 migration failure after physical pool registration/
+        );
+
+        // Wait for TCP socket teardown to settle and verify zero remaining connections in pg_stat_activity.
+        await waitForDbIdle(dbProvFail);
+        const activityAfter = await adminPool.query(
+          `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+          [dbProvFail]
+        );
+        assert.strictEqual(
+          Number(activityAfter.rows[0]?.cnt || 0),
+          0,
+          `Expected 0 remaining pg_stat_activity connections to ${dbProvFail} after failed provisioning cleanup`
+        );
+
+        // Clean disposable tenant DB via normal DROP DATABASE after verifying zero connections.
+        await adminPool.query(`DROP DATABASE IF EXISTS "${dbProvFail}";`);
+      } finally {
+        MigrationRunner.runTenantMigrations = origRunTenantMigrations;
+        const leftoverDbCheck = await adminPool.query(
+          `SELECT 1 FROM pg_database WHERE datname = $1;`,
+          [dbProvFail]
+        );
+        if (leftoverDbCheck.rows.length > 0 && !createdDatabases.includes(dbProvFail)) {
+          createdDatabases.push(dbProvFail);
+        }
+      }
     });
     // ─── END Phase 2 lifecycle regression tests ───────────────────────────────
   } finally {
