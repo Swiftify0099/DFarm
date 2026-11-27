@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import pg from 'pg';
 import { assertDisposablePg17Cluster } from '../../../scripts/pg17-safety-guard.js';
+import { createPoolShutdownManager } from './helpers/pool-lifecycle-helpers.js';
 import {
   MigrationRunner,
   CONTROL_PLANE_MIGRATIONS,
@@ -67,6 +68,7 @@ test('RESTART-03.2 Real PostgreSQL 17 Operational Repository Isolation & Concurr
   let poolCtrl;
   let poolA;
   let poolB;
+  let primaryError = null;
 
   const orgA = crypto.randomUUID();
   const orgB = crypto.randomUUID();
@@ -173,19 +175,22 @@ test('RESTART-03.2 Real PostgreSQL 17 Operational Repository Isolation & Concurr
     });
 
     assert.deepEqual(poolErrors, [], `Unexpected async PostgreSQL pool errors: ${JSON.stringify(poolErrors)}`);
+  } catch (err) {
+    primaryError = err;
+    throw err;
   } finally {
-    const closePoolCleanly = async (pool) => {
-      if (!pool) return;
-      const deadline = Date.now() + 8000;
-      while (Date.now() < deadline) {
-        if (pool.totalCount === pool.idleCount && pool.waitingCount === 0) break;
-        await new Promise((resolve) => setTimeout(resolve, 25));
+    const { closePoolCleanly } = createPoolShutdownManager();
+    const cleanupErrors = [];
+    const runStep = async (fn) => {
+      try {
+        await fn();
+      } catch (err) {
+        cleanupErrors.push(err instanceof Error ? err : new Error(String(err)));
       }
-      await pool.end();
     };
 
     const waitForDbIdle = async (dbName) => {
-      const deadline = Date.now() + 3000;
+      const deadline = Date.now() + 5000;
       while (Date.now() < deadline) {
         const res = await adminPool.query(
           `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
@@ -194,21 +199,60 @@ test('RESTART-03.2 Real PostgreSQL 17 Operational Repository Isolation & Concurr
         if (Number(res.rows[0]?.cnt || 0) === 0) return;
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
+      const finalRes = await adminPool.query(
+        `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+        [dbName]
+      );
+      const remaining = Number(finalRes.rows[0]?.cnt || 0);
+      if (remaining > 0) {
+        throw new Error(
+          `Disposable database '${dbName}' still had ${remaining} active/idle connection(s) before DROP DATABASE.`
+        );
+      }
     };
 
-    await closePoolCleanly(poolCtrl);
-    await closePoolCleanly(poolA);
-    await closePoolCleanly(poolB);
+    for (const [pool, label] of [
+      [poolCtrl, 'poolCtrl'],
+      [poolA, 'poolA'],
+      [poolB, 'poolB'],
+    ]) {
+      if (pool) {
+        await runStep(async () => {
+          await closePoolCleanly(pool, label);
+          assert.strictEqual(pool.ended, true, `Pool '${label}' must reach ended=true`);
+        });
+      }
+    }
 
-    await waitForDbIdle(dbNameA);
-    await waitForDbIdle(dbNameB);
-    await waitForDbIdle(dbNameCtrl);
+    for (const dbName of [dbNameA, dbNameB, dbNameCtrl]) {
+      await runStep(async () => {
+        await waitForDbIdle(dbName);
+        await adminPool.query(`DROP DATABASE IF EXISTS ${dbName};`);
+      });
+    }
 
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameA} WITH (FORCE);`);
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameB} WITH (FORCE);`);
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameCtrl} WITH (FORCE);`);
-    await adminPool.end();
+    await runStep(async () => {
+      await closePoolCleanly(adminPool, 'adminPool');
+      assert.strictEqual(adminPool.ended, true, 'adminPool must reach ended=true');
+    });
 
-    assert.deepEqual(poolErrors, [], `Unexpected async pool errors during shutdown: ${JSON.stringify(poolErrors)}`);
+    await runStep(async () => {
+      assert.deepEqual(poolErrors, [], `Unexpected async pool errors during shutdown: ${JSON.stringify(poolErrors)}`);
+    });
+
+    if (cleanupErrors.length > 0) {
+      const cleanErr =
+        cleanupErrors.length === 1
+          ? cleanupErrors[0]
+          : new AggregateError(
+              cleanupErrors,
+              `Cleanup failed with ${cleanupErrors.length} errors: ${cleanupErrors.map((e) => e.message).join('; ')}`
+            );
+      if (primaryError) {
+        const orig = primaryError instanceof Error ? primaryError : new Error(String(primaryError));
+        throw new AggregateError([orig, cleanErr], `${orig.message} (cleanup also failed: ${cleanErr.message})`);
+      }
+      throw cleanErr;
+    }
   }
 });

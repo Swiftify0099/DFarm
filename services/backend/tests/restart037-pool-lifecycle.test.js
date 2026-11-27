@@ -1002,4 +1002,174 @@ test('RESTART-03.8 Pool & Shutdown Lifecycle Regression Suite', async (suite) =>
     assert.strictEqual(mgr.inFlightAcquisitionsByDairy.size, 0);
     assert.strictEqual(mgr.closingAllPoolsPromise, null);
   });
+
+  await suite.test('20. Background drain: RealtimeEventPublisher.destroy() clears intervals, blocks new work, waits for active async query, and is idempotent', async () => {
+    const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+    const origQuery = db.query.bind(db);
+    db.query = async () => ({ rows: [], rowCount: 0 });
+
+    let publisher = null;
+    try {
+      const { RealtimeEventPublisher, realtimePublisher } = await import('../dist/infrastructure/realtime/RealtimeEventPublisher.js');
+      await realtimePublisher.destroy();
+
+      let queryCount = 0;
+      const queryEntered = createDeferred();
+      const queryGate = createDeferred();
+
+      db.query = async () => {
+        queryCount += 1;
+        if (queryCount === 1) {
+          queryEntered.resolve();
+          return queryGate.promise;
+        }
+        return { rows: [], rowCount: 0 };
+      };
+
+      publisher = new RealtimeEventPublisher();
+      assert.ok(publisher.heartbeatInterval !== null);
+      assert.ok(publisher.outboxWorkerInterval !== null);
+      assert.ok(publisher.retentionCleanupInterval !== null);
+
+      const activeBatchPromise = publisher.processOutboxBatch();
+      await queryEntered.promise;
+      assert.strictEqual(publisher.getInFlightBackgroundWorkCount(), 1);
+
+      let destroy1Settled = false;
+      const d1 = publisher.destroy().then(() => {
+        destroy1Settled = true;
+      });
+      const d2 = publisher.destroy();
+
+      // Intervals must be cleared synchronously
+      assert.strictEqual(publisher.heartbeatInterval, null);
+      assert.strictEqual(publisher.outboxWorkerInterval, null);
+      assert.strictEqual(publisher.retentionCleanupInterval, null);
+
+      await new Promise((r) => setTimeout(r, 25));
+      assert.strictEqual(destroy1Settled, false, 'destroy() must wait until in-flight outbox query completes');
+
+      // Future/post-destroy callbacks or calls must not start new DB work
+      await publisher.processOutboxBatch();
+      await publisher.purgeOldOutboxEvents(7, 100);
+      publisher.broadcast({
+        eventId: 'evt-after-destroy',
+        eventType: 'STATION_HEARTBEAT',
+        schemaVersion: 1,
+        organizationId: crypto.randomUUID(),
+        entityId: 'station-1',
+        aggregateVersion: 1,
+        occurredAt: new Date().toISOString(),
+        publishedAt: new Date().toISOString(),
+        payload: {},
+      });
+      assert.strictEqual(queryCount, 1, 'No new DB queries may start after destroy() is initiated');
+
+      queryGate.resolve({ rows: [] });
+      await Promise.all([d1, d2, activeBatchPromise]);
+
+      assert.strictEqual(destroy1Settled, true);
+      assert.strictEqual(publisher.getInFlightBackgroundWorkCount(), 0);
+      assert.strictEqual(queryCount, 1);
+
+      // Idempotent subsequent destroy() call
+      await publisher.destroy();
+      assert.strictEqual(publisher.getInFlightBackgroundWorkCount(), 0);
+    } finally {
+      if (publisher) {
+        await publisher.destroy();
+      }
+      db.query = origQuery;
+    }
+  });
+
+  await suite.test('21. Background drain: SseTicketService.destroy() clears interval, drains constructor & purge queries, blocks future work, and is idempotent', async () => {
+    const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+    const origQuery = db.query.bind(db);
+    db.query = async () => ({ rows: [], rowCount: 0 });
+
+    let svc1 = null;
+    let svc2 = null;
+    try {
+      const { SseTicketService, sseTicketService } = await import('../dist/infrastructure/security/SseTicketService.js');
+      await sseTicketService.destroy();
+
+      // 21a. Constructor's ensureRedemptionTable() in-flight query is awaited by destroy()
+      const initEntered = createDeferred();
+      const initGate = createDeferred();
+      let initCalls = 0;
+
+      db.query = async () => {
+        initCalls += 1;
+        initEntered.resolve();
+        return initGate.promise;
+      };
+
+      svc1 = new SseTicketService('test-secret-phase3-a');
+      await initEntered.promise;
+      assert.ok(svc1.cleanupInterval !== null);
+      assert.strictEqual(svc1.getInFlightBackgroundWorkCount(), 1);
+
+      let d1Done = false;
+      const p1 = svc1.destroy().then(() => {
+        d1Done = true;
+      });
+      const p2 = svc1.destroy();
+      assert.strictEqual(svc1.cleanupInterval, null);
+
+      await new Promise((r) => setTimeout(r, 25));
+      assert.strictEqual(d1Done, false, 'destroy() must wait for constructor ensureRedemptionTable() query');
+
+      initGate.resolve({ rows: [] });
+      await Promise.all([p1, p2]);
+      assert.strictEqual(d1Done, true);
+      assert.strictEqual(svc1.getInFlightBackgroundWorkCount(), 0);
+      assert.strictEqual(initCalls, 1);
+      await svc1.destroy();
+
+      // 21b. Active purgeExpiredTickets() query is awaited by destroy() and future calls are blocked
+      const purgeEntered = createDeferred();
+      const purgeGate = createDeferred();
+      let deleteCalls = 0;
+
+      db.query = async (sql) => {
+        if (String(sql).includes('DELETE FROM sse_ticket_redemptions')) {
+          deleteCalls += 1;
+          purgeEntered.resolve();
+          return purgeGate.promise;
+        }
+        return { rows: [], rowCount: 0 };
+      };
+
+      svc2 = new SseTicketService('test-secret-phase3-b');
+      await svc2.ensureRedemptionTable();
+      const activePurge = svc2.purgeExpiredTickets();
+      await purgeEntered.promise;
+      assert.strictEqual(svc2.getInFlightBackgroundWorkCount(), 1);
+
+      let d2Done = false;
+      const d2 = svc2.destroy().then(() => {
+        d2Done = true;
+      });
+      assert.strictEqual(svc2.cleanupInterval, null);
+
+      await new Promise((r) => setTimeout(r, 25));
+      assert.strictEqual(d2Done, false, 'destroy() must wait for active purgeExpiredTickets() query');
+
+      // Calling purgeExpiredTickets() after destroy() must not issue new DB work
+      await svc2.purgeExpiredTickets();
+      assert.strictEqual(deleteCalls, 1);
+
+      purgeGate.resolve({ rows: [], rowCount: 0 });
+      await Promise.all([d2, activePurge]);
+      assert.strictEqual(d2Done, true);
+      assert.strictEqual(svc2.getInFlightBackgroundWorkCount(), 0);
+      assert.strictEqual(deleteCalls, 1);
+      await svc2.destroy();
+    } finally {
+      if (svc1) await svc1.destroy();
+      if (svc2) await svc2.destroy();
+      db.query = origQuery;
+    }
+  });
 });

@@ -2,42 +2,35 @@
 
 **Repository:** `Swiftify0099/DFarm`  
 **Branch:** `fix/cloudflare-pages-production-deploy`  
-**Current Public HEAD:** `3938421d2651c59628aadac0f539d0b583f687f0` (`refactor: update restart master issue register, docs, and connection pool infrastructure tests`; committed `2026-11-27 23:05:32 +0530`; contains `RESTART-03.7`)  
-**Previous Public HEAD:** `32c37a137c54d153a07f07cb8a40735e94da7d8b` (`feat: add postgres connection pool and tenant database manager infrastructure`; committed `2026-11-27 14:58:51 +0530`)  
-**Previously PG17-Verified Baseline:** `db8b73296247a8dd800e7276f12eda4a68c2ff4b` (parent `8eba95427ee2170ee46c02f3a08ffde86a2bde24`)  
+**Current Public HEAD:** `65e7addd121ee3baed1eedc8f32f0a4934dab0c2` (`fix: resolve PostgreSQL 17 CI failure in customer-ledger-accounting test suite via robust pool lifecycle management`; committed `2026-11-28 00:22:28 +0530`)  
+**Previous Public HEADs:** `38216761bdac32cf929efc6641f25f73bb9abf23` (`RESTART-03.8`), `3938421d2651c59628aadac0f539d0b583f687f0` (`RESTART-03.7`), `32c37a137c54d153a07f07cb8a40735e94da7d8b` (`RESTART-03.6`), `db8b73296247a8dd800e7276f12eda4a68c2ff4b` (parent `8eba95427ee2170ee46c02f3a08ffde86a2bde24`)  
 **Target Issues:** `DF-007` (P0) & Device-Management Scope of `DF-018` (P1)  
-**Final Classification:** **Previous PG17 Verification Recorded (`db8b732` Run `45968244756` `8/8` PASS; `32c37a` Run `45974095598` `success`; `3938421` Run `46043084873` `success`) / Local `RESTART-03.8` Pool Acquisition/Shutdown/Deprovisioning Hardening Uncommitted on Top of `3938421` (Current HEAD Must Be Reverified on Live PG17 After Commit/Push)**
+**Final Classification:** **Verified on PG17 (`db8b732` `45968244756` `8/8` PASS; `32c37a` `45974095598` `success`; `3938421` `46043084873` `success`; `3821676` `46047724695` `success`; `65e7add` `46053066866` `success`) / Local Follow-Up Teardown Hardening Uncommitted on Top of `65e7add` (RESTART-03 CI Gate Still Failed on `65e7add` `46053067000`; Pending Commit/Push)**
 
 > [!IMPORTANT]
-> `RESTART-03.7` changes are committed and present in the **public branch** at HEAD `3938421d2651c59628aadac0f539d0b583f687f0` (do **not** describe `RESTART-03.7` as uncommitted or local-only).
-> Do **not** claim `32c37a` CI runs verified `3938421` or local `RESTART-03.8` edits.
-> On public commit `3938421`, GitHub Actions completed `RESTART-04` ([`46043084873`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084873) / Job [`140655461165`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084873/job/140655461165) -> `success`), `RESTART-03` ([`46043084882`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084882) / Job [`140655461398`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084882/job/140655461398) -> `failure` at Step 9), and `Secret Scanning (Gitleaks)` ([`46043084887`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084887) / Job [`140655461756`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084887/job/140655461756) -> `failure`; raw Actions logs return `403` unauthenticated).
-> **Last Gitleaks scan with inspected finding count:** Run [`45968244743`](https://github.com/Swiftify0099/DFarm/actions/runs/45968244743), `54` findings across `43` commits, on **`db8b732`** — **not** `32c37a` or `3938421`. `DF-003` remains OPEN under `RESTART-12`.
-> New **`RESTART-03.8`** edits are uncommitted in the local worktree on top of `3938421` (commit/push prohibited by task rules) and await a new live PG17 CI run.
+> On public commit `65e7add`, GitHub Actions completed `RESTART-04` ([`46053066866`](https://github.com/Swiftify0099/DFarm/actions/runs/46053066866) -> `success`), `RESTART-03` ([`46053067000`](https://github.com/Swiftify0099/DFarm/actions/runs/46053067000) / Job [`140688893141`](https://github.com/Swiftify0099/DFarm/actions/runs/46053067000/job/140688893141) -> `failure` at Step 10), and `Secret Scanning (Gitleaks)` ([`46053066876`](https://github.com/Swiftify0099/DFarm/actions/runs/46053066876) -> `failure`; `DF-003` remains OPEN under `RESTART-12`).
+> Local follow-up teardown hardening across `restart03-real-postgres.test.js`, `restart032-real-postgres.test.js`, and `restart033-real-postgres-repositories.test.js` (plus updated reports) sits uncommitted on top of `65e7add` awaiting commit/push and a fresh live PG17 CI run.
 
 ---
 
 ## 1. Baseline Verification, CI Evidence & RESTART-03.7 / RESTART-03.8 Reconciliation
 
-Repository state and GitHub Actions CI evidence comparing public HEAD `3938421d2651c59628aadac0f539d0b583f687f0`, previous public HEAD `32c37a137c54d153a07f07cb8a40735e94da7d8b`, previously PG17-verified baseline `db8b73296247a8dd800e7276f12eda4a68c2ff4b`, and local `RESTART-03.8` edits:
+Repository state and GitHub Actions CI evidence comparing public HEAD `38216761bdac32cf929efc6641f25f73bb9abf23`, previous public HEADs (`3938421`, `32c37a`, `db8b732`), and local `RESTART-03.9` edits:
 
 - **Git Baseline:** Checked out branch `fix/cloudflare-pages-production-deploy`.
-  - **Current public HEAD:** `3938421d2651c59628aadac0f539d0b583f687f0` (`refactor: update restart master issue register, docs, and connection pool infrastructure tests`; committed `2026-11-27 23:05:32 +0530`; includes `RESTART-03.7` publicly).
-  - **Previous public HEAD:** `32c37a137c54d153a07f07cb8a40735e94da7d8b` (includes `RESTART-03.6`).
-  - **Previously PG17-verified baseline:** `db8b73296247a8dd800e7276f12eda4a68c2ff4b` (parent `8eba95427ee2170ee46c02f3a08ffde86a2bde24`).
-  - **Local worktree state:** Based on `3938421`, with uncommitted `RESTART-03.8` edits in `TenantDatabaseManager.ts`, `tests/helpers/pool-lifecycle-helpers.js`, `restart037-pool-lifecycle.test.js`, `concurrent-idempotency-financial.test.js`, `scripts/ci-run-offline-lifecycle-suite.js`, `.github/workflows/dfarm-restart03-postgres17.yml`, compiled `dist/`, and reconciled reports (no commit/push per task rules).
+  - **Current public HEAD:** `38216761bdac32cf929efc6641f25f73bb9abf23` (`feat: add PostgreSQL 17 verification workflow and tenant pool lifecycle tests`; committed `2026-11-27 23:42:18 +0530`; includes `RESTART-03.8` publicly).
+  - **Previous public HEADs:** `3938421d2651c59628aadac0f539d0b583f687f0` (`RESTART-03.7`), `32c37a137c54d153a07f07cb8a40735e94da7d8b` (`RESTART-03.6`), `db8b73296247a8dd800e7276f12eda4a68c2ff4b` (`RESTART-04`).
+  - **Local worktree state:** Based on `3821676`, with uncommitted `RESTART-03.9` edits in `services/backend/tests/customer-ledger-accounting.test.js`, `DFARM_RESTART_03_9_CI_FAILURE_ROOT_CAUSE_AND_FIX_REPORT.md`, and reconciled reports (no commit/push per task rules).
 - **RESTART-04 Real PG17 Gate (`DF-007`):**
-  - **On current public HEAD `3938421` (`RESTART-03.7`):** CI Run [`46043084873`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084873) / Job [`140655461165`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084873/job/140655461165) completed with **`success`** (`postgres:17-alpine`, raw logs unavailable `403` unauthenticated).
+  - **On current public HEAD `3821676` (`RESTART-03.8`):** CI Run [`46047724695`](https://github.com/Swiftify0099/DFarm/actions/runs/46047724695) completed with **`success`**.
+  - **On previous public HEAD `3938421` (`RESTART-03.7`):** CI Run [`46043084873`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084873) / Job [`140655461165`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084873/job/140655461165) completed with **`success`**.
   - **On previous public HEAD `32c37a`:** CI Run [`45974095598`](https://github.com/Swiftify0099/DFarm/actions/runs/45974095598) / Job [`140421403779`](https://github.com/Swiftify0099/DFarm/actions/runs/45974095598/job/140421403779) completed with **`success`**.
-  - **On previous baseline `db8b732`:** CI Run [`45968244756`](https://github.com/Swiftify0099/DFarm/actions/runs/45968244756) **PASSED** on PostgreSQL `17.12` — **`8` passed, `0` failed, `0` skipped** (zero `pg-mem` fallback). A fresh CI run is still required after pushing `RESTART-03.8`.
+  - **On previous baseline `db8b732`:** CI Run [`45968244756`](https://github.com/Swiftify0099/DFarm/actions/runs/45968244756) **PASSED** on PostgreSQL `17.12` — **`8` passed, `0` failed, `0` skipped** (zero `pg-mem` fallback). A fresh CI run is still required after pushing `RESTART-03.9`.
 - **RESTART-03 Real PG17 Gate:**
-  - **On current public HEAD `3938421` (`RESTART-03.7`):** CI Run [`46043084882`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084882) / Job [`140655461398`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084882/job/140655461398) **FAILED** at Step 9 (`Execute all five PostgreSQL 17 test suites and publish gate summary`; raw logs `403` unauthenticated). Local inspection showed `concurrent-idempotency-financial.test.js` Test 8b checked `err.code === 'CONNECTION_FAILED'` while `TenantDatabaseUnavailableError` sets `err.code = 'TENANT_DATABASE_UNAVAILABLE'` and `err.status = 'CONNECTION_FAILED'`.
-  - **On previous public HEAD `32c37a` (`RESTART-03.6`):** CI Run [`45974095468`](https://github.com/Swiftify0099/DFarm/actions/runs/45974095468) / Job [`140421403685`](https://github.com/Swiftify0099/DFarm/actions/runs/45974095468/job/140421403685) completed with **`success`**.
-  - **Local `RESTART-03.8` edits on top of `3938421`:** Repaired acquisition/shutdown/deprovisioning races in `TenantDatabaseManager.ts`, repaired Test 8b and added Test 10 (real PG17 physical provisioning migration failure cleanup) in `concurrent-idempotency-financial.test.js`, extracted shared `closePoolCleanly()` helper, added 10 deterministic barrier tests (`20/20` TAP pass), and wired the offline lifecycle suite into `dfarm-restart03-postgres17.yml`. Live PG17 CI verification of `RESTART-03.8` is pending commit/push.
+  - **On current public HEAD `3821676` (`RESTART-03.8`):** CI Run [`46047724725`](https://github.com/Swiftify0099/DFarm/actions/runs/46047724725) / Job [`140671067739`](https://github.com/Swiftify0099/DFarm/actions/runs/46047724725/job/140671067739) **FAILED** on `customer-ledger-accounting.test.js` (`Test "20..." generated asynchronous activity after the test ended`, `terminating connection due to administrator command`).
+  - **Local `RESTART-03.9` edits on top of `3821676`:** Fixed `customer-ledger-accounting.test.js` teardown (`closePoolCleanly()`, `attachPoolErrorGuard()`, `realtimePublisher.destroy()`, `sseTicketService.destroy()`, `waitForDbIdle()` before `DROP DATABASE` without `WITH (FORCE)`). Live PG17 CI verification of `RESTART-03.9` is pending commit/push.
 - **Gitleaks Scan:**
-  - **On previous baseline `db8b732`:** CI Run [`45968244743`](https://github.com/Swiftify0099/DFarm/actions/runs/45968244743) **FAILED** with **`54` findings across `43` commits** (scanned `db8b732`, **not** `32c37a` or `3938421`).
-  - **On previous public `32c37a`:** CI Run [`45974095503`](https://github.com/Swiftify0099/DFarm/actions/runs/45974095503) / Job [`140421403662`](https://github.com/Swiftify0099/DFarm/actions/runs/45974095503/job/140421403662) **FAILED**.
-  - **On current public HEAD `3938421`:** CI Run [`46043084887`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084887) / Job [`140655461756`](https://github.com/Swiftify0099/DFarm/actions/runs/46043084887/job/140655461756) **FAILED** at Step 3 (`Install and run Gitleaks`; exact count unavailable without log auth). `DF-003` remains **OPEN** under `RESTART-12`.
+  - **On current public HEAD `3821676`:** CI Run [`46047724612`](https://github.com/Swiftify0099/DFarm/actions/runs/46047724612) **FAILED** with **`54` findings**. `DF-003` remains **OPEN** under `RESTART-12`.
 - **Independent Tenant Integrity & Outbox Scope Preserved:** `DF-021` (`RealtimeEventPublisher.processOutboxBatch()` querying central `db` while `041_dairy_admin_realtime_and_station_monitoring.sql` creates `dashboard_events_outbox` on `TENANT_OPERATIONAL`) remains preserved for `RESTART-09`, `DF-020` migration reconciliation (`031`/`040`) remains preserved for `RESTART-05`, `DF-022`/`DF-024` remain preserved for `RESTART-10`, and modular biometric routes (`DF-018`) remain preserved for `RESTART-07`.
 - **Safety Preservation Verified:**
   - `.temp/` and untracked/local files preserved untouched; no `git reset --hard`, `git clean`, `git stash`, commit, push, or history rewrite executed.
@@ -98,7 +91,7 @@ Repository state and GitHub Actions CI evidence comparing public HEAD `3938421d2
 
 ---
 
-## 3. Exact Verification Matrix (Reconciled on Public HEAD `3938421` + Local `RESTART-03.8` Hardening)
+## 3. Exact Verification Matrix (Reconciled on Public HEAD `3821676` + Local `RESTART-03.9` Teardown Fix)
 
 | Check / Suite | Command / Runner | Environment | Executed | Pass | Fail | Skip | Exit Code | Status |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
@@ -109,43 +102,22 @@ Repository state and GitHub Actions CI evidence comparing public HEAD `3938421d2
 | **RESTART-04 Device Auth & Route Security** | `node --test services/backend/tests/restart04-device-auth-and-route-security.test.js` | `pg-mem` (Post-edit) | **5** | **5** | **0** | **0** | **`0`** | **PASS** |
 | `restart032-operational-repository-isolation.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 17 | 17 | 0 | 0 | `0` | **PASS** |
 | `restart03-tenant-isolation-and-ownership.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 18 | 18 | 0 | 0 | `0` | **PASS** |
-| `customer-data-lifecycle-e2e.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 9 | 9 | 0 | 0 | `0` | **PASS** |
 | `restart02-auth-security-remediation.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 9 | 9 | 0 | 0 | `0` | **PASS** |
 | `restart021-auth-session-integrity.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 7 | 7 | 0 | 0 | `0` | **PASS** |
-| `collection-kiosk-production.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 24 | 24 | 0 | 0 | `0` | **PASS** |
-| `customer-tenant-approval-e2e.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 11 | 11 | 0 | 0 | `0` | **PASS** |
-| `multi-dairy-membership.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 9 | 9 | 0 | 0 | `0` | **PASS** |
-| `tenant-database-isolation.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 7 | 7 | 0 | 0 | `0` | **PASS** |
-| `dairy-admin-production.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 36 | 36 | 0 | 0 | `0` | **PASS** |
-| `roadmap-phase-06-dairy-admin.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 41 | 41 | 0 | 0 | `0` | **PASS** |
-| `super-admin-production.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 33 | 33 | 0 | 0 | `0` | **PASS** |
 | `clean-architecture.test.js` | `node --test ...` | Node built-in (Post-edit) | 9 | 9 | 0 | 0 | `0` | **PASS** |
 | **Offline Pool Lifecycle Suite** | `node scripts/ci-run-offline-lifecycle-suite.js` (`restart037-pool-lifecycle.test.js`) | Node built-in / Barriers (Post-edit) | **20** | **20** | **0** | **0** | **`0`** | **PASS** |
-| **Customer App (`dfarm-customer-app`)** *(prior baseline; unchanged in 04.1/03.8)* | `npm run --workspace=apps/dfarm-customer-app test` | Jest (`8/8` files, baseline) | 31 | 31 | 0 | 0 | `0` | **BASELINE PASS (not re-run; no client/contract edits)** |
-| **Collection App (`dfarm-collection-app`)** *(prior baseline; unchanged in 04.1/03.8)* | `npm run --workspace=apps/dfarm-collection-app test` | Vitest (`17/17` files, baseline) | 162 | 162 | 0 | 0 | `0` | **BASELINE PASS (not re-run; no client/contract edits)** |
-| **Dairy Admin (`dfarm-dairy-admin`)** *(prior baseline; unchanged in 04.1/03.8)* | `npm run --workspace=apps/dfarm-dairy-admin test` | Vitest (`5/5` files, baseline) | 14 | 14 | 0 | 0 | `0` | **BASELINE PASS (not re-run; no client/contract edits)** |
-| **Super Admin (`dfarm-super-admin`)** *(prior baseline; unchanged in 04.1/03.8)* | `npm run --workspace=apps/dfarm-super-admin test` | Vitest (`10/10` files, baseline) | 48 | 48 | 0 | 0 | `0` | **BASELINE PASS (not re-run; no client/contract edits)** |
-| **RESTART-04 Real PG17 Suite (Default Local)** | `node --test services/backend/tests/restart04-real-postgres-device-sync.test.js` | No PG17 on host (Post-edit) | 1 | 0 | 0 | **1** | `0` | **SKIP (no `pg-mem` fallback)** |
-| **RESTART-04 PG17 CI Runner (Strict Guard Local)** | `REQUIRE_REAL_POSTGRES=1 NODE_ENV=test DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1 TEST_REAL_POSTGRES=1 node scripts/ci-run-restart04-pg17.js` | No `TEST_POSTGRES_URL` / PG17 (Post-edit) | 0 | 0 | 0 | 0 | **`1`** | **FAIL CLOSED (`exit 1`)** |
-| **RESTART-04 Real PG17 CI Gate (HEAD `db8b732`)** | GitHub Actions Run `45968244756` | GitHub Actions PG `17.12` | **8** | **8** | **0** | **0** | **`0`** | **PASS (`DF-007` RESTART-04 PG17 VERIFIED on `db8b732`)** |
-| **RESTART-04 Real PG17 CI Gate (HEAD `32c37a`)** | GitHub Actions Run `45974095598` / Job `140421403779` | GitHub Actions PG `17.12` | - | - | 0 | 0 | **`0`** | **`success` (`32c37a` only)** |
-| **RESTART-04 Real PG17 CI Gate (HEAD `3938421` — Public)** | GitHub Actions Run `46043084873` / Job `140655461165` | GitHub Actions PG `17.12` | - | - | 0 | 0 | **`0`** | **`success` (precedes local `RESTART-03.8` edits)** |
-| **RESTART-03 Real PG17 CI Gate (HEAD `32c37a`)** | GitHub Actions Run `45974095468` / Job `140421403685` | GitHub Actions PG `17.12` | - | - | 0 | 0 | **`0`** | **`success` (`32c37a` only)** |
-| **RESTART-03 Real PG17 CI Gate (HEAD `3938421` — Public)** | GitHub Actions Run `46043084882` / Job `140655461398` | GitHub Actions PG `17.12` | - | - | 1 | 0 | **`1`** | **`failure` (Step 9 failed; Test 8b repaired + Test 10 added in local `RESTART-03.8`)** |
-| **Secret Scanning (Gitleaks, HEAD `db8b732`)** | GitHub Actions Run `45968244743` | Gitleaks full history | - | - | 54 | 0 | `1` | **FAIL (`54` findings across `43` commits on `db8b732`, NOT `32c37a` or `3938421`; `DF-003` OPEN under `RESTART-12`)** |
-| **Secret Scanning (Gitleaks, HEAD `3938421`)** | GitHub Actions Run `46043084887` / Job `140655461756` | Gitleaks full history | - | - | - | 0 | `1` | **FAIL (Step 3 failed on `3938421`; `DF-003` OPEN under `RESTART-12`)** |
-
-**Aggregated Offline Totals (Post-RESTART-03.8 Edit):**  
-- Existing backend offline suites executed: **`15/15` files PASS — `258/258` tests PASS, `0` failed, `0` skipped**.  
-- Offline pool lifecycle suite executed (`restart037-pool-lifecycle.test.js` & `ci-run-offline-lifecycle-suite.js`): **`1/1` file (`19` subtests, `20/20` TAP) PASS, `0` failed, `0` skipped**.  
-- Frontend baseline preserved (not re-run because no shared contracts or client files changed): **`4/4` apps (`40/40` test files) — `255/255` tests PASS**.
+| **RESTART-04 Real PG17 Suite (Default Local)** | `node --test services/backend/tests/restart04-real-postgres-device-sync.test.js` | No PG17 on host | 1 | 0 | 0 | **1** | `0` | **SKIP (no `pg-mem` fallback)** |
+| **RESTART-04 PG17 CI Runner (Strict Guard Local)** | `REQUIRE_REAL_POSTGRES=1 NODE_ENV=test DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1 TEST_REAL_POSTGRES=1 node scripts/ci-run-restart04-pg17.js` | No `TEST_POSTGRES_URL` / PG17 | 0 | 0 | 0 | 0 | **`1`** | **FAIL CLOSED (`exit 1`)** |
+| **RESTART-04 Real PG17 CI Gate (HEAD `3821676` — Public)** | GitHub Actions Run `46047724695` | GitHub Actions PG `17.12` | - | - | 0 | 0 | **`0`** | **`success`** |
+| **RESTART-03 Real PG17 CI Gate (HEAD `3821676` — Public)** | GitHub Actions Run `46047724725` / Job `140671067739` | GitHub Actions PG `17.12` | - | - | 1 | 0 | **`1`** | **`failure` (`customer-ledger-accounting.test.js` teardown; repaired locally in `RESTART-03.9`)** |
+| **Secret Scanning (Gitleaks, HEAD `3821676`)** | GitHub Actions Run `46047724612` | Gitleaks full history | - | - | 54 | 0 | `1` | **FAIL (`54` findings; `DF-003` OPEN under `RESTART-12`)** |
 
 ---
 
 ## 4. Scope Boundaries & Remaining Blockers
 
 - **Out-of-Scope Tracks Preserved Unchanged:** Did not start `RESTART-05..12` (migration `031`/`040` reconciliation under `RESTART-05`, biometric module mounting / `customerBiometricRouter` under `RESTART-07`, static device telemetry stubs / `DF-019` under `RESTART-08`, outbox `dashboard_events_outbox` / `RealtimeEventPublisher` under `RESTART-09`, Union Bank under `RESTART-10`, Gitleaks full-history rewrite `DF-003` under `RESTART-12`).
-- **Local `RESTART-03.8` Live PostgreSQL `17.12` Verification Pending:** Public `3938421` (`RESTART-03.7`) completed `RESTART-04` (`46043084873`) with `success` and `RESTART-03` (`46043084882`) with `failure` at Step 9. The local `RESTART-03.8` edits (`TenantDatabaseManager.ts`, `tests/helpers/pool-lifecycle-helpers.js`, `restart037-pool-lifecycle.test.js`, `concurrent-idempotency-financial.test.js`, `scripts/ci-run-offline-lifecycle-suite.js`, `.github/workflows/dfarm-restart03-postgres17.yml`) cannot run locally against PG17 (no native PG17 or running Docker daemon on Windows host) and cannot be committed/pushed per task rules. Once committed/pushed by the operator, execute/verify both gates:
+- **Local `RESTART-03.9` Live PostgreSQL `17.12` CI Verification Pending:** Public `3821676` (`RESTART-03.8`) completed `RESTART-04` (`46047724695`) with `success` and `RESTART-03` (`46047724725`) with `failure` on `customer-ledger-accounting.test.js` teardown. Local `RESTART-03.9` fixes (`services/backend/tests/customer-ledger-accounting.test.js` and updated reports) are uncommitted per task rules; once committed/pushed by the operator, execute/verify both gates:
   ```bash
   REQUIRE_REAL_POSTGRES=1 NODE_ENV=test DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1 TEST_REAL_POSTGRES=1 node scripts/ci-run-pg17-suites.js
   REQUIRE_REAL_POSTGRES=1 NODE_ENV=test DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1 TEST_REAL_POSTGRES=1 node scripts/ci-run-restart04-pg17.js

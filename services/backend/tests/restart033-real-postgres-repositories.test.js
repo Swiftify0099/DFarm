@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import pg from 'pg';
 import { assertDisposablePg17Cluster } from '../../../scripts/pg17-safety-guard.js';
+import { createPoolShutdownManager } from './helpers/pool-lifecycle-helpers.js';
 
 const { Pool } = pg;
 
@@ -43,6 +44,17 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
 
   await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
 
+  const poolErrors = [];
+  const guardedPools = new WeakSet();
+  const attachPoolErrorGuard = (pool, label) => {
+    if (!pool || guardedPools.has(pool)) return pool;
+    guardedPools.add(pool);
+    pool.on('error', (err) => {
+      poolErrors.push({ label, code: err?.code, message: err?.message || String(err) });
+    });
+    return pool;
+  };
+
   const suffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
   const dbNameCtrl = `dfarm_r33_ctrl_${suffix}`;
   const dbNameA = `dfarm_r33_a_${suffix}`;
@@ -52,22 +64,55 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
   const urlA = makeDbUrl(TEST_PG_URL, dbNameA);
   const urlB = makeDbUrl(TEST_PG_URL, dbNameB);
 
-  const adminPool = new Pool({ connectionString: TEST_PG_URL, connectionTimeoutMillis: 5000 });
+  const adminPool = attachPoolErrorGuard(
+    new Pool({ connectionString: TEST_PG_URL, connectionTimeoutMillis: 5000 }),
+    'adminPool'
+  );
   let poolCtrl;
   let poolA;
   let poolB;
+  let tenantDbManagerRef = null;
+  let dbRef = null;
+  const createdDatabases = [];
+  const { closePoolCleanly } = createPoolShutdownManager();
+
+  const waitForDbIdle = async (dbName) => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const res = await adminPool.query(
+        `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+        [dbName]
+      );
+      if (Number(res.rows[0]?.cnt || 0) === 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const finalRes = await adminPool.query(
+      `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+      [dbName]
+    );
+    const remaining = Number(finalRes.rows[0]?.cnt || 0);
+    if (remaining > 0) {
+      throw new Error(
+        `Disposable database '${dbName}' still had ${remaining} active/idle connection(s) before DROP DATABASE.`
+      );
+    }
+  };
 
   const orgA = crypto.randomUUID();
   const orgB = crypto.randomUUID();
+  let primaryError = null;
 
   try {
     await adminPool.query(`CREATE DATABASE ${dbNameCtrl};`);
+    createdDatabases.push(dbNameCtrl);
     await adminPool.query(`CREATE DATABASE ${dbNameA};`);
+    createdDatabases.push(dbNameA);
     await adminPool.query(`CREATE DATABASE ${dbNameB};`);
+    createdDatabases.push(dbNameB);
 
-    poolCtrl = new Pool({ connectionString: ctrlUrl, max: 5 });
-    poolA = new Pool({ connectionString: urlA, max: 15 });
-    poolB = new Pool({ connectionString: urlB, max: 10 });
+    poolCtrl = attachPoolErrorGuard(new Pool({ connectionString: ctrlUrl, max: 5 }), 'poolCtrl');
+    poolA = attachPoolErrorGuard(new Pool({ connectionString: urlA, max: 15 }), 'poolA');
+    poolB = attachPoolErrorGuard(new Pool({ connectionString: urlB, max: 10 }), 'poolB');
 
     // Point backend singletons to disposable control-plane DB BEFORE importing any dist/ module (config/env.js)
     process.env['NODE_ENV'] = 'test';
@@ -84,7 +129,10 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
     const tenantBMigrations = await MigrationRunner.runTenantMigrations(poolB, orgB);
 
     const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+    dbRef = db;
+    attachPoolErrorGuard(db.pool, 'globalDbPool');
     const { tenantDbManager } = await import('../dist/infrastructure/database/TenantDatabaseManager.js');
+    tenantDbManagerRef = tenantDbManager;
     const { CredentialEncryption } = await import('../dist/infrastructure/security/CredentialEncryption.js');
     const {
       PostgresLedgerRepository,
@@ -115,11 +163,6 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
       },
     };
     tenantDbManager.setControlPlaneDb(controlPlaneAdapter);
-
-    suite.after(async () => {
-      await tenantDbManager.closeAllPools().catch(() => {});
-      await db.close().catch(() => {});
-    });
 
     const centerA = crypto.randomUUID();
     const centerB = crypto.randomUUID();
@@ -218,6 +261,8 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
 
       const tenantDbA = await tenantDbManager.getStrictTenantDb(orgA);
       const tenantDbB = await tenantDbManager.getStrictTenantDb(orgB);
+      attachPoolErrorGuard(tenantDbManager.getTenantPool(orgA), `tenantPool_${orgA.slice(0, 8)}`);
+      attachPoolErrorGuard(tenantDbManager.getTenantPool(orgB), `tenantPool_${orgB.slice(0, 8)}`);
       assert.equal((await tenantDbA.query('SELECT current_database() AS d;')).rows[0].d, dbNameA);
       assert.equal((await tenantDbB.query('SELECT current_database() AS d;')).rows[0].d, dbNameB);
 
@@ -791,19 +836,93 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
       assert.equal(afterUpdateB?.membershipStatus, 'APPROVED');
       assert.equal(afterUpdateB?.farmerCode, 'FB-SHARED');
     });
+  } catch (err) {
+    primaryError = err;
+    throw err;
   } finally {
-    try {
-      const { tenantDbManager } = await import('../dist/infrastructure/database/TenantDatabaseManager.js');
-      const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
-      await tenantDbManager.closeAllPools().catch(() => {});
-      await db.close().catch(() => {});
-    } catch {}
-    await poolCtrl?.end().catch(() => {});
-    await poolA?.end().catch(() => {});
-    await poolB?.end().catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameA} WITH (FORCE);`).catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameB} WITH (FORCE);`).catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameCtrl} WITH (FORCE);`).catch(() => {});
-    await adminPool.end().catch(() => {});
+    const cleanupErrors = [];
+    const runStep = async (fn) => {
+      try {
+        await fn();
+      } catch (err) {
+        cleanupErrors.push(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+
+    if (tenantDbManagerRef) {
+      const knownDairyIds = new Set([orgA, orgB]);
+      for (const m of tenantDbManagerRef.getAllMappings?.() || []) {
+        if (m?.dairyId) knownDairyIds.add(m.dairyId);
+      }
+      for (const dairyId of knownDairyIds) {
+        await runStep(async () => {
+          const tenantPool = tenantDbManagerRef.getTenantPool?.(dairyId);
+          if (tenantPool) {
+            const label = `tenantPool_${dairyId.slice(0, 8)}`;
+            attachPoolErrorGuard(tenantPool, label);
+            await closePoolCleanly(tenantPool, label, () => tenantDbManagerRef.closeTenantPool(dairyId));
+            assert.strictEqual(tenantPool.ended, true, `Tenant pool '${label}' must reach ended=true`);
+            assert.strictEqual(
+              tenantDbManagerRef.getTenantPool(dairyId),
+              undefined,
+              `Tenant pool '${label}' must be evicted from manager`
+            );
+          }
+        });
+      }
+      await runStep(() => tenantDbManagerRef.closeAllPools());
+    }
+
+    if (dbRef) {
+      await runStep(async () => {
+        attachPoolErrorGuard(dbRef.pool, 'globalDbPool');
+        await closePoolCleanly(dbRef.pool, 'globalDbPool', () => dbRef.close());
+        assert.strictEqual(dbRef.pool.ended, true, 'Global db.pool must reach ended=true');
+      });
+    }
+
+    for (const [pool, label] of [
+      [poolCtrl, 'poolCtrl'],
+      [poolA, 'poolA'],
+      [poolB, 'poolB'],
+    ]) {
+      if (pool) {
+        await runStep(async () => {
+          await closePoolCleanly(pool, label);
+          assert.strictEqual(pool.ended, true, `Pool '${label}' must reach ended=true`);
+        });
+      }
+    }
+
+    for (const dbName of [...createdDatabases].reverse()) {
+      await runStep(async () => {
+        await waitForDbIdle(dbName);
+        await adminPool.query(`DROP DATABASE IF EXISTS ${dbName};`);
+      });
+    }
+
+    await runStep(async () => {
+      await closePoolCleanly(adminPool, 'adminPool');
+      assert.strictEqual(adminPool.ended, true, 'adminPool must reach ended=true');
+    });
+
+    await runStep(async () => {
+      assert.deepEqual(poolErrors, [], `Unexpected async PostgreSQL pool errors: ${JSON.stringify(poolErrors)}`);
+    });
+
+    if (cleanupErrors.length > 0) {
+      const cleanErr =
+        cleanupErrors.length === 1
+          ? cleanupErrors[0]
+          : new AggregateError(
+              cleanupErrors,
+              `Cleanup failed with ${cleanupErrors.length} errors: ${cleanupErrors.map((e) => e.message).join('; ')}`
+            );
+      if (primaryError) {
+        const orig = primaryError instanceof Error ? primaryError : new Error(String(primaryError));
+        throw new AggregateError([orig, cleanErr], `${orig.message} (cleanup also failed: ${cleanErr.message})`);
+      }
+      throw cleanErr;
+    }
   }
 });

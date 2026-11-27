@@ -22,8 +22,13 @@ export declare class RealtimeEventPublisher {
     private outboxWorkerInterval;
     private retentionCleanupInterval;
     private isProcessingOutbox;
+    private isDestroyed;
+    private destroyPromise;
+    private readonly inFlightBackgroundWork;
     private lastCrossInstanceSyncTime;
     private constructor();
+    private trackBackgroundWork;
+    getInFlightBackgroundWorkCount(): number;
     static getInstance(): RealtimeEventPublisher;
     /**
      * Registers an active SSE client stream.
@@ -103,7 +108,7 @@ export declare class RealtimeEventPublisher {
      * - Fully idempotent.
      */
     purgeOldOutboxEvents(retentionDays?: number, batchSize?: number): Promise<number>;
-    destroy(): void;
+    destroy(): Promise<void>;
 }
 export declare const realtimePublisher: RealtimeEventPublisher;
 //# sourceMappingURL=RealtimeEventPublisher.d.ts.map

@@ -174,16 +174,12 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
         }
       };
 
-      // 1. Stop background intervals before closing pools so no timer fires mid-teardown
+      // 1. Stop background producers and await all in-flight background work before closing pools
       if (realtimePublisherRef) {
-        await runStep(async () => {
-          realtimePublisherRef.destroy();
-        });
+        await runStep(() => realtimePublisherRef.destroy());
       }
       if (sseTicketServiceRef) {
-        await runStep(async () => {
-          sseTicketServiceRef.destroy();
-        });
+        await runStep(() => sseTicketServiceRef.destroy());
       }
 
       // 2. Close all TenantDatabaseManager pools cleanly and verify removal

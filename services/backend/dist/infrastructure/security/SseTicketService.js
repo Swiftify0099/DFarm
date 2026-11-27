@@ -8,6 +8,10 @@ export class SseTicketService {
     consumedTickets = new Map();
     cleanupInterval = null;
     tableInitialized = false;
+    isDestroyed = false;
+    destroyPromise = null;
+    isPurgingTickets = false;
+    inFlightBackgroundWork = new Set();
     constructor(secret) {
         this.secret =
             secret ||
@@ -17,11 +21,24 @@ export class SseTicketService {
         this.ensureRedemptionTable().catch(() => { });
         // Periodically purge expired tickets from replay cache and database (every 60 seconds)
         this.cleanupInterval = setInterval(() => {
+            if (this.isDestroyed)
+                return;
             this.purgeExpiredTickets().catch(() => { });
         }, 60000);
         if (this.cleanupInterval.unref) {
             this.cleanupInterval.unref();
         }
+    }
+    trackBackgroundWork(promise) {
+        this.inFlightBackgroundWork.add(promise);
+        const cleanup = () => {
+            this.inFlightBackgroundWork.delete(promise);
+        };
+        promise.then(cleanup, cleanup);
+        return promise;
+    }
+    getInFlightBackgroundWorkCount() {
+        return this.inFlightBackgroundWork.size;
     }
     static getInstance() {
         if (!SseTicketService.instance) {
@@ -30,24 +47,27 @@ export class SseTicketService {
         return SseTicketService.instance;
     }
     async ensureRedemptionTable() {
-        if (this.tableInitialized)
+        if (this.tableInitialized || this.isDestroyed)
             return;
-        try {
-            await db.query(`
-        CREATE TABLE IF NOT EXISTS sse_ticket_redemptions (
-          jti VARCHAR(64) PRIMARY KEY,
-          user_id UUID,
-          organization_id UUID,
-          expires_at TIMESTAMPTZ NOT NULL,
-          redeemed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_sse_ticket_redemptions_exp ON sse_ticket_redemptions (expires_at);
-      `);
-            this.tableInitialized = true;
-        }
-        catch {
-            // Non-fatal, table might already exist
-        }
+        const work = (async () => {
+            try {
+                await db.query(`
+          CREATE TABLE IF NOT EXISTS sse_ticket_redemptions (
+            jti VARCHAR(64) PRIMARY KEY,
+            user_id UUID,
+            organization_id UUID,
+            expires_at TIMESTAMPTZ NOT NULL,
+            redeemed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          CREATE INDEX IF NOT EXISTS idx_sse_ticket_redemptions_exp ON sse_ticket_redemptions (expires_at);
+        `);
+                this.tableInitialized = true;
+            }
+            catch {
+                // Non-fatal, table might already exist
+            }
+        })();
+        return this.trackBackgroundWork(work);
     }
     /**
      * Issues a short-lived (default 30s), purpose-specific SSE ticket.
@@ -186,24 +206,47 @@ export class SseTicketService {
         };
     }
     async purgeExpiredTickets() {
-        const now = Math.floor(Date.now() / 1000);
-        for (const [jti, exp] of this.consumedTickets.entries()) {
-            if (exp < now) {
-                this.consumedTickets.delete(jti);
+        if (this.isDestroyed || this.isPurgingTickets)
+            return;
+        this.isPurgingTickets = true;
+        const purgePromise = (async () => {
+            try {
+                const now = Math.floor(Date.now() / 1000);
+                for (const [jti, exp] of this.consumedTickets.entries()) {
+                    if (exp < now) {
+                        this.consumedTickets.delete(jti);
+                    }
+                }
+                if (this.isDestroyed)
+                    return;
+                try {
+                    await db.query(`DELETE FROM sse_ticket_redemptions WHERE expires_at < NOW();`);
+                }
+                catch {
+                    // Non-fatal cleanup notice
+                }
             }
-        }
-        try {
-            await db.query(`DELETE FROM sse_ticket_redemptions WHERE expires_at < NOW();`);
-        }
-        catch {
-            // Non-fatal cleanup notice
-        }
+            finally {
+                this.isPurgingTickets = false;
+            }
+        })();
+        return this.trackBackgroundWork(purgePromise);
     }
-    destroy() {
+    async destroy() {
+        if (this.destroyPromise) {
+            return this.destroyPromise;
+        }
+        this.isDestroyed = true;
         if (this.cleanupInterval) {
             clearInterval(this.cleanupInterval);
             this.cleanupInterval = null;
         }
+        this.destroyPromise = (async () => {
+            while (this.inFlightBackgroundWork.size > 0) {
+                await Promise.allSettled(Array.from(this.inFlightBackgroundWork));
+            }
+        })();
+        return this.destroyPromise;
     }
 }
 export const sseTicketService = SseTicketService.getInstance();

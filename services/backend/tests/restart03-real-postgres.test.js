@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import pg from 'pg';
 import { assertDisposablePg17Cluster } from '../../../scripts/pg17-safety-guard.js';
+import { createPoolShutdownManager } from './helpers/pool-lifecycle-helpers.js';
 import {
   MigrationRunner,
   MIGRATION_MANIFEST,
@@ -72,7 +73,21 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
 
   await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
 
-  const adminPool = new pg.Pool({ connectionString: TEST_PG_URL, connectionTimeoutMillis: 3000 });
+  const poolErrors = [];
+  const guardedPools = new WeakSet();
+  const attachPoolErrorGuard = (pool, label) => {
+    if (!pool || guardedPools.has(pool)) return pool;
+    guardedPools.add(pool);
+    pool.on('error', (err) => {
+      poolErrors.push({ label, code: err?.code, message: err?.message || String(err) });
+    });
+    return pool;
+  };
+
+  const adminPool = attachPoolErrorGuard(
+    new pg.Pool({ connectionString: TEST_PG_URL, connectionTimeoutMillis: 3000 }),
+    'adminPool'
+  );
   const suffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
   const dbNameCtrl = `dfarm_verify_ctrl_${suffix}`;
   const dbNameA = `dfarm_verify_a_${suffix}`;
@@ -87,18 +102,46 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
   let poolCtrl;
   let poolA;
   let poolB;
+  const createdDatabases = [];
+  const { closePoolCleanly } = createPoolShutdownManager();
+
+  const waitForDbIdle = async (dbName) => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const res = await adminPool.query(
+        `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+        [dbName]
+      );
+      if (Number(res.rows[0]?.cnt || 0) === 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const finalRes = await adminPool.query(
+      `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+      [dbName]
+    );
+    const remaining = Number(finalRes.rows[0]?.cnt || 0);
+    if (remaining > 0) {
+      throw new Error(
+        `Disposable database '${dbName}' still had ${remaining} active/idle connection(s) before DROP DATABASE.`
+      );
+    }
+  };
 
   const orgA = crypto.randomUUID();
   const orgB = crypto.randomUUID();
+  let primaryError = null;
 
   try {
     await adminPool.query(`CREATE DATABASE ${dbNameCtrl};`);
+    createdDatabases.push(dbNameCtrl);
     await adminPool.query(`CREATE DATABASE ${dbNameA};`);
+    createdDatabases.push(dbNameA);
     await adminPool.query(`CREATE DATABASE ${dbNameB};`);
+    createdDatabases.push(dbNameB);
 
-    poolCtrl = new pg.Pool({ connectionString: makeDbUrl(dbNameCtrl), max: 5 });
-    poolA = new pg.Pool({ connectionString: makeDbUrl(dbNameA), max: 10 });
-    poolB = new pg.Pool({ connectionString: makeDbUrl(dbNameB), max: 5 });
+    poolCtrl = attachPoolErrorGuard(new pg.Pool({ connectionString: makeDbUrl(dbNameCtrl), max: 5 }), 'poolCtrl');
+    poolA = attachPoolErrorGuard(new pg.Pool({ connectionString: makeDbUrl(dbNameA), max: 10 }), 'poolA');
+    poolB = attachPoolErrorGuard(new pg.Pool({ connectionString: makeDbUrl(dbNameB), max: 5 }), 'poolB');
 
     const ctrlResults = await MigrationRunner.runControlPlaneMigrations(poolCtrl);
     const tenantAResults = await MigrationRunner.runTenantMigrations(poolA, orgA);
@@ -310,13 +353,61 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
       const custRes = await poolA.query(`SELECT COUNT(*)::int AS c FROM customers WHERE farmer_code = 'F-ROLLBACK';`);
       assert.equal(custRes.rows[0].c, 0);
     });
+  } catch (err) {
+    primaryError = err;
+    throw err;
   } finally {
-    await poolCtrl?.end().catch(() => {});
-    await poolA?.end().catch(() => {});
-    await poolB?.end().catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameA} WITH (FORCE);`).catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameB} WITH (FORCE);`).catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameCtrl} WITH (FORCE);`).catch(() => {});
-    await adminPool.end().catch(() => {});
+    const cleanupErrors = [];
+    const runStep = async (fn) => {
+      try {
+        await fn();
+      } catch (err) {
+        cleanupErrors.push(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+
+    for (const [pool, label] of [
+      [poolCtrl, 'poolCtrl'],
+      [poolA, 'poolA'],
+      [poolB, 'poolB'],
+    ]) {
+      if (pool) {
+        await runStep(async () => {
+          await closePoolCleanly(pool, label);
+          assert.strictEqual(pool.ended, true, `Pool '${label}' must reach ended=true`);
+        });
+      }
+    }
+
+    for (const dbName of [...createdDatabases].reverse()) {
+      await runStep(async () => {
+        await waitForDbIdle(dbName);
+        await adminPool.query(`DROP DATABASE IF EXISTS ${dbName};`);
+      });
+    }
+
+    await runStep(async () => {
+      await closePoolCleanly(adminPool, 'adminPool');
+      assert.strictEqual(adminPool.ended, true, 'adminPool must reach ended=true');
+    });
+
+    await runStep(async () => {
+      assert.deepEqual(poolErrors, [], `Unexpected async PostgreSQL pool errors: ${JSON.stringify(poolErrors)}`);
+    });
+
+    if (cleanupErrors.length > 0) {
+      const cleanErr =
+        cleanupErrors.length === 1
+          ? cleanupErrors[0]
+          : new AggregateError(
+              cleanupErrors,
+              `Cleanup failed with ${cleanupErrors.length} errors: ${cleanupErrors.map((e) => e.message).join('; ')}`
+            );
+      if (primaryError) {
+        const orig = primaryError instanceof Error ? primaryError : new Error(String(primaryError));
+        throw new AggregateError([orig, cleanErr], `${orig.message} (cleanup also failed: ${cleanErr.message})`);
+      }
+      throw cleanErr;
+    }
   }
 });

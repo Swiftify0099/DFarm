@@ -18,7 +18,13 @@ export declare class SseTicketService {
     private consumedTickets;
     private cleanupInterval;
     private tableInitialized;
+    private isDestroyed;
+    private destroyPromise;
+    private isPurgingTickets;
+    private readonly inFlightBackgroundWork;
     constructor(secret?: string);
+    private trackBackgroundWork;
+    getInFlightBackgroundWorkCount(): number;
     static getInstance(): SseTicketService;
     ensureRedemptionTable(): Promise<void>;
     /**
@@ -34,7 +40,7 @@ export declare class SseTicketService {
      */
     verifyAndConsumeTicket(ticketStr: string): Promise<AuthenticatedUser>;
     private purgeExpiredTickets;
-    destroy(): void;
+    destroy(): Promise<void>;
 }
 export declare const sseTicketService: SseTicketService;
 //# sourceMappingURL=SseTicketService.d.ts.map

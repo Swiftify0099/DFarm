@@ -24,6 +24,10 @@ export class SseTicketService {
   private consumedTickets: Map<string, number> = new Map();
   private cleanupInterval: NodeJS.Timeout | null = null;
   private tableInitialized = false;
+  private isDestroyed = false;
+  private destroyPromise: Promise<void> | null = null;
+  private isPurgingTickets = false;
+  private readonly inFlightBackgroundWork = new Set<Promise<unknown>>();
 
   constructor(secret?: string) {
     this.secret =
@@ -36,11 +40,25 @@ export class SseTicketService {
 
     // Periodically purge expired tickets from replay cache and database (every 60 seconds)
     this.cleanupInterval = setInterval(() => {
+      if (this.isDestroyed) return;
       this.purgeExpiredTickets().catch(() => {});
     }, 60000);
     if (this.cleanupInterval.unref) {
       this.cleanupInterval.unref();
     }
+  }
+
+  private trackBackgroundWork<T>(promise: Promise<T>): Promise<T> {
+    this.inFlightBackgroundWork.add(promise);
+    const cleanup = () => {
+      this.inFlightBackgroundWork.delete(promise);
+    };
+    promise.then(cleanup, cleanup);
+    return promise;
+  }
+
+  public getInFlightBackgroundWorkCount(): number {
+    return this.inFlightBackgroundWork.size;
   }
 
   public static getInstance(): SseTicketService {
@@ -51,22 +69,25 @@ export class SseTicketService {
   }
 
   public async ensureRedemptionTable(): Promise<void> {
-    if (this.tableInitialized) return;
-    try {
-      await db.query(`
-        CREATE TABLE IF NOT EXISTS sse_ticket_redemptions (
-          jti VARCHAR(64) PRIMARY KEY,
-          user_id UUID,
-          organization_id UUID,
-          expires_at TIMESTAMPTZ NOT NULL,
-          redeemed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_sse_ticket_redemptions_exp ON sse_ticket_redemptions (expires_at);
-      `);
-      this.tableInitialized = true;
-    } catch {
-      // Non-fatal, table might already exist
-    }
+    if (this.tableInitialized || this.isDestroyed) return;
+    const work = (async () => {
+      try {
+        await db.query(`
+          CREATE TABLE IF NOT EXISTS sse_ticket_redemptions (
+            jti VARCHAR(64) PRIMARY KEY,
+            user_id UUID,
+            organization_id UUID,
+            expires_at TIMESTAMPTZ NOT NULL,
+            redeemed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          CREATE INDEX IF NOT EXISTS idx_sse_ticket_redemptions_exp ON sse_ticket_redemptions (expires_at);
+        `);
+        this.tableInitialized = true;
+      } catch {
+        // Non-fatal, table might already exist
+      }
+    })();
+    return this.trackBackgroundWork(work);
   }
 
   /**
@@ -233,25 +254,50 @@ export class SseTicketService {
   }
 
   private async purgeExpiredTickets(): Promise<void> {
-    const now = Math.floor(Date.now() / 1000);
-    for (const [jti, exp] of this.consumedTickets.entries()) {
-      if (exp < now) {
-        this.consumedTickets.delete(jti);
-      }
-    }
+    if (this.isDestroyed || this.isPurgingTickets) return;
+    this.isPurgingTickets = true;
+    const purgePromise = (async () => {
+      try {
+        const now = Math.floor(Date.now() / 1000);
+        for (const [jti, exp] of this.consumedTickets.entries()) {
+          if (exp < now) {
+            this.consumedTickets.delete(jti);
+          }
+        }
 
-    try {
-      await db.query(`DELETE FROM sse_ticket_redemptions WHERE expires_at < NOW();`);
-    } catch {
-      // Non-fatal cleanup notice
-    }
+        if (this.isDestroyed) return;
+
+        try {
+          await db.query(`DELETE FROM sse_ticket_redemptions WHERE expires_at < NOW();`);
+        } catch {
+          // Non-fatal cleanup notice
+        }
+      } finally {
+        this.isPurgingTickets = false;
+      }
+    })();
+    return this.trackBackgroundWork(purgePromise);
   }
 
-  public destroy(): void {
+  public async destroy(): Promise<void> {
+    if (this.destroyPromise) {
+      return this.destroyPromise;
+    }
+
+    this.isDestroyed = true;
+
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
     }
+
+    this.destroyPromise = (async () => {
+      while (this.inFlightBackgroundWork.size > 0) {
+        await Promise.allSettled(Array.from(this.inFlightBackgroundWork));
+      }
+    })();
+
+    return this.destroyPromise;
   }
 }
 
