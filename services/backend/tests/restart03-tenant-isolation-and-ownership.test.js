@@ -811,5 +811,114 @@ test('RESTART-03: Multi-Tenant Database Isolation, Shift Session Integrity, Cust
       const txAAfter = await tenantDbA.query(`SELECT COUNT(*)::int AS c FROM milk_collections WHERE customer_id = $1;`, [farmerA]);
       assert.equal(Number(txAAfter.rows[0].c), 1);
     });
+
+    await t.test('3-6. CustomerRepository RFID assignment and lookups fail closed without tenant context or active mapping', async () => {
+      const cRepo = new PostgresCustomerRepository();
+      await assert.rejects(
+        () => cRepo.assignRfidCard(farmerA, 'RFID-UNSCOPED-01'),
+        (e) => e.name === 'DomainValidationError' && e.code === 'TENANT_CONTEXT_REQUIRED'
+      );
+      await assert.rejects(
+        () => cRepo.findByFarmerCode('F-404', orgUnmapped),
+        /No active persistent database|not provisioned|Tenant database/i
+      );
+      await assert.rejects(
+        () => cRepo.findByRfid('RFID-404', orgUnmapped),
+        /No active persistent database|not provisioned|Tenant database/i
+      );
+      await assert.rejects(
+        () => cRepo.listCustomers({ organizationId: orgUnmapped }),
+        /No active persistent database|not provisioned|Tenant database/i
+      );
+      await assert.rejects(
+        () => cRepo.listPendingRegistrations(orgUnmapped),
+        /No active persistent database|not provisioned|Tenant database/i
+      );
+    });
+
+    await t.test('3-7. updateFaceEnrollment enforces organization_id operator scoping (no unscoped users fallback)', async () => {
+      const cRepo = new PostgresCustomerRepository();
+      // Provision isolated org with another org's active operator inside the same DB to ensure org_id filter holds
+      const emptyOpOrg = crypto.randomUUID();
+      await db.query(
+        `INSERT INTO organizations (id, name, code, status) VALUES ($1, 'Empty Op Dairy', 'R03-EOP', 'ACTIVE') ON CONFLICT (id) DO NOTHING;`,
+        [emptyOpOrg]
+      );
+      await tenantDbManager.provisionTenantDatabase({ dairyId: emptyOpOrg, dairyCode: 'R03-EOP', dairyName: 'Empty Op Dairy' });
+      const tenantEmptyOpDb = await tenantDbManager.getStrictTenantDb(emptyOpOrg);
+      await tenantEmptyOpDb.query(`DELETE FROM user_center_assignments;`).catch(() => {});
+      await tenantEmptyOpDb.query(`DELETE FROM users;`).catch(() => {});
+      await tenantEmptyOpDb.query(
+        `INSERT INTO organizations (id, name, code, status) VALUES ($1, 'Other Org Shadow', 'R03-OTH', 'ACTIVE') ON CONFLICT (id) DO NOTHING;`,
+        [orgB]
+      );
+      await tenantEmptyOpDb.query(
+        `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+         VALUES ($1, $2, 'other_org_op', 'Other Org Op', '+919800008899', 'COLLECTION_OPERATOR', 'ACTIVE')
+         ON CONFLICT (id) DO NOTHING;`,
+        [crypto.randomUUID(), orgB]
+      );
+      await assert.rejects(
+        () =>
+          cRepo.updateFaceEnrollment(
+            crypto.randomUUID(),
+            'sface_int8_2021dec',
+            JSON.stringify({ ciphertext: 'aa', iv: 'bb', authTag: 'cc' }),
+            emptyOpOrg
+          ),
+        (e) => e.name === 'DomainValidationError' && e.code === 'NO_ACTIVE_OPERATOR'
+      );
+    });
+
+    await t.test('3-8. retry-provisioning mirrors control-plane primary center and admin user into recovered tenant DB', async () => {
+      const recOrgId = crypto.randomUUID();
+      const recCenterId = crypto.randomUUID();
+      const recAdminId = crypto.randomUUID();
+      const superId = crypto.randomUUID();
+      const recCode = 'R03-REC-' + crypto.randomUUID().slice(0, 4).toUpperCase();
+
+      await db.query(
+        `INSERT INTO organizations (id, name, code, status) VALUES ($1, 'Recovered Dairy', $2, 'ACTIVE') ON CONFLICT (id) DO NOTHING;`,
+        [recOrgId, recCode]
+      );
+      await db.query(
+        `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+         VALUES ($1, $2, 'C-01', 'Recovered Main Center', 'Main St', 'Village', 'Pune', 'MH', '411001', '+919800007777', 'ACTIVE')
+         ON CONFLICT (id) DO NOTHING;`,
+        [recCenterId, recOrgId]
+      );
+      await db.query(
+        `INSERT INTO users (id, organization_id, username, full_name, email, phone_number, role, user_role, status)
+         VALUES ($1, $2, $3, 'Recovered Admin', $4, '9800007777', 'DAIRY_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'ACTIVE')
+         ON CONFLICT (id) DO NOTHING;`,
+        [recAdminId, recOrgId, `rec_admin_${recCode}`, `rec_${recCode}@dfarm.in`]
+      );
+      await db.query(
+        `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, user_role, status)
+         VALUES ($1, $2, $3, 'Restart03 Super Admin', '+919800006666', 'SUPER_ADMIN', 'SUPER_ADMIN', 'ACTIVE')
+         ON CONFLICT (id) DO NOTHING;`,
+        [superId, orgA, `super_${superId.slice(0, 8)}`]
+      );
+
+      const superToken = tokenService.signToken({
+        userId: superId,
+        organizationId: orgA,
+        role: 'SUPER_ADMIN',
+        actorType: 'STAFF',
+      });
+
+      const retryRes = await request(app)
+        .post(`/api/v1/dairies/${recOrgId}/retry-provisioning`)
+        .set('Authorization', `Bearer ${superToken}`);
+      assert.equal(retryRes.status, 200);
+      assert.equal(retryRes.body.success, true);
+
+      const recTenantDb = await tenantDbManager.getStrictTenantDb(recOrgId);
+      const cCheck = await recTenantDb.query(`SELECT id, name FROM dairy_centers WHERE id = $1 AND organization_id = $2;`, [recCenterId, recOrgId]);
+      assert.equal(cCheck.rows.length, 1);
+      assert.equal(cCheck.rows[0].name, 'Recovered Main Center');
+      const uCheck = await recTenantDb.query(`SELECT id, role FROM users WHERE id = $1 AND organization_id = $2;`, [recAdminId, recOrgId]);
+      assert.equal(uCheck.rows.length, 1);
+    });
   });
 });

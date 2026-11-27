@@ -897,6 +897,68 @@ router.post('/:id/retry-provisioning', authenticate, authorizeRoles('SUPER_ADMIN
         }
         try {
             const mapping = await tenantDbManager.provisionTenantDatabase(dairy.id, dairy.code, dairy.name);
+            if (mapping && mapping.provisioningStatus === 'ACTIVE') {
+                const tenantDb = await tenantDbManager.getStrictTenantDb(dairy.id);
+                // Mirror authoritative control-plane centers and active users into recovered tenant DB
+                const centersRes = await db.query(`SELECT id, organization_id, code, name, address_line1, village_town, district, state, postal_code,
+                  contact_phone, contact_email, latitude, longitude, formatted_address, place_id, country, status
+           FROM dairy_centers WHERE organization_id = $1;`, [dairy.id]);
+                for (const c of centersRes.rows) {
+                    await tenantDb.query(`INSERT INTO dairy_centers (
+              id, organization_id, code, name, address_line1, village_town,
+              district, state, postal_code, contact_phone, contact_email,
+              latitude, longitude, formatted_address, place_id, country, location_updated_at, status
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, COALESCE($16, 'India'), NOW(), COALESCE($17, 'ACTIVE')
+            ) ON CONFLICT (id) DO UPDATE SET
+              name = EXCLUDED.name,
+              status = EXCLUDED.status,
+              updated_at = NOW();`, [
+                        c.id,
+                        c.organization_id,
+                        c.code,
+                        c.name,
+                        c.address_line1 || 'Main Road',
+                        c.village_town || c.district || 'Town',
+                        c.district || 'District',
+                        c.state || 'State',
+                        c.postal_code || '000000',
+                        c.contact_phone || '0000000000',
+                        c.contact_email || null,
+                        c.latitude ?? null,
+                        c.longitude ?? null,
+                        c.formatted_address || null,
+                        c.place_id || null,
+                        c.country || 'India',
+                        c.status || 'ACTIVE',
+                    ]);
+                }
+                const usersRes = await db.query(`SELECT id, organization_id, username, full_name, email, phone_number, mobile_number, normalized_mobile_number, role, user_role, status
+           FROM users WHERE organization_id = $1 AND status = 'ACTIVE';`, [dairy.id]);
+                for (const u of usersRes.rows) {
+                    await tenantDb.query(`INSERT INTO users (
+              id, organization_id, username, full_name, email, phone_number, mobile_number, normalized_mobile_number, role, user_role, status, activated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'ACTIVE', NOW()
+            ) ON CONFLICT (id) DO UPDATE SET
+              organization_id = EXCLUDED.organization_id,
+              status = 'ACTIVE',
+              role = EXCLUDED.role,
+              user_role = EXCLUDED.user_role,
+              activated_at = NOW();`, [
+                        u.id,
+                        u.organization_id,
+                        u.username,
+                        u.full_name,
+                        u.email,
+                        u.phone_number,
+                        u.mobile_number,
+                        u.normalized_mobile_number,
+                        u.role || 'DAIRY_ADMIN',
+                        u.user_role || u.role || 'DAIRY_ADMIN',
+                    ]);
+                }
+            }
             const memDairy = inMemoryDairies.get(dairy.id);
             if (memDairy) {
                 memDairy.provisioningStatus = mapping.provisioningStatus;

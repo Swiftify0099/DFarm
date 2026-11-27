@@ -162,7 +162,7 @@ export class PostgresCustomerRepository {
         if (!organizationId) {
             throw new Error('Tenant context (organizationId) is required for farmer code lookup.');
         }
-        const client = await tenantDbManager.getTenantDb(organizationId);
+        const client = await tenantDbManager.getStrictTenantDb(organizationId);
         const sql = `
       ${this.getBaseSelectQuery()}
       WHERE c.farmer_code = $1 AND c.organization_id = $2 AND c.is_deleted = FALSE
@@ -181,7 +181,7 @@ export class PostgresCustomerRepository {
         if (!organizationId) {
             throw new Error('Tenant context (organizationId) is required for RFID card lookup. Cross-dairy search is prohibited.');
         }
-        const client = await tenantDbManager.getTenantDb(organizationId);
+        const client = await tenantDbManager.getStrictTenantDb(organizationId);
         const sql = `
       ${this.getBaseSelectQuery()}
       WHERE r.card_uid = $1 AND c.organization_id = $2 AND rca.is_active = TRUE AND c.is_deleted = FALSE
@@ -230,7 +230,7 @@ export class PostgresCustomerRepository {
         if (!params.organizationId) {
             throw new Error('Tenant context (organizationId) is required to list customers.');
         }
-        const client = await tenantDbManager.getTenantDb(params.organizationId);
+        const client = await tenantDbManager.getStrictTenantDb(params.organizationId);
         const conditions = ['c.organization_id = $1'];
         if (!params.includeSoftDeleted) {
             conditions.push('c.is_deleted = FALSE');
@@ -386,7 +386,7 @@ export class PostgresCustomerRepository {
         if (!organizationId) {
             throw new Error('Tenant context (organizationId) is required to view pending customer approvals.');
         }
-        const client = await tenantDbManager.getTenantDb(organizationId);
+        const client = await tenantDbManager.getStrictTenantDb(organizationId);
         const sql = `
       ${this.getBaseSelectQuery()}
       WHERE c.registration_status = 'PENDING_APPROVAL' AND c.organization_id = $1 AND c.is_deleted = FALSE
@@ -396,14 +396,11 @@ export class PostgresCustomerRepository {
         return await this.hydrateDetails(client, res.rows);
     }
     async assignRfidCard(customerId, cardUid, organizationId) {
-        let orgId = organizationId;
-        if (!orgId) {
-            const customer = await this.findById(customerId);
-            orgId = customer?.organizationId;
+        if (!organizationId) {
+            throw new DomainValidationError('Tenant context (organizationId) is required for RFID card assignment.', 'TENANT_CONTEXT_REQUIRED');
         }
-        if (!orgId)
-            return;
-        const client = await tenantDbManager.getTenantDb(orgId);
+        const orgId = organizationId;
+        const client = await tenantDbManager.getStrictTenantDb(orgId);
         await client.withTransaction(async (dbClient) => {
             // 1. Ensure card exists in rfid_cards
             const cardRes = await dbClient.query(`
@@ -484,17 +481,11 @@ export class PostgresCustomerRepository {
             }
         }
         catch { }
-        // Resolve authoritative active staff operator in tenant DB (never fabricate a fake user)
+        // Resolve authoritative active staff operator in tenant DB scoped strictly to organization_id (never fabricate or cross-query)
         let enrolledBy = null;
         const uRes = await client.query(`SELECT id FROM users WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1;`, [orgId]);
         if (uRes.rows.length > 0) {
             enrolledBy = uRes.rows[0].id;
-        }
-        else {
-            const anyUserRes = await client.query(`SELECT id FROM users WHERE status = 'ACTIVE' ORDER BY created_at ASC LIMIT 1;`);
-            if (anyUserRes.rows.length > 0) {
-                enrolledBy = anyUserRes.rows[0].id;
-            }
         }
         if (!enrolledBy) {
             throw new DomainValidationError(`No active staff user found in tenant database '${orgId}' to attribute biometric enrollment.`, 'NO_ACTIVE_OPERATOR');
