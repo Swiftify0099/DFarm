@@ -101,64 +101,92 @@ export class PostgresLedgerRepository {
         }
         return { customerId: cust.id, centerId, operatorId };
     }
-    async appendEntry(params) {
+    async lockOrCreateLedgerAccount(txClient, orgId, customerId, preferredAccountId, initialBalance = 0.0) {
+        const accRes = await this.queryTenant(txClient, orgId, `SELECT id, organization_id, current_balance
+       FROM customer_ledger_accounts
+       WHERE customer_id = $1
+       FOR UPDATE;`, [customerId]);
+        if (accRes.rows.length > 0) {
+            if (String(accRes.rows[0].organization_id || '').toLowerCase() !== orgId.toLowerCase()) {
+                throw new ForbiddenTenantError(`Cross-tenant ledger account conflict for customer '${customerId}'.`);
+            }
+            return {
+                accountId: accRes.rows[0].id,
+                currentBalance: Number(accRes.rows[0].current_balance || 0),
+            };
+        }
+        const accountUuid = preferredAccountId && UUID_REGEX.test(preferredAccountId.trim())
+            ? preferredAccountId.trim()
+            : crypto.randomUUID();
+        const safeInitial = Math.round((Number(initialBalance || 0) + Number.EPSILON) * 100) / 100;
+        const createdAcc = await this.queryTenant(txClient, orgId, `INSERT INTO customer_ledger_accounts (id, customer_id, organization_id, currency, current_balance, last_transaction_at, updated_at)
+       VALUES ($1, $2, $3, 'INR', $4, NOW(), NOW())
+       ON CONFLICT (customer_id) DO UPDATE SET updated_at = NOW()
+       WHERE customer_ledger_accounts.organization_id = EXCLUDED.organization_id
+       RETURNING id, current_balance;`, [accountUuid, customerId, orgId, safeInitial]);
+        if (createdAcc.rows.length === 0) {
+            throw new ForbiddenTenantError(`Cross-tenant ledger account conflict for customer '${customerId}'.`);
+        }
+        return {
+            accountId: createdAcc.rows[0].id,
+            currentBalance: Number(createdAcc.rows[0].current_balance || 0),
+        };
+    }
+    async executeJournalMutation(params) {
         const { orgId, tenantDb } = await this.getAuthorizedTenantDb(params.organizationId);
         const amount = Number(params.amount);
         if (!Number.isFinite(amount) || amount <= 0) {
             throw new DomainValidationError('Ledger entry amount must be a positive number.', 'INVALID_LEDGER_AMOUNT');
         }
+        const roundedAmount = Math.round((amount + Number.EPSILON) * 100) / 100;
+        if (roundedAmount <= 0) {
+            throw new DomainValidationError('Ledger entry amount must be at least 0.01.', 'INVALID_LEDGER_AMOUNT');
+        }
+        if (!params.operatorId || typeof params.operatorId !== 'string' || !UUID_REGEX.test(params.operatorId.trim())) {
+            throw new DomainValidationError('Valid authenticated operator ID is required for ledger transactions.', 'INVALID_OPERATOR');
+        }
+        const requestedOperatorId = params.operatorId.trim();
+        if (!params.entryId || typeof params.entryId !== 'string' || !UUID_REGEX.test(params.entryId.trim())) {
+            throw new DomainValidationError('Valid ledger entry UUID is required.', 'INVALID_LEDGER_ENTRY_ID');
+        }
+        const cleanEntryId = params.entryId.trim();
+        const cleanIdempotencyKey = (params.idempotencyKey || '').trim();
+        if (!cleanIdempotencyKey) {
+            throw new DomainValidationError('Idempotency key is required for ledger transactions.', 'INVALID_IDEMPOTENCY_KEY');
+        }
         return await tenantDb.withTransaction(async (txClient) => {
+            // 1. Validate customer, center, and authenticated operator inside the tenant transaction
             const { customerId, centerId, operatorId } = await this.validateCustomerCenterAndOperator(txClient, {
                 organizationId: orgId,
                 customerId: params.customerId,
-                operatorId: params.operatorId,
+                operatorId: requestedOperatorId,
             });
-            const idempotencyKey = params.idempotencyKey || `LEDGER-${crypto.randomUUID()}`;
-            const existingTxn = await this.queryTenant(txClient, orgId, `SELECT id, balance_after
+            // 2. Acquire account row lock (FOR UPDATE) BEFORE checking idempotency or mutating state
+            const { accountId, currentBalance } = await this.lockOrCreateLedgerAccount(txClient, orgId, customerId, params.preferredAccountId, 0.0);
+            // 3. Re-check idempotency (both idempotency_key and entry id) AFTER obtaining the account lock
+            const existingTxn = await this.queryTenant(txClient, orgId, `SELECT id, customer_id, balance_after
          FROM ledger_transactions
-         WHERE idempotency_key = $1 AND organization_id = $2
-         LIMIT 1;`, [idempotencyKey, orgId]);
+         WHERE (idempotency_key = $1 OR id = $2)
+           AND organization_id = $3
+         LIMIT 1;`, [cleanIdempotencyKey, cleanEntryId, orgId]);
             if (existingTxn.rows.length > 0) {
+                const existing = existingTxn.rows[0];
+                if (String(existing.customer_id || '').toLowerCase() !== customerId.toLowerCase()) {
+                    throw new DomainValidationError('Idempotency key or entry ID conflict across customers.', 'IDEMPOTENCY_CONFLICT');
+                }
                 return {
-                    ledgerTransactionId: existingTxn.rows[0].id,
-                    balanceAfter: Number(existingTxn.rows[0].balance_after),
+                    ledgerTransactionId: existing.id,
+                    balanceAfter: Number(existing.balance_after),
                     isIdempotentReplay: true,
                 };
             }
-            // Lock customer_ledger_accounts row FOR UPDATE to prevent concurrent lost updates
-            const accRes = await this.queryTenant(txClient, orgId, `SELECT id, organization_id, current_balance
-         FROM customer_ledger_accounts
-         WHERE customer_id = $1
-         FOR UPDATE;`, [customerId]);
-            let accountId;
-            let currentBalance = 0;
-            if (accRes.rows.length > 0) {
-                if (String(accRes.rows[0].organization_id || '').toLowerCase() !== orgId.toLowerCase()) {
-                    throw new ForbiddenTenantError(`Cross-tenant ledger account conflict for customer '${customerId}'.`);
-                }
-                accountId = accRes.rows[0].id;
-                currentBalance = Number(accRes.rows[0].current_balance || 0);
-            }
-            else {
-                const createdAcc = await this.queryTenant(txClient, orgId, `INSERT INTO customer_ledger_accounts (customer_id, organization_id, currency, current_balance)
-           VALUES ($1, $2, 'INR', 0.00)
-           ON CONFLICT (customer_id) DO UPDATE SET updated_at = NOW()
-           WHERE customer_ledger_accounts.organization_id = EXCLUDED.organization_id
-           RETURNING id, current_balance;`, [customerId, orgId]);
-                if (createdAcc.rows.length === 0) {
-                    throw new ForbiddenTenantError(`Cross-tenant ledger account conflict for customer '${customerId}'.`);
-                }
-                accountId = createdAcc.rows[0].id;
-                currentBalance = Number(createdAcc.rows[0].current_balance || 0);
-            }
-            const isCredit = params.entryType === 'CREDIT';
+            // 4. Calculate resulting balance strictly from authoritative locked database balance
+            const isCredit = params.direction === 'CREDIT';
             const newBal = isCredit
-                ? Math.round((currentBalance + amount + Number.EPSILON) * 100) / 100
-                : Math.round((currentBalance - amount + Number.EPSILON) * 100) / 100;
-            const entryId = crypto.randomUUID();
-            const txnType = isCredit ? 'MILK_COLLECTION_CREDIT' : 'FEED_PURCHASE_DEBIT';
-            const refEntity = isCredit ? 'MILK_COLLECTION' : 'FEED_SALE';
+                ? Math.round((currentBalance + roundedAmount + Number.EPSILON) * 100) / 100
+                : Math.round((currentBalance - roundedAmount + Number.EPSILON) * 100) / 100;
             const refId = params.referenceId && UUID_REGEX.test(params.referenceId) ? params.referenceId : accountId;
+            // 5. Insert exactly one ledger transaction
             const txnRes = await this.queryTenant(txClient, orgId, `INSERT INTO ledger_transactions (
           id, organization_id, center_id, customer_id, transaction_type,
           direction, amount, balance_after, reference_entity, reference_id,
@@ -170,52 +198,78 @@ export class PostgresLedgerRepository {
         )
         ON CONFLICT (idempotency_key) DO NOTHING
         RETURNING id;`, [
-                entryId,
+                cleanEntryId,
                 orgId,
                 centerId,
                 customerId,
-                txnType,
-                params.entryType,
-                amount,
+                params.transactionType,
+                params.direction,
+                roundedAmount,
                 newBal,
-                refEntity,
+                params.referenceEntity,
                 refId,
                 params.description,
-                idempotencyKey,
+                cleanIdempotencyKey,
                 operatorId,
             ]);
             if (txnRes.rows.length === 0) {
-                const recheck = await this.queryTenant(txClient, orgId, `SELECT id, balance_after FROM ledger_transactions WHERE idempotency_key = $1 AND organization_id = $2 LIMIT 1;`, [idempotencyKey, orgId]);
+                const recheck = await this.queryTenant(txClient, orgId, `SELECT id, customer_id, balance_after
+           FROM ledger_transactions
+           WHERE idempotency_key = $1 AND organization_id = $2
+           LIMIT 1;`, [cleanIdempotencyKey, orgId]);
                 if (recheck.rows.length === 0) {
                     throw new DomainValidationError('Idempotency key conflict across organizations.', 'IDEMPOTENCY_CONFLICT');
                 }
+                const existing = recheck.rows[0];
+                if (String(existing.customer_id || '').toLowerCase() !== customerId.toLowerCase()) {
+                    throw new DomainValidationError('Idempotency key conflict across customers.', 'IDEMPOTENCY_CONFLICT');
+                }
                 return {
-                    ledgerTransactionId: recheck.rows[0].id,
-                    balanceAfter: Number(recheck.rows[0].balance_after),
+                    ledgerTransactionId: existing.id,
+                    balanceAfter: Number(existing.balance_after),
                     isIdempotentReplay: true,
                 };
             }
-            await this.queryTenant(txClient, orgId, `UPDATE customer_ledger_accounts
-         SET current_balance = $1, last_transaction_at = NOW(), updated_at = NOW()
-         WHERE id = $2 AND organization_id = $3;`, [newBal, accountId, orgId]);
+            // 6. Insert exactly two balanced double-entry journal lines
             const insertLineSql = `
         INSERT INTO ledger_entries (
           transaction_id, account_id, account_type, entry_type, amount
         ) VALUES ($1, $2, $3, $4, $5);
       `;
             if (isCredit) {
-                await this.queryTenant(txClient, orgId, insertLineSql, [entryId, accountId, 'CUSTOMER_PAYABLE', 'CREDIT', amount]);
-                await this.queryTenant(txClient, orgId, insertLineSql, [entryId, centerId, 'MILK_PURCHASE_EXPENSE', 'DEBIT', amount]);
+                await this.queryTenant(txClient, orgId, insertLineSql, [cleanEntryId, accountId, 'CUSTOMER_PAYABLE', 'CREDIT', roundedAmount]);
+                await this.queryTenant(txClient, orgId, insertLineSql, [cleanEntryId, centerId, params.contraAccountType, 'DEBIT', roundedAmount]);
             }
             else {
-                await this.queryTenant(txClient, orgId, insertLineSql, [entryId, accountId, 'CUSTOMER_PAYABLE', 'DEBIT', amount]);
-                await this.queryTenant(txClient, orgId, insertLineSql, [entryId, centerId, 'FEED_INVENTORY', 'CREDIT', amount]);
+                await this.queryTenant(txClient, orgId, insertLineSql, [cleanEntryId, accountId, 'CUSTOMER_PAYABLE', 'DEBIT', roundedAmount]);
+                await this.queryTenant(txClient, orgId, insertLineSql, [cleanEntryId, centerId, params.contraAccountType, 'CREDIT', roundedAmount]);
             }
+            // 7. Update account balance atomically after transaction and journal lines succeed
+            await this.queryTenant(txClient, orgId, `UPDATE customer_ledger_accounts
+         SET current_balance = $1, last_transaction_at = NOW(), updated_at = NOW()
+         WHERE id = $2 AND organization_id = $3;`, [newBal, accountId, orgId]);
             return {
-                ledgerTransactionId: entryId,
+                ledgerTransactionId: cleanEntryId,
                 balanceAfter: newBal,
                 isIdempotentReplay: false,
             };
+        });
+    }
+    async appendEntry(params) {
+        const isCredit = params.entryType === 'CREDIT';
+        return this.executeJournalMutation({
+            organizationId: params.organizationId,
+            customerId: params.customerId,
+            operatorId: params.operatorId,
+            entryId: crypto.randomUUID(),
+            direction: params.entryType,
+            amount: params.amount,
+            transactionType: isCredit ? 'MILK_COLLECTION_CREDIT' : 'FEED_PURCHASE_DEBIT',
+            referenceEntity: isCredit ? 'MILK_COLLECTION' : 'FEED_SALE',
+            referenceId: params.referenceId,
+            description: params.description,
+            idempotencyKey: params.idempotencyKey || `LEDGER-${crypto.randomUUID()}`,
+            contraAccountType: isCredit ? 'MILK_PURCHASE_EXPENSE' : 'FEED_INVENTORY',
         });
     }
     async findById(accountId, organizationId) {
@@ -323,95 +377,61 @@ export class PostgresLedgerRepository {
     }
     async save(account, newEntry, options) {
         const rawOrgId = account.props?.organizationId || account.organizationId;
+        if (newEntry) {
+            const creditAmt = Number(newEntry.creditAmount || 0);
+            const debitAmt = Number(newEntry.debitAmount || 0);
+            if ((creditAmt > 0 && debitAmt > 0) || (creditAmt <= 0 && debitAmt <= 0)) {
+                throw new DomainValidationError('Ledger entry must specify either a positive creditAmount or a positive debitAmount.', 'INVALID_LEDGER_AMOUNT');
+            }
+            const direction = creditAmt > 0 ? 'CREDIT' : 'DEBIT';
+            const amount = direction === 'CREDIT' ? creditAmt : debitAmt;
+            const txnType = newEntry.type === 'MILK_CREDIT'
+                ? 'MILK_COLLECTION_CREDIT'
+                : newEntry.type === 'CASH_ADVANCE_DEBIT'
+                    ? 'ADVANCE_DEBIT'
+                    : newEntry.type === 'BANK_PAYOUT'
+                        ? 'PAYMENT_PAYOUT_DEBIT'
+                        : newEntry.type === 'ADJUSTMENT'
+                            ? (direction === 'CREDIT' ? 'LEDGER_ADJUSTMENT_CREDIT' : 'LEDGER_ADJUSTMENT_DEBIT')
+                            : 'FEED_PURCHASE_DEBIT';
+            const refEntity = newEntry.type === 'MILK_CREDIT'
+                ? 'MILK_COLLECTION'
+                : newEntry.type === 'CASH_ADVANCE_DEBIT'
+                    ? 'CUSTOMER_ADVANCE'
+                    : newEntry.type === 'BANK_PAYOUT'
+                        ? 'CUSTOMER_PAYMENT'
+                        : newEntry.type === 'ADJUSTMENT'
+                            ? 'MANUAL_ADJUSTMENT'
+                            : 'FEED_SALE';
+            const contraAccountType = direction === 'CREDIT'
+                ? 'MILK_PURCHASE_EXPENSE'
+                : txnType === 'FEED_PURCHASE_DEBIT'
+                    ? 'FEED_INVENTORY'
+                    : 'CASH_BANK';
+            await this.executeJournalMutation({
+                organizationId: rawOrgId,
+                customerId: account.customerId,
+                operatorId: options?.operatorId || '',
+                entryId: newEntry.id,
+                direction,
+                amount,
+                transactionType: txnType,
+                referenceEntity: refEntity,
+                referenceId: newEntry.referenceId,
+                description: newEntry.description,
+                idempotencyKey: options?.idempotencyKey?.trim() || `LEDGER-${newEntry.id}`,
+                contraAccountType,
+                preferredAccountId: account.id,
+            });
+            return;
+        }
         const { orgId, tenantDb } = await this.getAuthorizedTenantDb(rawOrgId);
         await tenantDb.withTransaction(async (txClient) => {
-            const requestedOpId = newEntry
-                ? (options?.operatorId || newEntry.createdBy || newEntry.operatorId || '')
-                : undefined;
-            const { customerId, centerId, operatorId } = await this.validateCustomerCenterAndOperator(txClient, {
+            const { customerId } = await this.validateCustomerCenterAndOperator(txClient, {
                 organizationId: orgId,
                 customerId: account.customerId,
-                operatorId: requestedOpId,
             });
-            if (newEntry) {
-                const idempotencyKey = `LEDGER-${newEntry.id}`;
-                const existingTxn = await this.queryTenant(txClient, orgId, `SELECT id FROM ledger_transactions WHERE idempotency_key = $1 AND organization_id = $2 LIMIT 1;`, [idempotencyKey, orgId]);
-                if (existingTxn.rows.length > 0) {
-                    return;
-                }
-            }
-            // 1. Lock and update customer_ledger_accounts strictly within orgId
-            const existingAcc = await this.queryTenant(txClient, orgId, `SELECT id, organization_id FROM customer_ledger_accounts WHERE customer_id = $1 FOR UPDATE;`, [customerId]);
-            let accountId = account.id;
-            if (existingAcc.rows.length > 0) {
-                if (String(existingAcc.rows[0].organization_id || '').toLowerCase() !== orgId.toLowerCase()) {
-                    throw new ForbiddenTenantError(`Cross-tenant ledger account write rejected for customer '${customerId}'.`);
-                }
-                accountId = existingAcc.rows[0].id;
-                await this.queryTenant(txClient, orgId, `UPDATE customer_ledger_accounts
-           SET current_balance = $1, last_transaction_at = NOW(), updated_at = NOW()
-           WHERE id = $2 AND organization_id = $3;`, [account.currentBalance, accountId, orgId]);
-            }
-            else {
-                const createdAcc = await this.queryTenant(txClient, orgId, `INSERT INTO customer_ledger_accounts (id, customer_id, organization_id, currency, current_balance, last_transaction_at, updated_at)
-           VALUES ($1, $2, $3, 'INR', $4, NOW(), NOW())
-           RETURNING id;`, [account.id || crypto.randomUUID(), customerId, orgId, account.currentBalance]);
-                accountId = createdAcc.rows[0].id;
-            }
-            // 2. If new ledger entry provided, insert journal transaction + balanced double-entry lines
-            if (newEntry) {
-                const direction = newEntry.creditAmount > 0 ? 'CREDIT' : 'DEBIT';
-                const amount = newEntry.creditAmount > 0 ? newEntry.creditAmount : newEntry.debitAmount;
-                const txnType = newEntry.type === 'MILK_CREDIT' ? 'MILK_COLLECTION_CREDIT' : 'FEED_PURCHASE_DEBIT';
-                const refEntity = newEntry.type === 'MILK_CREDIT' ? 'MILK_COLLECTION' : 'FEED_SALE';
-                const refId = newEntry.referenceId && UUID_REGEX.test(newEntry.referenceId) ? newEntry.referenceId : accountId;
-                const idempotencyKey = `LEDGER-${newEntry.id}`;
-                const insertTxnSql = `
-          INSERT INTO ledger_transactions (
-            id, organization_id, center_id, customer_id, transaction_type,
-            direction, amount, balance_after, reference_entity, reference_id,
-            description, idempotency_key, created_by, created_at
-          ) VALUES (
-            $1, $2, $3, $4, $5,
-            $6, $7, $8, $9, $10,
-            $11, $12, $13, NOW()
-          )
-          ON CONFLICT (idempotency_key) DO NOTHING
-          RETURNING id;
-        `;
-                const txnRes = await this.queryTenant(txClient, orgId, insertTxnSql, [
-                    newEntry.id,
-                    orgId,
-                    centerId,
-                    customerId,
-                    txnType,
-                    direction,
-                    amount,
-                    newEntry.runningBalance,
-                    refEntity,
-                    refId,
-                    newEntry.description,
-                    idempotencyKey,
-                    operatorId,
-                ]);
-                if (txnRes.rows.length === 0) {
-                    return;
-                }
-                const insertLineSql = `
-          INSERT INTO ledger_entries (
-            transaction_id, account_id, account_type, entry_type, amount
-          ) VALUES ($1, $2, $3, $4, $5);
-        `;
-                if (direction === 'CREDIT') {
-                    await this.queryTenant(txClient, orgId, insertLineSql, [newEntry.id, accountId, 'CUSTOMER_PAYABLE', 'CREDIT', amount]);
-                    await this.queryTenant(txClient, orgId, insertLineSql, [newEntry.id, centerId, 'MILK_PURCHASE_EXPENSE', 'DEBIT', amount]);
-                }
-                else {
-                    await this.queryTenant(txClient, orgId, insertLineSql, [newEntry.id, accountId, 'CUSTOMER_PAYABLE', 'DEBIT', amount]);
-                    const contraAccount = txnType === 'FEED_PURCHASE_DEBIT' ? 'FEED_INVENTORY' : 'CASH_BANK';
-                    await this.queryTenant(txClient, orgId, insertLineSql, [newEntry.id, centerId, contraAccount, 'CREDIT', amount]);
-                }
-            }
+            await this.lockOrCreateLedgerAccount(txClient, orgId, customerId, account.id, account.currentBalance);
         });
     }
     async listEntries(customerId, limit = 50, offset = 0, organizationId) {

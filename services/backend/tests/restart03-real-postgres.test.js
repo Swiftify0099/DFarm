@@ -28,10 +28,14 @@ async function canConnectRealPostgres(url) {
 test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Verification Suite', async (suite) => {
   const reachable = await canConnectRealPostgres(TEST_PG_URL);
   if (!reachable) {
+    const msg = 'Real PostgreSQL 17 server unavailable; boot docker-compose.pg17-verify.yml and set TEST_POSTGRES_URL';
+    if (process.env['REQUIRE_REAL_POSTGRES'] === '1') {
+      assert.fail(`REQUIRE_REAL_POSTGRES=1 gate failed: ${msg}`);
+    }
     console.log(
       '[RESTART-03 REAL PG] Physical PostgreSQL 17 server unavailable (TEST_POSTGRES_URL unset or unreachable). Test marked as SKIP / NOT RUN (no pg-mem fallback).'
     );
-    suite.skip('Real PostgreSQL 17 server unavailable; boot docker-compose.pg17-verify.yml and set TEST_POSTGRES_URL');
+    suite.skip(msg);
     return;
   }
 

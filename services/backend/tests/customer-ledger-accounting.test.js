@@ -3,856 +3,816 @@ import assert from 'node:assert/strict';
 import request from 'supertest';
 import pg from 'pg';
 import crypto from 'node:crypto';
-import { createApp } from '../dist/app.js';
-import { signJwt } from '../dist/jwt.js';
-import { pool } from '../dist/db.js';
+import { MigrationRunner } from '../dist/infrastructure/database/MigrationRunner.js';
 
-const { Client } = pg;
-const dbClient = new Client({
-  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@127.0.0.1:54322/postgres',
-});
+const { Pool } = pg;
 
-async function query(text, params) {
-  return dbClient.query(text, params);
+// Strictly require explicit TEST_POSTGRES_URL. Never fall back to DATABASE_URL or ambient ports.
+const TEST_PG_URL = process.env['TEST_POSTGRES_URL'] || '';
+const REQUIRE_REAL_PG = process.env['REQUIRE_REAL_POSTGRES'] === '1';
+
+async function canConnectRealPostgres(url) {
+  if (!url) return false;
+  const probe = new Pool({ connectionString: url, connectionTimeoutMillis: 2000 });
+  try {
+    const res = await probe.query('SELECT version() AS v;');
+    return Boolean(res.rows[0]?.v);
+  } catch {
+    return false;
+  } finally {
+    await probe.end().catch(() => {});
+  }
 }
 
-test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite (22 Scenarios)', async (t) => {
-  await dbClient.connect();
-  t.after(async () => {
-    await dbClient.end();
-    await pool.end();
-  });
+function makeDbUrl(baseUrl, dbName) {
+  const u = new URL(baseUrl);
+  u.pathname = `/${dbName}`;
+  return u.toString();
+}
 
-  const app = createApp();
-
-  // Shared test context
-  let org1Id = '';
-  let org2Id = '';
-  let center1Id = '';
-  let center2Id = '';
-  let adminUserId = '';
-  let supervisorUserId = '';
-  let operatorUserId = '';
-  let org2AdminUserId = '';
-
-  let customer1Id = '';
-  let customer2Id = '';
-  let org2CustomerId = '';
-
-  let adminToken = '';
-  let supervisorToken = '';
-  let operatorToken = '';
-  let org2AdminToken = '';
-  let customer1Token = '';
-  let customer2Token = '';
-
-  let testAdvanceId = '';
-  let testCollectionId = '';
-  const runSuffix = Date.now().toString().slice(-6);
-
-  await t.test('0. Setup Test Organizations, Centers, Staff Users, and Customers', async () => {
-    // 1. Get or create Org 1 (Sangli) and Org 2 (Kolhapur)
-    const o1 = await query("SELECT id FROM organizations WHERE code = 'SDCU_01' OR name ILIKE '%Sangli%' LIMIT 1;");
-    assert.ok(o1.rows.length > 0, 'Org 1 must exist');
-    org1Id = o1.rows[0].id;
-
-    const o2 = await query("SELECT id FROM organizations WHERE code = 'KDCU_02' OR name ILIKE '%Kolhapur%' LIMIT 1;");
-    if (o2.rows.length > 0) {
-      org2Id = o2.rows[0].id;
-    } else {
-      const newOrg2 = await query(`INSERT INTO organizations (name, code, status) VALUES ('Kolhapur District Union', 'KDCU_P12', 'ACTIVE') RETURNING id;`);
-      org2Id = newOrg2.rows[0].id;
+test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite (Isolated Database-Per-Dairy PG17)', async (t) => {
+  const reachable = await canConnectRealPostgres(TEST_PG_URL);
+  if (!reachable) {
+    const msg =
+      'Real PostgreSQL 17 server unavailable (TEST_POSTGRES_URL unset or unreachable); no ambient fallback permitted.';
+    if (REQUIRE_REAL_PG) {
+      assert.fail(`REQUIRE_REAL_POSTGRES=1 gate failed: ${msg}`);
     }
+    console.log(`[CUSTOMER LEDGER ACCOUNTING] ${msg} Marked as SKIP / NOT RUN.`);
+    t.skip(msg);
+    return;
+  }
 
-    // 2. Centers
-    const c1 = await query('SELECT id FROM dairy_centers WHERE organization_id = $1 LIMIT 1;', [org1Id]);
-    assert.ok(c1.rows.length > 0, 'Center 1 must exist');
-    center1Id = c1.rows[0].id;
+  const suffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+  const dbNameCtrl = `dfarm_l12_ctrl_${suffix}`;
+  const dbNameOrg1 = `dfarm_l12_org1_${suffix}`;
+  const dbNameOrg2 = `dfarm_l12_org2_${suffix}`;
 
-    const c2 = await query('SELECT id FROM dairy_centers WHERE organization_id = $1 LIMIT 1;', [org2Id]);
-    if (c2.rows.length > 0) {
-      center2Id = c2.rows[0].id;
-    } else {
-      const newCenter2 = await query(`INSERT INTO dairy_centers (organization_id, name, code, status) VALUES ($1, 'Kolhapur Center P12', 'KOL_P12', 'ACTIVE') RETURNING id;`, [org2Id]);
-      center2Id = newCenter2.rows[0].id;
-    }
+  const ctrlUrl = makeDbUrl(TEST_PG_URL, dbNameCtrl);
+  const org1Url = makeDbUrl(TEST_PG_URL, dbNameOrg1);
+  const org2Url = makeDbUrl(TEST_PG_URL, dbNameOrg2);
 
-    // 3. Staff Users
-    // Admin (Org 1)
-    const adminRes = await query(
-      `INSERT INTO users (organization_id, username, full_name, email, phone_number, role, status)
-       VALUES ($1, 'p12_admin_' || $2, 'Admin Thorat', 'p12_admin_' || $2 || '@dfarm.test', '+9199' || $2 || '1', 'DAIRY_OWNER', 'ACTIVE')
-       RETURNING id;`,
-      [org1Id, runSuffix]
-    );
-    adminUserId = adminRes.rows[0].id;
+  const adminPool = new Pool({ connectionString: TEST_PG_URL, connectionTimeoutMillis: 5000 });
+  let poolCtrl;
+  let poolOrg1;
+  let poolOrg2;
 
-    // Supervisor (Org 1)
-    const supRes = await query(
-      `INSERT INTO users (organization_id, username, full_name, email, phone_number, role, status)
-       VALUES ($1, 'p12_supervisor_' || $2, 'Supervisor Patil', 'p12_sup_' || $2 || '@dfarm.test', '+9199' || $2 || '2', 'SUPERVISOR', 'ACTIVE')
-       RETURNING id;`,
-      [org1Id, runSuffix]
-    );
-    supervisorUserId = supRes.rows[0].id;
-    await query(`INSERT INTO user_center_assignments (user_id, center_id, is_primary) VALUES ($1, $2, TRUE) ON CONFLICT DO NOTHING;`, [supervisorUserId, center1Id]);
+  try {
+    await adminPool.query(`CREATE DATABASE ${dbNameCtrl};`);
+    await adminPool.query(`CREATE DATABASE ${dbNameOrg1};`);
+    await adminPool.query(`CREATE DATABASE ${dbNameOrg2};`);
 
-    // Operator (Org 1)
-    const opRes = await query(
-      `INSERT INTO users (organization_id, username, full_name, email, phone_number, role, status)
-       VALUES ($1, 'p12_operator_' || $2, 'Operator Kadam', 'p12_op_' || $2 || '@dfarm.test', '+9199' || $2 || '3', 'COLLECTION_OPERATOR', 'ACTIVE')
-       RETURNING id;`,
-      [org1Id, runSuffix]
-    );
-    operatorUserId = opRes.rows[0].id;
-    await query(`INSERT INTO user_center_assignments (user_id, center_id, is_primary) VALUES ($1, $2, TRUE) ON CONFLICT DO NOTHING;`, [operatorUserId, center1Id]);
+    poolCtrl = new Pool({ connectionString: ctrlUrl, max: 10 });
+    poolOrg1 = new Pool({ connectionString: org1Url, max: 15 });
+    poolOrg2 = new Pool({ connectionString: org2Url, max: 10 });
 
-    // Admin (Org 2)
-    const org2AdminRes = await query(
-      `INSERT INTO users (organization_id, username, full_name, email, phone_number, role, status)
-       VALUES ($1, 'p12_org2_admin_' || $2, 'Org2 Admin Deshmukh', 'p12_org2_' || $2 || '@dfarm.test', '+9199' || $2 || '4', 'DAIRY_OWNER', 'ACTIVE')
-       RETURNING id;`,
-      [org2Id, runSuffix]
-    );
-    org2AdminUserId = org2AdminRes.rows[0].id;
+    const org1Id = crypto.randomUUID();
+    const org2Id = crypto.randomUUID();
 
-    // 4. Customers
-    // Customer 1 (Org 1)
-    const cust1Res = await query(
-      `INSERT INTO customers (organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status)
-       VALUES ($1, $2, 'FC-P12-' || $3 || '-01', 'Ramesh Jadhav', '+9198' || $3 || '1', 'ACTIVE')
-       RETURNING id;`,
-      [org1Id, center1Id, runSuffix]
-    );
-    customer1Id = cust1Res.rows[0].id;
+    await MigrationRunner.runControlPlaneMigrations(poolCtrl);
+    await MigrationRunner.runTenantMigrations(poolOrg1, org1Id);
+    await MigrationRunner.runTenantMigrations(poolOrg2, org2Id);
 
-    // Customer 2 (Org 1)
-    const cust2Res = await query(
-      `INSERT INTO customers (organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status)
-       VALUES ($1, $2, 'FC-P12-' || $3 || '-02', 'Suresh Shinde', '+9198' || $3 || '2', 'ACTIVE')
-       RETURNING id;`,
-      [org1Id, center1Id, runSuffix]
-    );
-    customer2Id = cust2Res.rows[0].id;
+    // Point backend singletons to disposable control-plane DB BEFORE importing app/db/manager
+    process.env['NODE_ENV'] = 'test';
+    process.env['TEST_REAL_POSTGRES'] = '1';
+    process.env['DATABASE_TLS_MODE'] = 'disable';
+    process.env['CENTRAL_DATABASE_URL'] = ctrlUrl;
+    process.env['DATABASE_URL'] = ctrlUrl;
+    process.env['DATABASE_PROVISIONER_URL'] = ctrlUrl;
+    process.env['TENANT_POOL_CONNECTION_TIMEOUT_MS'] = '5000';
 
-    // Customer Org 2
-    const custOrg2Res = await query(
-      `INSERT INTO customers (organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status)
-       VALUES ($1, $2, 'FC-P12-' || $3 || '-03', 'Anand Koli', '+9198' || $3 || '3', 'ACTIVE')
-       RETURNING id;`,
-      [org2Id, center2Id, runSuffix]
-    );
-    org2CustomerId = custOrg2Res.rows[0].id;
+    const { createApp } = await import('../dist/app.js');
+    const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+    const { tenantDbManager } = await import('../dist/infrastructure/database/TenantDatabaseManager.js');
+    const { CredentialEncryption } = await import('../dist/infrastructure/security/CredentialEncryption.js');
+    const { HmacJwtTokenService } = await import('../dist/infrastructure/security/HmacJwtTokenService.js');
+    const { PostgresLedgerRepository } = await import('../dist/infrastructure/repositories/PostgresLedgerRepository.js');
+    const { CustomerLedgerAccount } = await import('../dist/domain/entities/CustomerLedgerAccount.js');
 
-    // Authorize milk categories
-    await query(
-      `INSERT INTO customer_milk_categories (customer_id, milk_category, is_authorized, authorized_by) 
-       VALUES ($1, 'COW', TRUE, $4), ($2, 'COW', TRUE, $4), ($3, 'COW', TRUE, $4);`,
-      [customer1Id, customer2Id, org2CustomerId, adminUserId]
-    );
+    const app = createApp();
+    const tokenService = new HmacJwtTokenService();
+    const ledgerRepo = new PostgresLedgerRepository();
 
-    // Center Settings for biological limits
-    await query(
-      `INSERT INTO center_settings (
-         center_id, cow_fat_min, cow_fat_max, cow_snf_min, cow_snf_max,
-         buffalo_fat_min, buffalo_fat_max, buffalo_snf_min, buffalo_snf_max
-       ) VALUES ($1, 2.8, 6.0, 7.8, 10.2, 5.0, 12.0, 8.2, 11.5)
-       ON CONFLICT (center_id) DO UPDATE SET
-         cow_fat_min = 2.8, cow_fat_max = 6.0, cow_snf_min = 7.8, cow_snf_max = 10.2;`,
-      [center1Id]
-    );
-
-    // Ensure active Rate Chart and cells for COW
-    const rcRes = await query(
-      `INSERT INTO rate_charts (organization_id, center_id, name, milk_category, pricing_type, is_active)
-       VALUES ($1, $2, 'Tasgaon Cow Standard Rate P12 ' || $3, 'COW', 'GRID', TRUE)
-       RETURNING id;`,
-      [org1Id, center1Id, runSuffix]
-    );
-    const cowRateChartId = rcRes.rows[0].id;
-
-    const rcvRes = await query(
-      `INSERT INTO rate_chart_versions (rate_chart_id, version_number, effective_from, is_approved, approved_by, approved_at)
-       VALUES ($1, 1, NOW() - INTERVAL '1 day', TRUE, $2, NOW())
-       RETURNING id;`,
-      [cowRateChartId, supervisorUserId]
-    );
-    const cowRateVersionId = rcvRes.rows[0].id;
-
-    await query(
-      `INSERT INTO rate_chart_cells (rate_chart_version_id, fat_percentage, snf_percentage, rate_per_unit)
-       VALUES ($1, 4.0, 8.5, 36.50), ($1, 4.2, 8.5, 37.80), ($1, 3.5, 8.5, 34.00);`,
-      [cowRateVersionId]
-    );
-
-    // 5. Generate Auth Tokens
-    adminToken = signJwt({
-      sub: adminUserId,
-      userId: adminUserId,
-      organizationId: org1Id,
-      role: 'DAIRY_OWNER',
-      centerIds: [center1Id],
+    t.after(async () => {
+      await tenantDbManager.closeAllPools().catch(() => {});
+      await db.close().catch(() => {});
     });
 
-    supervisorToken = signJwt({
-      sub: supervisorUserId,
-      userId: supervisorUserId,
-      organizationId: org1Id,
-      role: 'SUPERVISOR',
-      primaryCenterId: center1Id,
-      centerIds: [center1Id],
+    const org1Code = `L12_A_${suffix.toUpperCase()}`;
+    const org2Code = `L12_B_${suffix.toUpperCase()}`;
+    const center1Id = crypto.randomUUID();
+    const center2Id = crypto.randomUUID();
+    const adminUserId = crypto.randomUUID();
+    const supervisorUserId = crypto.randomUUID();
+    const operatorUserId = crypto.randomUUID();
+    const org2AdminUserId = crypto.randomUUID();
+
+    const customer1Id = crypto.randomUUID();
+    const customer2Id = crypto.randomUUID();
+    const org2CustomerId = crypto.randomUUID();
+    const globalCust1Id = crypto.randomUUID();
+    const globalCust2Id = crypto.randomUUID();
+    const globalCustOrg2Id = crypto.randomUUID();
+
+    let adminToken = '';
+    let supervisorToken = '';
+    let operatorToken = '';
+    let org2AdminToken = '';
+    let customer1Token = '';
+
+    let testAdvanceId = '';
+    let testCollectionId = '';
+
+    await t.test('0. Setup Disposable Isolated Organizations, Mappings, Centers, Staff, and Customers', async () => {
+      // Seed control-plane organizations & authoritative encrypted tenant DB mappings
+      await poolCtrl.query(
+        `INSERT INTO organizations (id, name, code, status)
+         VALUES ($1, 'L12 Isolated Dairy A', $2, 'ACTIVE'),
+                ($3, 'L12 Isolated Dairy B', $4, 'ACTIVE');`,
+        [org1Id, org1Code, org2Id, org2Code]
+      );
+
+      await poolCtrl.query(
+        `INSERT INTO dairy_database_mappings (
+           id, dairy_id, dairy_code, database_name, resource_type,
+           connection_uri_encrypted, schema_version, provisioning_status, provisioned_at, last_verified_at
+         ) VALUES
+           ($1, $2, $3, $4, 'PHYSICAL_DATABASE', $5, 'v1.0.0', 'ACTIVE', NOW(), NOW()),
+           ($6, $7, $8, $9, 'PHYSICAL_DATABASE', $10, 'v1.0.0', 'ACTIVE', NOW(), NOW());`,
+        [
+          crypto.randomUUID(), org1Id, org1Code, dbNameOrg1, CredentialEncryption.encrypt(org1Url),
+          crypto.randomUUID(), org2Id, org2Code, dbNameOrg2, CredentialEncryption.encrypt(org2Url),
+        ]
+      );
+
+      await tenantDbManager.initialize();
+
+      // Seed tenant DB A & control plane mirrors for auth verification
+      for (const targetPool of [poolCtrl, poolOrg1]) {
+        await targetPool.query(
+          `INSERT INTO organizations (id, name, code, status)
+           VALUES ($1, 'L12 Isolated Dairy A', $2, 'ACTIVE')
+           ON CONFLICT (id) DO NOTHING;`,
+          [org1Id, org1Code]
+        );
+        await targetPool.query(
+          `INSERT INTO dairy_centers (
+             id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status
+           ) VALUES ($1, $2, 'C-L12-A', 'L12 Center A', 'Road A', 'Town A', 'Sangli', 'Maharashtra', '416417', '+919800001001', 'ACTIVE')
+           ON CONFLICT (id) DO NOTHING;`,
+          [center1Id, org1Id]
+        );
+        await targetPool.query(
+          `INSERT INTO users (id, organization_id, username, full_name, email, phone_number, role, user_role, status) VALUES
+             ($1, $5, 'l12_admin_' || $6, 'Admin L12', 'l12_admin_' || $6 || '@dfarm.test', '+9199' || $6 || '1', 'DAIRY_OWNER', 'DAIRY_OWNER', 'ACTIVE'),
+             ($2, $5, 'l12_sup_' || $6, 'Supervisor L12', 'l12_sup_' || $6 || '@dfarm.test', '+9199' || $6 || '2', 'SUPERVISOR', 'SUPERVISOR', 'ACTIVE'),
+             ($3, $5, 'l12_op_' || $6, 'Operator L12', 'l12_op_' || $6 || '@dfarm.test', '+9199' || $6 || '3', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE')
+           ON CONFLICT (id) DO NOTHING;`,
+          [adminUserId, supervisorUserId, operatorUserId, null, org1Id, suffix]
+        );
+        await targetPool.query(
+          `INSERT INTO user_center_assignments (user_id, center_id, is_primary)
+           VALUES ($1, $4, TRUE), ($2, $4, TRUE), ($3, $4, TRUE)
+           ON CONFLICT DO NOTHING;`,
+          [adminUserId, supervisorUserId, operatorUserId, center1Id]
+        );
+      }
+
+      // Seed tenant DB B & control plane mirrors
+      for (const targetPool of [poolCtrl, poolOrg2]) {
+        await targetPool.query(
+          `INSERT INTO organizations (id, name, code, status)
+           VALUES ($1, 'L12 Isolated Dairy B', $2, 'ACTIVE')
+           ON CONFLICT (id) DO NOTHING;`,
+          [org2Id, org2Code]
+        );
+        await targetPool.query(
+          `INSERT INTO dairy_centers (
+             id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status
+           ) VALUES ($1, $2, 'C-L12-B', 'L12 Center B', 'Road B', 'Town B', 'Kolhapur', 'Maharashtra', '416001', '+919800001002', 'ACTIVE')
+           ON CONFLICT (id) DO NOTHING;`,
+          [center2Id, org2Id]
+        );
+        await targetPool.query(
+          `INSERT INTO users (id, organization_id, username, full_name, email, phone_number, role, user_role, status)
+           VALUES ($1, $2, 'l12_org2_admin_' || $3, 'Org2 Admin L12', 'l12_org2_' || $3 || '@dfarm.test', '+9199' || $3 || '4', 'DAIRY_OWNER', 'DAIRY_OWNER', 'ACTIVE')
+           ON CONFLICT (id) DO NOTHING;`,
+          [org2AdminUserId, org2Id, suffix]
+        );
+        await targetPool.query(
+          `INSERT INTO user_center_assignments (user_id, center_id, is_primary)
+           VALUES ($1, $2, TRUE) ON CONFLICT DO NOTHING;`,
+          [org2AdminUserId, center2Id]
+        );
+      }
+
+      // Seed customers in isolated Tenant DBs
+      await poolOrg1.query(
+        `INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted, global_customer_id)
+         VALUES
+           ($1, $3, $4, 'FC-L12-01', 'Ramesh L12', '+9198' || $5 || '1', 'ACTIVE', 'APPROVED', FALSE, $6),
+           ($2, $3, $4, 'FC-L12-02', 'Suresh L12', '+9198' || $5 || '2', 'ACTIVE', 'APPROVED', FALSE, $7);`,
+        [customer1Id, customer2Id, org1Id, center1Id, suffix, globalCust1Id, globalCust2Id]
+      );
+
+      await poolOrg2.query(
+        `INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted, global_customer_id)
+         VALUES ($1, $2, $3, 'FC-L12-03', 'Anand L12', '+9198' || $4 || '3', 'ACTIVE', 'APPROVED', FALSE, $5);`,
+        [org2CustomerId, org2Id, center2Id, suffix, globalCustOrg2Id]
+      );
+
+      // Seed central global identities & memberships for customer JWT verification
+      await poolCtrl.query(
+        `INSERT INTO global_customer_identities (id, normalized_mobile_number, phone_verified_at)
+         VALUES
+           ($1, '+9198' || $4 || '1', NOW()),
+           ($2, '+9198' || $4 || '2', NOW()),
+           ($3, '+9198' || $4 || '3', NOW());`,
+        [globalCust1Id, globalCust2Id, globalCustOrg2Id, suffix]
+      );
+
+      await poolCtrl.query(
+        `INSERT INTO customer_dairy_memberships (
+           id, global_customer_id, organization_id, tenant_customer_id, farmer_code, customer_name,
+           membership_status, dairy_name, dairy_code, center_id, center_name
+         ) VALUES
+           ($1, $2, $3, $4, 'FC-L12-01', 'Ramesh L12', 'APPROVED', 'L12 Isolated Dairy A', $5, $6, 'L12 Center A'),
+           ($7, $8, $3, $9, 'FC-L12-02', 'Suresh L12', 'APPROVED', 'L12 Isolated Dairy A', $5, $6, 'L12 Center A'),
+           ($10, $11, $12, $13, 'FC-L12-03', 'Anand L12', 'APPROVED', 'L12 Isolated Dairy B', $14, $15, 'L12 Center B');`,
+        [
+          crypto.randomUUID(), globalCust1Id, org1Id, customer1Id, org1Code, center1Id,
+          crypto.randomUUID(), globalCust2Id, customer2Id,
+          crypto.randomUUID(), globalCustOrg2Id, org2Id, org2CustomerId, org2Code, center2Id,
+        ]
+      );
+
+      await poolOrg1.query(
+        `INSERT INTO customer_milk_categories (customer_id, milk_category, is_authorized, authorized_by)
+         VALUES ($1, 'COW', TRUE, $3), ($2, 'COW', TRUE, $3);`,
+        [customer1Id, customer2Id, adminUserId]
+      );
+
+      await poolOrg1.query(
+        `INSERT INTO center_settings (
+           center_id, cow_fat_min, cow_fat_max, cow_snf_min, cow_snf_max,
+           buffalo_fat_min, buffalo_fat_max, buffalo_snf_min, buffalo_snf_max
+         ) VALUES ($1, 2.8, 6.0, 7.8, 10.2, 5.0, 12.0, 8.2, 11.5)
+         ON CONFLICT (center_id) DO UPDATE SET
+           cow_fat_min = 2.8, cow_fat_max = 6.0, cow_snf_min = 7.8, cow_snf_max = 10.2;`,
+        [center1Id]
+      );
+
+      const rcRes = await poolOrg1.query(
+        `INSERT INTO rate_charts (organization_id, center_id, name, milk_category, pricing_type, is_active)
+         VALUES ($1, $2, 'L12 Cow Rate Chart', 'COW', 'GRID', TRUE) RETURNING id;`,
+        [org1Id, center1Id]
+      );
+      const rcvRes = await poolOrg1.query(
+        `INSERT INTO rate_chart_versions (rate_chart_id, version_number, effective_from, is_approved, approved_by, approved_at)
+         VALUES ($1, 1, NOW() - INTERVAL '1 day', TRUE, $2, NOW()) RETURNING id;`,
+        [rcRes.rows[0].id, supervisorUserId]
+      );
+      await poolOrg1.query(
+        `INSERT INTO rate_chart_cells (rate_chart_version_id, fat_percentage, snf_percentage, rate_per_unit)
+         VALUES ($1, 4.0, 8.5, 36.50), ($1, 4.2, 8.5, 37.80), ($1, 3.5, 8.5, 34.00);`,
+        [rcvRes.rows[0].id]
+      );
+
+      adminToken = tokenService.signToken({
+        userId: adminUserId,
+        organizationId: org1Id,
+        centerId: center1Id,
+        role: 'DAIRY_OWNER',
+        actorType: 'STAFF',
+        fullName: 'Admin L12',
+      });
+      supervisorToken = tokenService.signToken({
+        userId: supervisorUserId,
+        organizationId: org1Id,
+        centerId: center1Id,
+        role: 'SUPERVISOR',
+        actorType: 'STAFF',
+        fullName: 'Supervisor L12',
+      });
+      operatorToken = tokenService.signToken({
+        userId: operatorUserId,
+        organizationId: org1Id,
+        centerId: center1Id,
+        role: 'COLLECTION_OPERATOR',
+        actorType: 'STAFF',
+        fullName: 'Operator L12',
+      });
+      org2AdminToken = tokenService.signToken({
+        userId: org2AdminUserId,
+        organizationId: org2Id,
+        centerId: center2Id,
+        role: 'DAIRY_OWNER',
+        actorType: 'STAFF',
+        fullName: 'Org2 Admin L12',
+      });
+      customer1Token = tokenService.signToken({
+        userId: customer1Id,
+        organizationId: org1Id,
+        centerId: center1Id,
+        globalCustomerId: globalCust1Id,
+        role: 'FARMER_CUSTOMER',
+        actorType: 'CUSTOMER',
+        fullName: 'Ramesh L12',
+      });
     });
 
-    operatorToken = signJwt({
-      sub: operatorUserId,
-      userId: operatorUserId,
-      organizationId: org1Id,
-      role: 'COLLECTION_OPERATOR',
-      primaryCenterId: center1Id,
-      centerIds: [center1Id],
+    await t.test('1. Milk credit: synchronous credit increases running liability balance & creates balanced journal in Tenant A only', async () => {
+      const sessionRes = await poolOrg1.query(
+        `SELECT public.create_milk_collection_session(
+           $1::uuid, $2::uuid, $3::uuid, 'TEST_POS_01'::varchar, 'MORNING'::varchar,
+           'COW'::varchar, 'SUPERVISOR_MANUAL'::varchar, gen_random_uuid(), CURRENT_DATE, NULL
+         ) AS result;`,
+        [center1Id, customer1Id, supervisorUserId]
+      );
+      const session = sessionRes.rows[0].result;
+
+      const completeRes = await poolOrg1.query(
+        `SELECT public.complete_milk_collection_session(
+           $1::uuid, $2::uuid, 'TEST_POS_01'::varchar, 10.0::numeric, 4.0::numeric,
+           8.5::numeric, 'KG'::varchar, 'MANUAL_ENTRY'::varchar, gen_random_uuid(), ('IDEM-L12-MILK-' || $3)::varchar
+         ) AS result;`,
+        [session.sessionId, supervisorUserId, suffix]
+      );
+      const complete = completeRes.rows[0].result;
+      assert.ok(complete.collectionId);
+      assert.ok(complete.newBalance > 0);
+      testCollectionId = complete.collectionId;
+      const milkCreditAmount = complete.totalAmount;
+
+      const cla = await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
+      assert.equal(parseFloat(cla.rows[0].current_balance), milkCreditAmount);
+
+      const lt = await poolOrg1.query(
+        "SELECT * FROM ledger_transactions WHERE reference_id = $1 AND transaction_type = 'MILK_COLLECTION_CREDIT';",
+        [testCollectionId]
+      );
+      assert.equal(lt.rows.length, 1);
+      assert.equal(lt.rows[0].direction, 'CREDIT');
+      assert.equal(parseFloat(lt.rows[0].amount), milkCreditAmount);
+
+      const le = await poolOrg1.query('SELECT * FROM ledger_entries WHERE transaction_id = $1;', [lt.rows[0].id]);
+      assert.equal(le.rows.length, 2);
+      const debitEntry = le.rows.find((e) => e.entry_type === 'DEBIT');
+      const creditEntry = le.rows.find((e) => e.entry_type === 'CREDIT');
+      assert.equal(parseFloat(debitEntry.amount), milkCreditAmount);
+      assert.equal(parseFloat(creditEntry.amount), milkCreditAmount);
+      assert.equal(debitEntry.account_type, 'MILK_PURCHASE_EXPENSE');
+      assert.equal(creditEntry.account_type, 'CUSTOMER_PAYABLE');
+
+      // Zero leakage to control plane or Tenant B
+      assert.equal(Number((await poolCtrl.query('SELECT COUNT(*)::int AS c FROM ledger_transactions;')).rows[0].c), 0);
+      assert.equal(Number((await poolOrg2.query('SELECT COUNT(*)::int AS c FROM ledger_transactions;')).rows[0].c), 0);
     });
 
-    org2AdminToken = signJwt({
-      sub: org2AdminUserId,
-      userId: org2AdminUserId,
-      organizationId: org2Id,
-      role: 'DAIRY_OWNER',
-      centerIds: [center2Id],
+    await t.test('2. Advance debit: emergency cash advance reduces dairy liability balance & creates active advance', async () => {
+      const prevBalance = parseFloat(
+        (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance
+      );
+      const advanceAmount = 200.0;
+      const advRes = await poolOrg1.query(
+        `SELECT public.post_customer_advance(
+           $1::uuid, $2::uuid, $3::uuid, $4::numeric, $5::text, 'MONTHLY_BILL_DEDUCTION'::varchar, $6::varchar, CURRENT_DATE
+         ) AS result;`,
+        [customer1Id, center1Id, supervisorUserId, advanceAmount, 'Emergency purchase of veterinary medicines', `IDEM-L12-ADV-${suffix}`]
+      );
+      const data = advRes.rows[0].result;
+      assert.ok(data.advanceId);
+      testAdvanceId = data.advanceId;
+      assert.equal(Number(data.principalAmount), advanceAmount);
+      assert.equal(data.status, 'ACTIVE');
+
+      const expectedBalance = parseFloat((prevBalance - advanceAmount).toFixed(2));
+      assert.equal(Number(data.balanceAfter), expectedBalance);
+
+      const lt = await poolOrg1.query("SELECT * FROM ledger_transactions WHERE reference_id = $1 AND transaction_type = 'CUSTOMER_ADVANCE_DEBIT';", [testAdvanceId]);
+      assert.equal(lt.rows.length, 1);
+      const le = await poolOrg1.query('SELECT * FROM ledger_entries WHERE transaction_id = $1;', [lt.rows[0].id]);
+      assert.equal(le.rows.length, 2);
+      assert.equal(le.rows.find((e) => e.entry_type === 'DEBIT').account_type, 'CUSTOMER_PAYABLE');
+      assert.equal(le.rows.find((e) => e.entry_type === 'CREDIT').account_type, 'CASH_BANK');
     });
 
-    customer1Token = signJwt({
-      sub: customer1Id,
-      userId: customer1Id,
-      organizationId: org1Id,
-      role: 'FARMER_CUSTOMER',
-      centerIds: [center1Id],
+    await t.test('3. Partial advance recovery: partially recovers advance & credits customer liability ledger', async () => {
+      const prevBalance = parseFloat(
+        (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance
+      );
+      const recoveryAmount = 80.0;
+      const recRes = await poolOrg1.query(
+        `SELECT public.recover_customer_advance($1::uuid, $2::uuid, $3::numeric, $4::varchar, $5::text) AS result;`,
+        [testAdvanceId, operatorUserId, recoveryAmount, `IDEM-L12-REC1-${suffix}`, 'Cash counter repayment of Rs 80']
+      );
+      const data = recRes.rows[0].result;
+      assert.equal(Number(data.recoveredAmount), recoveryAmount);
+      assert.equal(Number(data.remainingPrincipal), 120.0);
+      assert.equal(data.status, 'ACTIVE');
+      assert.equal(Number(data.newBalance), parseFloat((prevBalance + recoveryAmount).toFixed(2)));
     });
 
-    customer2Token = signJwt({
-      sub: customer2Id,
-      userId: customer2Id,
-      organizationId: org1Id,
-      role: 'FARMER_CUSTOMER',
-      centerIds: [center1Id],
-    });
-  });
+    await t.test('4. Full advance recovery: settles remaining principal & rejects over-recovery', async () => {
+      await assert.rejects(
+        () =>
+          poolOrg1.query(
+            `SELECT public.recover_customer_advance($1::uuid, $2::uuid, $3::numeric, NULL, 'Over-recovery attempt') AS result;`,
+            [testAdvanceId, operatorUserId, 150.0]
+          ),
+        /OVER_RECOVERY_PROHIBITED|exceeds/i
+      );
 
-  // 1. Milk credit
-  await t.test('1. Milk credit: synchronous credit increases running liability balance & creates balanced journal', async () => {
-    // Post a milk collection credit using collection intake
-    const sessionRes = await query(
-      `SELECT public.create_milk_collection_session(
-         $1::uuid, $2::uuid, $3::uuid, 'TEST_POS_01'::varchar, 'MORNING'::varchar,
-         'COW'::varchar, 'SUPERVISOR_MANUAL'::varchar, gen_random_uuid(), CURRENT_DATE, NULL
-       ) AS result;`,
-      [center1Id, customer1Id, supervisorUserId]
-    );
-    const session = sessionRes.rows[0].result;
-
-    const completeRes = await query(
-      `SELECT public.complete_milk_collection_session(
-         $1::uuid, $2::uuid, 'TEST_POS_01'::varchar, 10.0::numeric, 4.0::numeric,
-         8.5::numeric, 'KG'::varchar, 'MANUAL_ENTRY'::varchar, gen_random_uuid(), ('IDEM-P12-MILK-' || $3)::varchar
-       ) AS result;`,
-      [session.sessionId, supervisorUserId, runSuffix]
-    );
-    const complete = completeRes.rows[0].result;
-    assert.ok(complete.collectionId);
-    assert.ok(complete.newBalance > 0);
-    testCollectionId = complete.collectionId;
-    const milkCreditAmount = complete.totalAmount;
-
-    // Verify Customer Ledger Account
-    const cla = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
-    assert.equal(parseFloat(cla.rows[0].current_balance), milkCreditAmount);
-
-    // Verify Ledger Transaction
-    const lt = await query(
-      "SELECT * FROM ledger_transactions WHERE reference_id = $1 AND transaction_type = 'MILK_COLLECTION_CREDIT';",
-      [testCollectionId]
-    );
-    assert.equal(lt.rows.length, 1);
-    assert.equal(lt.rows[0].direction, 'CREDIT');
-    assert.equal(parseFloat(lt.rows[0].amount), milkCreditAmount);
-    assert.equal(parseFloat(lt.rows[0].balance_after), milkCreditAmount);
-
-    // Verify Balanced Double-Entry Journal Entries
-    const le = await query('SELECT * FROM ledger_entries WHERE transaction_id = $1;', [lt.rows[0].id]);
-    assert.equal(le.rows.length, 2);
-
-    const debitEntry = le.rows.find(e => e.entry_type === 'DEBIT');
-    const creditEntry = le.rows.find(e => e.entry_type === 'CREDIT');
-    assert.ok(debitEntry, 'Must have DEBIT journal entry');
-    assert.ok(creditEntry, 'Must have CREDIT journal entry');
-    assert.equal(parseFloat(debitEntry.amount), milkCreditAmount);
-    assert.equal(parseFloat(creditEntry.amount), milkCreditAmount);
-    assert.equal(debitEntry.account_type, 'MILK_PURCHASE_EXPENSE');
-    assert.equal(creditEntry.account_type, 'CUSTOMER_PAYABLE');
-  });
-
-  // 2. Advance debit
-  await t.test('2. Advance debit: emergency cash advance reduces dairy liability balance & creates active advance', async () => {
-    const claBefore = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
-    const prevBalance = parseFloat(claBefore.rows[0].current_balance);
-
-    const advanceAmount = 200.00;
-    const res = await request(app)
-      .post(`/api/v1/ledger/${customer1Id}/advances`)
-      .set('Authorization', `Bearer ${supervisorToken}`)
-      .send({
-        amount: advanceAmount,
-        reason: 'Emergency purchase of veterinary medicines',
-        recoveryType: 'MONTHLY_BILL_DEDUCTION',
-        idempotencyKey: 'IDEM-P12-ADV-' + runSuffix,
-      });
-
-    assert.equal(res.status, 201);
-    assert.equal(res.body.success, true);
-    const data = res.body.data;
-    assert.ok(data.advanceId);
-    testAdvanceId = data.advanceId;
-    assert.equal(data.principalAmount, advanceAmount);
-    assert.equal(data.outstandingAmount, advanceAmount);
-    assert.equal(data.status, 'ACTIVE');
-
-    // Balance after = prevBalance - advanceAmount (DEBIT decreases liability)
-    const expectedBalance = parseFloat((prevBalance - advanceAmount).toFixed(2));
-    assert.equal(data.newBalance, expectedBalance);
-
-    const claAfter = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
-    assert.equal(parseFloat(claAfter.rows[0].current_balance), expectedBalance);
-
-    // Verify balanced journal entries
-    const lt = await query("SELECT * FROM ledger_transactions WHERE reference_id = $1 AND transaction_type = 'CUSTOMER_ADVANCE_DEBIT';", [testAdvanceId]);
-    assert.equal(lt.rows.length, 1);
-    const le = await query('SELECT * FROM ledger_entries WHERE transaction_id = $1;', [lt.rows[0].id]);
-    assert.equal(le.rows.length, 2);
-    const debit = le.rows.find(e => e.entry_type === 'DEBIT');
-    const credit = le.rows.find(e => e.entry_type === 'CREDIT');
-    assert.equal(debit.account_type, 'CUSTOMER_PAYABLE');
-    assert.equal(credit.account_type, 'CASH_BANK');
-    assert.equal(parseFloat(debit.amount), advanceAmount);
-    assert.equal(parseFloat(credit.amount), advanceAmount);
-  });
-
-  // 3. Partial advance recovery
-  await t.test('3. Partial advance recovery: partially recovers advance & credits customer liability ledger', async () => {
-    const claBefore = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
-    const prevBalance = parseFloat(claBefore.rows[0].current_balance);
-
-    const recoveryAmount = 80.00;
-    const res = await request(app)
-      .post(`/api/v1/ledger/advances/${testAdvanceId}/recover`)
-      .set('Authorization', `Bearer ${operatorToken}`)
-      .send({
-        amount: recoveryAmount,
-        notes: 'Cash counter repayment of Rs 80',
-        idempotencyKey: 'IDEM-P12-REC1-' + runSuffix,
-      });
-
-    assert.equal(res.status, 200);
-    assert.equal(res.body.success, true);
-    const data = res.body.data;
-    assert.equal(data.recoveredAmount, recoveryAmount);
-    assert.equal(data.totalRecoveredAmount, 80.00);
-    assert.equal(data.remainingPrincipal, 120.00);
-    assert.equal(data.status, 'ACTIVE');
-
-    // Liability balance increases back by recovered amount
-    const expectedBalance = parseFloat((prevBalance + recoveryAmount).toFixed(2));
-    assert.equal(data.newBalance, expectedBalance);
-  });
-
-  // 4. Full advance recovery
-  await t.test('4. Full advance recovery: settles remaining principal & rejects over-recovery', async () => {
-    // A. Attempting over-recovery (e.g. 150 > remaining 120) must be rejected
-    const overRes = await request(app)
-      .post(`/api/v1/ledger/advances/${testAdvanceId}/recover`)
-      .set('Authorization', `Bearer ${operatorToken}`)
-      .send({
-        amount: 150.00,
-        notes: 'Over-recovery attempt',
-      });
-    assert.equal(overRes.status, 400);
-    assert.ok(overRes.body.error.message.includes('OVER_RECOVERY_PROHIBITED') || overRes.body.error.code === 'OVER_RECOVERY_PROHIBITED');
-
-    // B. Settling exact remaining principal (120.00)
-    const settleRes = await request(app)
-      .post(`/api/v1/ledger/advances/${testAdvanceId}/recover`)
-      .set('Authorization', `Bearer ${operatorToken}`)
-      .send({
-        amount: 120.00,
-        notes: 'Full final settlement',
-        idempotencyKey: 'IDEM-P12-REC2-' + runSuffix,
-      });
-
-    assert.equal(settleRes.status, 200);
-    const data = settleRes.body.data;
-    assert.equal(data.totalRecoveredAmount, 200.00);
-    assert.equal(data.remainingPrincipal, 0.00);
-    assert.equal(data.status, 'FULLY_RECOVERED');
-  });
-
-  // 5. Deduction posting
-  await t.test('5. Deduction posting: authorized charges (veterinary, AI service, insurance) reduce liability balance', async () => {
-    const claBefore = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
-    const prevBalance = parseFloat(claBefore.rows[0].current_balance);
-
-    const deductionAmount = 50.00;
-    const res = await request(app)
-      .post(`/api/v1/ledger/${customer1Id}/deductions`)
-      .set('Authorization', `Bearer ${supervisorToken}`)
-      .send({
-        category: 'VETERINARY_MEDICINE',
-        amount: deductionAmount,
-        description: 'Deworming & Mineral mixture kit',
-        supportingReference: 'VET-INV-891',
-        idempotencyKey: 'IDEM-P12-DED-' + runSuffix,
-      });
-
-    assert.equal(res.status, 201);
-    assert.equal(res.body.success, true);
-    const data = res.body.data;
-    assert.equal(data.category, 'VETERINARY_MEDICINE');
-    assert.equal(data.amount, deductionAmount);
-
-    const expectedBalance = parseFloat((prevBalance - deductionAmount).toFixed(2));
-    assert.equal(data.newBalance, expectedBalance);
-
-    // Verify double-entry journal (Debit Customer Payable, Credit Deduction Income)
-    const lt = await query("SELECT * FROM ledger_transactions WHERE reference_id = $1 AND transaction_type = 'AUTHORIZED_DEDUCTION_DEBIT';", [data.deductionId]);
-    assert.equal(lt.rows.length, 1);
-    const le = await query('SELECT * FROM ledger_entries WHERE transaction_id = $1;', [lt.rows[0].id]);
-    assert.equal(le.rows.length, 2);
-    const debit = le.rows.find(e => e.entry_type === 'DEBIT');
-    const credit = le.rows.find(e => e.entry_type === 'CREDIT');
-    assert.equal(debit.account_type, 'CUSTOMER_PAYABLE');
-    assert.equal(credit.account_type, 'DEDUCTION_INCOME');
-    assert.equal(parseFloat(debit.amount), deductionAmount);
-    assert.equal(parseFloat(credit.amount), deductionAmount);
-  });
-
-  // 6. Duplicate financial event
-  await t.test('6. Duplicate financial event: duplicate idempotency key returns cached receipt without double-posting', async () => {
-    const claBefore = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
-    const balanceBefore = parseFloat(claBefore.rows[0].current_balance);
-
-    // Replay exact same deduction with idempotencyKey: 'IDEM-P12-DED-' + runSuffix
-    const res = await request(app)
-      .post(`/api/v1/ledger/${customer1Id}/deductions`)
-      .set('Authorization', `Bearer ${supervisorToken}`)
-      .send({
-        category: 'VETERINARY_MEDICINE',
-        amount: 50.00,
-        description: 'Deworming & Mineral mixture kit (Replay)',
-        idempotencyKey: 'IDEM-P12-DED-' + runSuffix,
-      });
-
-    assert.equal(res.status, 201);
-    assert.equal(res.body.data.isIdempotentReplay, true);
-
-    // Verify balance is completely unchanged
-    const claAfter = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
-    assert.equal(parseFloat(claAfter.rows[0].current_balance), balanceBefore);
-  });
-
-  // 7. Balanced journal
-  await t.test('7. Balanced journal: every transaction in ledger has SUM(Debits) = SUM(Credits)', async () => {
-    const unbalanced = await query(`
-      SELECT lt.id, lt.amount,
-             COALESCE(SUM(CASE WHEN le.entry_type = 'DEBIT' THEN le.amount ELSE 0 END), 0) AS total_debit,
-             COALESCE(SUM(CASE WHEN le.entry_type = 'CREDIT' THEN le.amount ELSE 0 END), 0) AS total_credit
-      FROM ledger_transactions lt
-      LEFT JOIN ledger_entries le ON le.transaction_id = lt.id
-      WHERE lt.customer_id = $1
-      GROUP BY lt.id, lt.amount
-      HAVING COALESCE(SUM(CASE WHEN le.entry_type = 'DEBIT' THEN le.amount ELSE 0 END), 0) <> COALESCE(SUM(CASE WHEN le.entry_type = 'CREDIT' THEN le.amount ELSE 0 END), 0)
-         OR COALESCE(SUM(CASE WHEN le.entry_type = 'DEBIT' THEN le.amount ELSE 0 END), 0) <> lt.amount;
-    `, [customer1Id]);
-
-    assert.equal(unbalanced.rows.length, 0, 'No unbalanced journal entries permitted');
-  });
-
-  // 8. Unbalanced journal rejection
-  await t.test('8. Unbalanced journal rejection: direct insertion of unbalanced entries is rejected by constraints', async () => {
-    // Attempt inserting invalid entry_type or negative amount
-    await assert.rejects(async () => {
-      await query(`
-        INSERT INTO ledger_entries (transaction_id, account_id, account_type, entry_type, amount)
-        VALUES ('${crypto.randomUUID()}', '${customer1Id}', 'CUSTOMER_PAYABLE', 'INVALID_TYPE', 100.00);
-      `);
+      const settleRes = await poolOrg1.query(
+        `SELECT public.recover_customer_advance($1::uuid, $2::uuid, $3::numeric, $4::varchar, 'Full final settlement') AS result;`,
+        [testAdvanceId, operatorUserId, 120.0, `IDEM-L12-REC2-${suffix}`]
+      );
+      const data = settleRes.rows[0].result;
+      assert.equal(Number(data.totalRecoveredAmount), 200.0);
+      assert.equal(Number(data.remainingPrincipal), 0.0);
+      assert.equal(data.status, 'FULLY_RECOVERED');
     });
 
-    await assert.rejects(async () => {
-      await query(`
-        INSERT INTO ledger_entries (transaction_id, account_id, account_type, entry_type, amount)
-        VALUES ('${crypto.randomUUID()}', '${customer1Id}', 'CUSTOMER_PAYABLE', 'DEBIT', -50.00);
-      `);
+    await t.test('5. Deduction posting: authorized charges reduce liability balance with balanced journal', async () => {
+      const prevBalance = parseFloat(
+        (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance
+      );
+      const deductionAmount = 50.0;
+      const dedRes = await poolOrg1.query(
+        `SELECT public.post_customer_deduction(
+           $1::uuid, $2::uuid, $3::uuid, 'VETERINARY_MEDICINE'::varchar, $4::numeric, $5::text, 'VET-INV-891'::varchar, $6::varchar
+         ) AS result;`,
+        [customer1Id, center1Id, supervisorUserId, deductionAmount, 'Deworming & Mineral mixture kit', `IDEM-L12-DED-${suffix}`]
+      );
+      const data = dedRes.rows[0].result;
+      assert.equal(Number(data.amount), deductionAmount);
+      assert.equal(Number(data.newBalance), parseFloat((prevBalance - deductionAmount).toFixed(2)));
+
+      const lt = await poolOrg1.query("SELECT * FROM ledger_transactions WHERE reference_id = $1 AND transaction_type = 'AUTHORIZED_DEDUCTION_DEBIT';", [data.deductionId]);
+      assert.equal(lt.rows.length, 1);
+      const le = await poolOrg1.query('SELECT * FROM ledger_entries WHERE transaction_id = $1;', [lt.rows[0].id]);
+      assert.equal(le.rows.length, 2);
+      assert.equal(le.rows.find((e) => e.entry_type === 'DEBIT').account_type, 'CUSTOMER_PAYABLE');
+      assert.equal(le.rows.find((e) => e.entry_type === 'CREDIT').account_type, 'DEDUCTION_INCOME');
     });
-  });
 
-  // 9. Running balance
-  await t.test('9. Running balance: current_balance strictly equals Opening + Credits - Debits', async () => {
-    const summaryRes = await request(app)
-      .get(`/api/v1/customers/${customer1Id}/ledger/summary`)
-      .set('Authorization', `Bearer ${adminToken}`);
+    await t.test('6. Duplicate financial event: duplicate idempotency key returns cached receipt without double-posting', async () => {
+      const balanceBefore = parseFloat(
+        (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance
+      );
+      const replayRes = await poolOrg1.query(
+        `SELECT public.post_customer_deduction(
+           $1::uuid, $2::uuid, $3::uuid, 'VETERINARY_MEDICINE'::varchar, 50.00::numeric, 'Replay'::text, NULL, $4::varchar
+         ) AS result;`,
+        [customer1Id, center1Id, supervisorUserId, `IDEM-L12-DED-${suffix}`]
+      );
+      assert.equal(replayRes.rows[0].result.isIdempotentReplay, true);
 
-    assert.equal(summaryRes.status, 200);
-    const s = summaryRes.body.data;
+      const balanceAfter = parseFloat(
+        (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance
+      );
+      assert.equal(balanceAfter, balanceBefore);
+    });
 
-    const calculatedBalance = parseFloat((s.openingBalance + s.totalCredits - s.totalDebits).toFixed(2));
-    assert.equal(s.currentBalance, calculatedBalance);
-  });
+    await t.test('7. Balanced journal: every transaction in ledger has SUM(Debits) = SUM(Credits)', async () => {
+      const unbalanced = await poolOrg1.query(
+        `SELECT lt.id, lt.amount,
+                COALESCE(SUM(CASE WHEN le.entry_type = 'DEBIT' THEN le.amount ELSE 0 END), 0) AS total_debit,
+                COALESCE(SUM(CASE WHEN le.entry_type = 'CREDIT' THEN le.amount ELSE 0 END), 0) AS total_credit
+         FROM ledger_transactions lt
+         LEFT JOIN ledger_entries le ON le.transaction_id = lt.id
+         WHERE lt.customer_id = $1
+         GROUP BY lt.id, lt.amount
+         HAVING COALESCE(SUM(CASE WHEN le.entry_type = 'DEBIT' THEN le.amount ELSE 0 END), 0) <> COALESCE(SUM(CASE WHEN le.entry_type = 'CREDIT' THEN le.amount ELSE 0 END), 0)
+            OR COALESCE(SUM(CASE WHEN le.entry_type = 'DEBIT' THEN le.amount ELSE 0 END), 0) <> lt.amount;`,
+        [customer1Id]
+      );
+      assert.equal(unbalanced.rows.length, 0);
+    });
 
-  // 10. Opening balance
-  await t.test('10. Opening balance: Authorized Admin initializes opening balance & prevents duplicates', async () => {
-    // Customer 2 starts fresh
-    const res = await request(app)
-      .post(`/api/v1/ledger/${customer2Id}/opening-balance`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({
-        amount: 500.00,
-        direction: 'CREDIT',
-        openingDate: '2026-04-01',
-        supportingReference: 'PREV-COOP-AUDIT-2026',
-        idempotencyKey: 'IDEM-P12-OB-' + runSuffix,
-      });
-
-    assert.equal(res.status, 201);
-    assert.equal(res.body.success, true);
-    assert.equal(res.body.data.newBalance, 500.00);
-
-    // Attempting second opening balance for same customer is rejected with 409
-    const dupRes = await request(app)
-      .post(`/api/v1/ledger/${customer2Id}/opening-balance`)
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({
-        amount: 300.00,
-        direction: 'DEBIT',
-        supportingReference: 'ANOTHER-REF',
-      });
-
-    assert.equal(dupRes.status, 409);
-    assert.ok(dupRes.body.error.message.includes('OPENING_BALANCE_EXISTS') || dupRes.body.error.code === 'OPENING_BALANCE_EXISTS');
-  });
-
-  // 11. Reversal
-  await t.test('11. Reversal: supervisor collection reversal creates debit reversal transaction and restores prior balance', async () => {
-    const claBefore = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
-    const prevBalance = parseFloat(claBefore.rows[0].current_balance);
-
-    const colRes = await query('SELECT total_amount FROM milk_collections WHERE id = $1;', [testCollectionId]);
-    const colAmount = parseFloat(colRes.rows[0].total_amount);
-
-    // Execute supervisor reversal
-    const revRes = await query(
-      `SELECT public.adjust_milk_collection($1::uuid, $2::uuid, 'Reversal of erroneous intake reading'::text, 'FULL_REVERSAL'::varchar, NULL, NULL, NULL) AS result;`,
-      [testCollectionId, supervisorUserId]
-    );
-
-    const rev = revRes.rows[0].result;
-    assert.equal(rev.status, 'REVERSED');
-    assert.equal(rev.reversedAmount, colAmount);
-    assert.equal(rev.newBalance, parseFloat((prevBalance - colAmount).toFixed(2)));
-
-    // Verify COLLECTION_REVERSAL_DEBIT ledger transaction
-    const lt = await query("SELECT * FROM ledger_transactions WHERE reference_id = $1 AND transaction_type = 'COLLECTION_REVERSAL_DEBIT';", [testCollectionId]);
-    assert.equal(lt.rows.length, 1);
-    assert.equal(lt.rows[0].direction, 'DEBIT');
-  });
-
-  // 12. Adjustment approval
-  await t.test('12. Adjustment approval: Supervisor adjustment with mandatory reason succeeds and updates balance', async () => {
-    const claBefore = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
-    const prevBalance = parseFloat(claBefore.rows[0].current_balance);
-
-    const adjustmentAmount = 150.00;
-    const res = await request(app)
-      .post(`/api/v1/ledger/${customer1Id}/adjustments`)
-      .set('Authorization', `Bearer ${supervisorToken}`)
-      .send({
-        direction: 'CREDIT',
-        amount: adjustmentAmount,
-        reason: 'Authorized festive seasonal incentive approved by Board',
-        idempotencyKey: 'IDEM-P12-ADJ-' + runSuffix,
-      });
-
-    assert.equal(res.status, 201);
-    assert.equal(res.body.success, true);
-    const data = res.body.data;
-    assert.equal(data.newBalance, parseFloat((prevBalance + adjustmentAmount).toFixed(2)));
-  });
-
-  // 13. Unauthorized adjustment
-  await t.test('13. Unauthorized adjustment: Operator and Farmer cannot perform ledger adjustments (403 Forbidden)', async () => {
-    // Collection Operator attempted adjustment
-    const opRes = await request(app)
-      .post(`/api/v1/ledger/${customer1Id}/adjustments`)
-      .set('Authorization', `Bearer ${operatorToken}`)
-      .send({
-        direction: 'CREDIT',
-        amount: 100.00,
-        reason: 'Unauthorized bonus attempt',
-      });
-    assert.equal(opRes.status, 403);
-
-    // Customer attempted adjustment
-    const custRes = await request(app)
-      .post(`/api/v1/ledger/${customer1Id}/adjustments`)
-      .set('Authorization', `Bearer ${customer1Token}`)
-      .send({
-        direction: 'CREDIT',
-        amount: 500.00,
-        reason: 'Customer trying to credit self',
-      });
-    assert.equal(custRes.status, 403);
-  });
-
-  // 14. Immutable historical transactions
-  await t.test('14. Immutable historical transactions: direct UPDATE or DELETE on ledger_transactions triggers database exception', async () => {
-    const lt = await query('SELECT id FROM ledger_transactions WHERE customer_id = $1 LIMIT 1;', [customer1Id]);
-    assert.ok(lt.rows.length > 0);
-    const txnId = lt.rows[0].id;
-
-    // Direct UPDATE attempt must fail
-    await assert.rejects(async () => {
-      await query("UPDATE ledger_transactions SET amount = 9999.00 WHERE id = $1;", [txnId]);
-    }, /CANNOT_MUTATE_LEDGER/);
-
-    // Direct DELETE attempt must fail
-    await assert.rejects(async () => {
-      await query("DELETE FROM ledger_transactions WHERE id = $1;", [txnId]);
-    }, /CANNOT_DELETE_LEDGER/);
-  });
-
-  // 15. Customer ownership
-  await t.test('15. Customer ownership: customer reads only own ledger; cross-customer access is forbidden', async () => {
-    // Customer 1 accessing Customer 1's ledger summary -> 200 OK
-    const ownRes = await request(app)
-      .get(`/api/v1/customers/${customer1Id}/ledger/summary`)
-      .set('Authorization', `Bearer ${customer1Token}`);
-    assert.equal(ownRes.status, 200);
-    assert.equal(ownRes.body.data.customerId, customer1Id);
-
-    // Customer 1 attempting to access Customer 2's ledger summary -> 403 Forbidden
-    const otherRes = await request(app)
-      .get(`/api/v1/customers/${customer2Id}/ledger/summary`)
-      .set('Authorization', `Bearer ${customer1Token}`);
-    assert.equal(otherRes.status, 403);
-    assert.equal(otherRes.body.error.code, 'CUSTOMER_ISOLATION_VIOLATION');
-  });
-
-  // 16. Cross-organization isolation
-  await t.test('16. Cross-organization isolation: Staff from Org 2 cannot read or post to Org 1 customer ledger', async () => {
-    // Org 2 Admin trying to read Org 1 customer ledger
-    const crossRes = await request(app)
-      .get(`/api/v1/customers/${customer1Id}/ledger/summary`)
-      .set('Authorization', `Bearer ${org2AdminToken}`);
-    assert.equal(crossRes.status, 403);
-    assert.equal(crossRes.body.error.code, 'CROSS_ORGANIZATION_ACCESS_DENIED');
-
-    // Org 2 Admin trying to post advance to Org 1 customer
-    const postRes = await request(app)
-      .post(`/api/v1/ledger/${customer1Id}/advances`)
-      .set('Authorization', `Bearer ${org2AdminToken}`)
-      .send({
-        amount: 100.00,
-        reason: 'Cross org advance attempt',
-      });
-    assert.equal(postRes.status, 403);
-    assert.equal(postRes.body.error.code, 'CROSS_ORGANIZATION_ACCESS_DENIED');
-  });
-
-  // 17. Reconciliation success
-  await t.test('17. Reconciliation success: clean customer ledger returns isReconciled: true and 0 discrepancies', async () => {
-    const recRes = await request(app)
-      .post('/api/v1/ledger/reconcile')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ customerId: customer1Id });
-
-    assert.equal(recRes.status, 200);
-    const report = recRes.body.data;
-    assert.equal(report.customerId, customer1Id);
-    assert.equal(report.isReconciled, true);
-    assert.equal(report.discrepancyCount, 0);
-    assert.equal(report.accountBalance, report.computedBalance);
-    assert.equal(report.discrepancies.length, 0);
-  });
-
-  // 18. Reconciliation mismatch detection
-  await t.test('18. Reconciliation mismatch detection: detects running balance drift without auto-correcting', async () => {
-    // Artificially tamper running balance in customer_ledger_accounts to simulate corruption
-    await query("UPDATE customer_ledger_accounts SET current_balance = current_balance + 100.00 WHERE customer_id = $1;", [customer2Id]);
-
-    const recRes = await request(app)
-      .post('/api/v1/ledger/reconcile')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send({ customerId: customer2Id });
-
-    assert.equal(recRes.status, 200);
-    const report = recRes.body.data;
-    assert.equal(report.isReconciled, false);
-    assert.ok(report.discrepancyCount > 0);
-
-    const mismatch = report.discrepancies.find(d => d.type === 'RUNNING_BALANCE_MISMATCH');
-    assert.ok(mismatch, 'Must detect RUNNING_BALANCE_MISMATCH');
-    assert.equal(mismatch.difference, 100.00);
-
-    // Restore correct balance
-    await query("UPDATE customer_ledger_accounts SET current_balance = current_balance - 100.00 WHERE customer_id = $1;", [customer2Id]);
-  });
-
-  // 19. Decimal precision
-  await t.test('19. Decimal precision: financial calculations use exact PostgreSQL NUMERIC arithmetic without floating-point error', async () => {
-    // 0.10 + 0.20 in JavaScript floating point produces 0.30000000000000004
-    // Verify PostgreSQL NUMERIC produces exact 0.30
-    const precRes = await query(`
-      SELECT 
-        (0.10::numeric(10,2) + 0.20::numeric(10,2)) AS exact_sum,
-        (123456.78::numeric(12,2) - 0.01::numeric(12,2)) AS exact_sub;
-    `);
-    assert.equal(precRes.rows[0].exact_sum, '0.30');
-    assert.equal(precRes.rows[0].exact_sub, '123456.77');
-  });
-
-  // 20. Database rollback after failed posting
-  await t.test('20. Database rollback: transactional failure leaves zero partial entries in ledger or accounts', async () => {
-    const claBefore = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
-    const balanceBefore = claBefore.rows[0].current_balance;
-
-    const txnCountBefore = await query('SELECT COUNT(*) FROM ledger_transactions WHERE customer_id = $1;', [customer1Id]);
-    const countBefore = txnCountBefore.rows[0].count;
-
-    // Attempt posting deduction with negative amount (triggers check constraint violation)
-    await assert.rejects(async () => {
-      await query(
-        `SELECT public.post_customer_deduction($1::uuid, $2::uuid, $3::uuid, 'VETERINARY_MEDICINE'::varchar, -100.00::numeric, 'Invalid'::text, NULL, NULL);`,
-        [customer1Id, center1Id, supervisorUserId]
+    await t.test('8. Unbalanced journal rejection: direct insertion of invalid/negative entries is rejected by constraints', async () => {
+      await assert.rejects(() =>
+        poolOrg1.query(
+          `INSERT INTO ledger_entries (transaction_id, account_id, account_type, entry_type, amount)
+           VALUES ($1, $2, 'CUSTOMER_PAYABLE', 'INVALID_TYPE', 100.00);`,
+          [crypto.randomUUID(), customer1Id]
+        )
+      );
+      await assert.rejects(() =>
+        poolOrg1.query(
+          `INSERT INTO ledger_entries (transaction_id, account_id, account_type, entry_type, amount)
+           VALUES ($1, $2, 'CUSTOMER_PAYABLE', 'DEBIT', -50.00);`,
+          [crypto.randomUUID(), customer1Id]
+        )
       );
     });
 
-    // Verify balance and transaction count are completely unchanged
-    const claAfter = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
-    assert.equal(claAfter.rows[0].current_balance, balanceBefore);
+    await t.test('9. Running balance summary: HTTP summary endpoint matches authoritative tenant DB balance', async () => {
+      const dbBal = parseFloat(
+        (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance
+      );
+      const summaryRes = await request(app)
+        .get(`/api/v1/ledger/summary?customerId=${customer1Id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      assert.equal(summaryRes.status, 200);
+      assert.equal(summaryRes.body.success, true);
+      assert.equal(summaryRes.body.data.customerId, customer1Id);
+      assert.equal(summaryRes.body.data.currentBalance, dbBal);
 
-    const txnCountAfter = await query('SELECT COUNT(*) FROM ledger_transactions WHERE customer_id = $1;', [customer1Id]);
-    assert.equal(txnCountAfter.rows[0].count, countBefore);
-  });
+      const acctRes = await request(app)
+        .get(`/api/v1/ledger/accounts/${customer1Id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      assert.equal(acctRes.status, 200);
+      assert.equal(acctRes.body.currentBalance, dbBal);
+    });
 
-  // 21. Feed debit integration contract
-  await t.test('21. Feed debit integration contract: verifies defined interface contract for P14 feed integration', async () => {
-    const claBefore = await query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id]);
-    const prevBalance = parseFloat(claBefore.rows[0].current_balance);
+    await t.test('10. Opening balance: initializes opening balance & prevents duplicates', async () => {
+      const obRes = await poolOrg1.query(
+        `SELECT public.post_customer_opening_balance(
+           $1::uuid, $2::uuid, $3::uuid, 500.00::numeric, 'CREDIT'::varchar, '2026-04-01'::date, 'PREV-COOP-AUDIT-2026'::varchar, $4::varchar
+         ) AS result;`,
+        [customer2Id, center1Id, adminUserId, `IDEM-L12-OB-${suffix}`]
+      );
+      assert.equal(Number(obRes.rows[0].result.newBalance), 500.0);
 
-    const feedDebitAmount = 750.00;
-    const feedContractPayload = {
-      customerId: customer1Id,
-      centerId: center1Id,
-      organizationId: org1Id,
-      feedSaleId: crypto.randomUUID(),
-      saleInvoiceNumber: 'FEED-INV-2026-9901',
-      totalDebitAmount: feedDebitAmount,
-      items: [
-        {
-          feedProductId: crypto.randomUUID(),
-          productName: 'NutriFeed Super Cattle Pellets 50kg',
-          quantityBags: 1,
-          unitPrice: 750.00,
-          itemTotal: 750.00,
-        },
-      ],
-      soldByUserId: operatorUserId,
-      idempotencyKey: 'IDEM-P12-FEED-' + runSuffix,
-    };
+      await assert.rejects(
+        () =>
+          poolOrg1.query(
+            `SELECT public.post_customer_opening_balance(
+               $1::uuid, $2::uuid, $3::uuid, 300.00::numeric, 'DEBIT'::varchar, CURRENT_DATE, 'ANOTHER-REF'::varchar, NULL
+             ) AS result;`,
+            [customer2Id, center1Id, adminUserId]
+          ),
+        /OPENING_BALANCE_EXISTS/
+      );
+    });
 
-    const res = await request(app)
-      .post('/api/v1/ledger/feed-debit')
-      .set('Authorization', `Bearer ${adminToken}`)
-      .send(feedContractPayload);
+    await t.test('11. Reversal: supervisor collection reversal creates debit reversal transaction and restores prior balance', async () => {
+      const prevBalance = parseFloat(
+        (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance
+      );
+      const colAmount = parseFloat(
+        (await poolOrg1.query('SELECT total_amount FROM milk_collections WHERE id = $1;', [testCollectionId])).rows[0].total_amount
+      );
+      const revRes = await poolOrg1.query(
+        `SELECT public.adjust_milk_collection($1::uuid, $2::uuid, 'Reversal of erroneous intake reading'::text, 'FULL_REVERSAL'::varchar, NULL, NULL, NULL) AS result;`,
+        [testCollectionId, supervisorUserId]
+      );
+      const rev = revRes.rows[0].result;
+      assert.equal(rev.status, 'REVERSED');
+      assert.equal(Number(rev.reversedAmount), colAmount);
+      assert.equal(Number(rev.newBalance), parseFloat((prevBalance - colAmount).toFixed(2)));
 
-    assert.equal(res.status, 201);
-    assert.equal(res.body.success, true);
-    const data = res.body.data;
-    assert.equal(data.totalDebitAmount, feedDebitAmount);
+      const lt = await poolOrg1.query("SELECT * FROM ledger_transactions WHERE reference_id = $1 AND transaction_type = 'COLLECTION_REVERSAL_DEBIT';", [testCollectionId]);
+      assert.equal(lt.rows.length, 1);
+      assert.equal(lt.rows[0].direction, 'DEBIT');
+    });
 
-    const expectedBalance = parseFloat((prevBalance - feedDebitAmount).toFixed(2));
-    assert.equal(data.newBalance, expectedBalance);
+    await t.test('12. Adjustment approval: authorized adjustment endpoint updates tenant balance with authenticated operatorId', async () => {
+      const prevBalance = parseFloat(
+        (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance
+      );
+      const adjAmount = 150.0;
+      const res = await request(app)
+        .post('/api/v1/ledger/adjustment')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          customerId: customer1Id,
+          type: 'CREDIT',
+          amount: adjAmount,
+          reason: 'Authorized festive seasonal incentive approved by Board',
+          operatorId: operatorUserId, // Attempted body override must be ignored in favor of req.user.userId
+        });
+      assert.equal(res.status, 200);
+      assert.equal(res.body.success, true);
 
-    // Verify double-entry journal: Debit Customer Payable, Credit Feed Inventory
-    const lt = await query("SELECT * FROM ledger_transactions WHERE reference_id = $1 AND transaction_type = 'FEED_PURCHASE_DEBIT';", [feedContractPayload.feedSaleId]);
-    assert.equal(lt.rows.length, 1);
-    const le = await query('SELECT * FROM ledger_entries WHERE transaction_id = $1;', [lt.rows[0].id]);
-    assert.equal(le.rows.length, 2);
-    const debit = le.rows.find(e => e.entry_type === 'DEBIT');
-    const credit = le.rows.find(e => e.entry_type === 'CREDIT');
-    assert.equal(debit.account_type, 'CUSTOMER_PAYABLE');
-    assert.equal(credit.account_type, 'FEED_INVENTORY');
-    assert.equal(parseFloat(debit.amount), feedDebitAmount);
-    assert.equal(parseFloat(credit.amount), feedDebitAmount);
-  });
+      const newBalance = parseFloat(
+        (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance
+      );
+      assert.equal(newBalance, parseFloat((prevBalance + adjAmount).toFixed(2)));
 
-  // 22. Historical P10 collection regression
-  await t.test('22. Historical P10 collection regression: verified milk collection posting functions identically without regression', async () => {
-    // Query existing collection and verify its ledger entry and receipt
-    const colRes = await query(
-      `SELECT mc.id, mc.total_amount, lt.id AS txn_id, lt.transaction_type, lt.balance_after
-       FROM milk_collections mc
-       JOIN ledger_transactions lt ON lt.reference_id = mc.id AND lt.reference_entity = 'MILK_COLLECTION' AND lt.transaction_type = 'MILK_COLLECTION_CREDIT'
-       ORDER BY mc.created_at DESC
-       LIMIT 1;`
-    );
-    assert.ok(colRes.rows.length > 0, 'Milk collection must have valid ledger transaction');
-    const col = colRes.rows[0];
-    assert.equal(col.transaction_type, 'MILK_COLLECTION_CREDIT');
+      const latestTxn = await poolOrg1.query(
+        `SELECT created_by, amount, direction FROM ledger_transactions WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1;`,
+        [customer1Id]
+      );
+      assert.equal(latestTxn.rows[0].created_by, adminUserId, 'Server must record req.user.userId, never client-supplied operatorId');
+    });
 
-    // Verify Financial Reports API endpoints
-    const balancesReportRes = await request(app)
-      .get('/api/v1/ledger/reports/balances')
-      .set('Authorization', `Bearer ${adminToken}`);
-    assert.equal(balancesReportRes.status, 200);
-    assert.ok(balancesReportRes.body.data.totalCustomers >= 2);
+    await t.test('13. Unauthorized adjustment: Operator and Farmer cannot perform ledger adjustments (403 Forbidden)', async () => {
+      const opRes = await request(app)
+        .post('/api/v1/ledger/adjustment')
+        .set('Authorization', `Bearer ${operatorToken}`)
+        .send({
+          customerId: customer1Id,
+          type: 'CREDIT',
+          amount: 100.0,
+          reason: 'Unauthorized bonus attempt',
+        });
+      assert.equal(opRes.status, 403);
 
-    const dailySummaryRes = await request(app)
-      .get('/api/v1/ledger/reports/daily-summary')
-      .set('Authorization', `Bearer ${adminToken}`);
-    assert.equal(dailySummaryRes.status, 200);
-    assert.ok(dailySummaryRes.body.data.summary.length >= 1);
+      const custRes = await request(app)
+        .post('/api/v1/ledger/adjustment')
+        .set('Authorization', `Bearer ${customer1Token}`)
+        .send({
+          customerId: customer1Id,
+          type: 'CREDIT',
+          amount: 500.0,
+          reason: 'Customer trying to credit self',
+        });
+      assert.equal(custRes.status, 403);
+    });
 
-    const centerLiabilitiesRes = await request(app)
-      .get('/api/v1/ledger/reports/center-liabilities')
-      .set('Authorization', `Bearer ${adminToken}`);
-    assert.equal(centerLiabilitiesRes.status, 200);
-    assert.ok(centerLiabilitiesRes.body.data.centers.length >= 1);
+    await t.test('14. Immutable historical transactions: direct UPDATE or DELETE on ledger_transactions triggers database exception', async () => {
+      const lt = await poolOrg1.query('SELECT id FROM ledger_transactions WHERE customer_id = $1 LIMIT 1;', [customer1Id]);
+      assert.ok(lt.rows.length > 0);
+      const txnId = lt.rows[0].id;
 
-    const advancesReportRes = await request(app)
-      .get('/api/v1/ledger/reports/advances')
-      .set('Authorization', `Bearer ${adminToken}`);
-    assert.equal(advancesReportRes.status, 200);
+      await assert.rejects(
+        () => poolOrg1.query('UPDATE ledger_transactions SET amount = 9999.00 WHERE id = $1;', [txnId]),
+        /CANNOT_MUTATE_LEDGER/
+      );
+      await assert.rejects(
+        () => poolOrg1.query('DELETE FROM ledger_transactions WHERE id = $1;', [txnId]),
+        /CANNOT_DELETE_LEDGER/
+      );
+    });
 
-    const registerReportRes = await request(app)
-      .get('/api/v1/ledger/reports/register')
-      .set('Authorization', `Bearer ${adminToken}`);
-    assert.equal(registerReportRes.status, 200);
-    assert.ok(registerReportRes.body.data.transactions.length >= 3);
+    await t.test('15. Customer ownership: customer reads only own ledger; cross-customer access is forbidden', async () => {
+      const ownRes = await request(app)
+        .get('/api/v1/ledger/summary')
+        .set('Authorization', `Bearer ${customer1Token}`);
+      assert.equal(ownRes.status, 200);
+      assert.equal(ownRes.body.data.customerId, customer1Id);
 
-    // Verify statement API
-    const statementRes = await request(app)
-      .get(`/api/v1/customers/${customer1Id}/ledger/statement`)
-      .set('Authorization', `Bearer ${adminToken}`);
-    assert.equal(statementRes.status, 200);
-    assert.ok(statementRes.body.data.transactions.length >= 2);
+      const otherRes = await request(app)
+        .get(`/api/v1/ledger/accounts/${customer2Id}`)
+        .set('Authorization', `Bearer ${customer1Token}`);
+      assert.equal(otherRes.status, 403);
+    });
 
-    // Least-privilege verification: Collection Operator cannot access full customer statement or transactions
-    const opStatementRes = await request(app)
-      .get(`/api/v1/customers/${customer1Id}/ledger/statement`)
-      .set('Authorization', `Bearer ${operatorToken}`);
-    assert.equal(opStatementRes.status, 403);
-    assert.equal(opStatementRes.body.error.code, 'STAFF_FINANCIAL_ACCESS_DENIED');
+    await t.test('16. Cross-organization isolation: Staff from Org 2 cannot read or post to Org 1 customer ledger', async () => {
+      const crossRead = await request(app)
+        .get(`/api/v1/ledger/accounts/${customer1Id}?organizationId=${org1Id}`)
+        .set('Authorization', `Bearer ${org2AdminToken}`);
+      assert.equal(crossRead.status, 403);
 
-    const opTxnRes = await request(app)
-      .get(`/api/v1/ledger/${customer1Id}/transactions`)
-      .set('Authorization', `Bearer ${operatorToken}`);
-    assert.equal(opTxnRes.status, 403);
-    assert.equal(opTxnRes.body.error.code, 'STAFF_FINANCIAL_ACCESS_DENIED');
-  });
+      const crossAdj = await request(app)
+        .post('/api/v1/ledger/adjustment')
+        .set('Authorization', `Bearer ${org2AdminToken}`)
+        .send({
+          organizationId: org1Id,
+          customerId: customer1Id,
+          type: 'DEBIT',
+          amount: 50.0,
+          reason: 'Cross org adjustment attempt',
+        });
+      assert.equal(crossAdj.status, 403);
+
+      assert.equal(await ledgerRepo.findByCustomer(customer1Id, org2Id), null);
+    });
+
+    await t.test('17. Reconciliation success: clean customer ledger returns isReconciled: true and 0 discrepancies', async () => {
+      const recRes = await poolOrg1.query('SELECT public.reconcile_customer_ledger($1::uuid, $2::uuid) AS result;', [
+        customer1Id,
+        adminUserId,
+      ]);
+      const report = recRes.rows[0].result;
+      assert.equal(report.customerId, customer1Id);
+      assert.equal(report.isReconciled, true);
+      assert.equal(report.discrepancyCount, 0);
+      assert.equal(Number(report.accountBalance), Number(report.computedBalance));
+    });
+
+    await t.test('18. Reconciliation mismatch detection: detects running balance drift without auto-correcting', async () => {
+      await poolOrg1.query('UPDATE customer_ledger_accounts SET current_balance = current_balance + 100.00 WHERE customer_id = $1;', [customer2Id]);
+      const recRes = await poolOrg1.query('SELECT public.reconcile_customer_ledger($1::uuid, $2::uuid) AS result;', [
+        customer2Id,
+        adminUserId,
+      ]);
+      const report = recRes.rows[0].result;
+      assert.equal(report.isReconciled, false);
+      assert.ok(report.discrepancyCount > 0);
+      const mismatch = report.discrepancies.find((d) => d.type === 'RUNNING_BALANCE_MISMATCH');
+      assert.ok(mismatch);
+      assert.equal(Number(mismatch.difference), 100.0);
+
+      await poolOrg1.query('UPDATE customer_ledger_accounts SET current_balance = current_balance - 100.00 WHERE customer_id = $1;', [customer2Id]);
+    });
+
+    await t.test('19. Decimal precision: financial calculations use exact PostgreSQL NUMERIC arithmetic without floating-point error', async () => {
+      const precRes = await poolOrg1.query(`
+        SELECT
+          (0.10::numeric(10,2) + 0.20::numeric(10,2)) AS exact_sum,
+          (123456.78::numeric(12,2) - 0.01::numeric(12,2)) AS exact_sub;
+      `);
+      assert.equal(precRes.rows[0].exact_sum, '0.30');
+      assert.equal(precRes.rows[0].exact_sub, '123456.77');
+    });
+
+    await t.test('20. Database rollback: transactional failure leaves zero partial entries in ledger or accounts', async () => {
+      const balanceBefore = (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance;
+      const countBefore = (await poolOrg1.query('SELECT COUNT(*) FROM ledger_transactions WHERE customer_id = $1;', [customer1Id])).rows[0].count;
+
+      await assert.rejects(() =>
+        poolOrg1.query(
+          `SELECT public.post_customer_deduction($1::uuid, $2::uuid, $3::uuid, 'VETERINARY_MEDICINE'::varchar, -100.00::numeric, 'Invalid'::text, NULL, NULL);`,
+          [customer1Id, center1Id, supervisorUserId]
+        )
+      );
+
+      const balanceAfter = (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance;
+      const countAfter = (await poolOrg1.query('SELECT COUNT(*) FROM ledger_transactions WHERE customer_id = $1;', [customer1Id])).rows[0].count;
+      assert.equal(balanceAfter, balanceBefore);
+      assert.equal(countAfter, countBefore);
+    });
+
+    await t.test('21. Feed debit via PostgresLedgerRepository.save(): double-entry journal, idempotency & actor enforcement', async () => {
+      const accountBefore = await ledgerRepo.findByCustomer(customer1Id, org1Id);
+      assert.ok(accountBefore);
+      const prevBal = accountBefore.currentBalance;
+      const feedDebitAmount = 750.0;
+      const feedSaleId = crypto.randomUUID();
+      const feedEntry = accountBefore.postDebit(feedDebitAmount, 'FEED_DEBIT', 'Feed Purchase Invoice #FEED-2026-9901', feedSaleId);
+      const idempotencyKey = `IDEM-L12-FEED-${suffix}`;
+
+      // Missing actor must reject
+      await assert.rejects(
+        () => ledgerRepo.save(accountBefore, feedEntry),
+        (err) => err.name === 'DomainValidationError' && err.code === 'INVALID_OPERATOR'
+      );
+
+      await ledgerRepo.save(accountBefore, feedEntry, { operatorId: operatorUserId, idempotencyKey });
+      // Idempotent replay must not double-debit
+      await ledgerRepo.save(accountBefore, feedEntry, { operatorId: operatorUserId, idempotencyKey });
+
+      const expectedBal = parseFloat((prevBal - feedDebitAmount).toFixed(2));
+      const accountAfter = await ledgerRepo.findByCustomer(customer1Id, org1Id);
+      assert.equal(accountAfter.currentBalance, expectedBal);
+
+      const le = await poolOrg1.query('SELECT * FROM ledger_entries WHERE transaction_id = $1;', [feedEntry.id]);
+      assert.equal(le.rows.length, 2);
+      assert.equal(le.rows.find((e) => e.entry_type === 'DEBIT').account_type, 'CUSTOMER_PAYABLE');
+      assert.equal(le.rows.find((e) => e.entry_type === 'CREDIT').account_type, 'FEED_INVENTORY');
+    });
+
+    await t.test('22. Payout, Ledger Entries, Reports & Operator Least-Privilege Verification', async () => {
+      const balBeforePayout = (await ledgerRepo.findByCustomer(customer1Id, org1Id)).currentBalance;
+      const payoutAmount = 100.0;
+
+      const payRes = await request(app)
+        .post('/api/v1/payments')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          customerId: customer1Id,
+          amount: payoutAmount,
+          paymentMethod: 'BANK_TRANSFER',
+          transactionReference: `UTR-L12-${suffix}`,
+          notes: 'Payout settlement test',
+        });
+      assert.equal(payRes.status, 201);
+      assert.equal(payRes.body.success, true);
+
+      const balAfterPayout = (await ledgerRepo.findByCustomer(customer1Id, org1Id)).currentBalance;
+      assert.equal(balAfterPayout, parseFloat((balBeforePayout - payoutAmount).toFixed(2)));
+
+      const entriesRes = await request(app)
+        .get(`/api/v1/ledger/entries?customerId=${customer1Id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      assert.equal(entriesRes.status, 200);
+      assert.ok(entriesRes.body.count >= 4);
+
+      const paymentsRes = await request(app)
+        .get('/api/v1/payments')
+        .set('Authorization', `Bearer ${adminToken}`);
+      assert.equal(paymentsRes.status, 200);
+      assert.ok(paymentsRes.body.count >= 1);
+
+      const colReportRes = await request(app)
+        .get('/api/v1/reports/collections')
+        .set('Authorization', `Bearer ${adminToken}`);
+      assert.equal(colReportRes.status, 200);
+      assert.equal(colReportRes.body.success, true);
+
+      // Collection operator lacks billing:read/passbook:view_own/collections:view_all on /ledger/entries
+      const opEntriesRes = await request(app)
+        .get(`/api/v1/ledger/entries?customerId=${customer1Id}`)
+        .set('Authorization', `Bearer ${operatorToken}`);
+      assert.equal(opEntriesRes.status, 403);
+    });
+  } finally {
+    try {
+      const { tenantDbManager } = await import('../dist/infrastructure/database/TenantDatabaseManager.js');
+      const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+      await tenantDbManager.closeAllPools().catch(() => {});
+      await db.close().catch(() => {});
+    } catch {}
+    await poolCtrl?.end().catch(() => {});
+    await poolOrg1?.end().catch(() => {});
+    await poolOrg2?.end().catch(() => {});
+    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameOrg1} WITH (FORCE);`).catch(() => {});
+    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameOrg2} WITH (FORCE);`).catch(() => {});
+    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameCtrl} WITH (FORCE);`).catch(() => {});
+    await adminPool.end().catch(() => {});
+  }
 });

@@ -1,0 +1,76 @@
+name: RESTART-03 PostgreSQL 17 Repository Verification
+
+on:
+  pull_request:
+    branches:
+      - main
+      - fix/cloudflare-pages-production-deploy
+  push:
+    branches:
+      - fix/cloudflare-pages-production-deploy
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres17-repository-gate:
+    name: PostgreSQL 17 Migration & Repository Isolation Gate
+    runs-on: ubuntu-latest
+
+    services:
+      postgres17:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: dfarm_verify
+          POSTGRES_PASSWORD: dfarm_verify_local
+          POSTGRES_DB: dfarm_central
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd="pg_isready -U dfarm_verify -d dfarm_central"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=15
+
+    env:
+      NODE_ENV: test
+      TEST_POSTGRES_URL: postgresql://dfarm_verify:dfarm_verify_local@127.0.0.1:55432/dfarm_central
+      REQUIRE_REAL_POSTGRES: "1"
+      TEST_REAL_POSTGRES: "1"
+      DATABASE_TLS_MODE: disable
+      TENANT_POOL_CONNECTION_TIMEOUT_MS: "5000"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build backend and database packages
+        run: npm run build:backend
+
+      - name: Validate database migration manifests
+        run: npm run db:validate
+
+      - name: Run RESTART-03 real PostgreSQL 17 isolation suite
+        run: node --test services/backend/tests/restart03-real-postgres.test.js
+
+      - name: Run RESTART-03.2 real PostgreSQL 17 SQL concurrency suite
+        run: node --test services/backend/tests/restart032-real-postgres.test.js
+
+      - name: Run RESTART-03.3 real PostgreSQL 17 actual repository suite
+        run: node --test services/backend/tests/restart033-real-postgres-repositories.test.js
+
+      - name: Run isolated PostgreSQL 17 customer ledger accounting suite
+        run: node --test services/backend/tests/customer-ledger-accounting.test.js
+
+      - name: Run concurrent collection idempotency & financial atomicity suite
+        run: node --test services/backend/tests/concurrent-idempotency-financial.test.js

@@ -475,6 +475,52 @@ test('RESTART-03.2: Operational Repositories, Multi-Dairy Discovery & Dairy Admi
       assert.equal(finalBal, balBefore + 60);
     });
 
+    await t.test('2.2b PostgresLedgerRepository.save(): mandatory actor, idempotent replay, stale-balance concurrency & rollback', async () => {
+      const staleSnapshot1 = await ledgerRepo.findByCustomer(multiA.custId, orgA);
+      const staleSnapshot2 = await ledgerRepo.findByCustomer(multiA.custId, orgA);
+      const baseBal = staleSnapshot1.currentBalance;
+
+      // 1. Missing or invalid actor rejected before any write
+      const missingOpEntry = staleSnapshot1.postCredit(50, 'Missing operator');
+      await assert.rejects(
+        () => ledgerRepo.save(staleSnapshot1, missingOpEntry),
+        (e) => e.name === 'DomainValidationError' && e.code === 'INVALID_OPERATOR'
+      );
+      await assert.rejects(
+        () => ledgerRepo.save(staleSnapshot1, missingOpEntry, { operatorId: fakeOperator }),
+        (e) => e.name === 'DomainValidationError' && e.code === 'INVALID_OPERATOR'
+      );
+
+      // 2. Concurrent identical entry ID (same entry submitted twice concurrently) -> applied once
+      const dupAccount1 = await ledgerRepo.findByCustomer(multiA.custId, orgA);
+      const dupAccount2 = await ledgerRepo.findByCustomer(multiA.custId, orgA);
+      const dupEntry = dupAccount1.postCredit(40, 'Duplicate save concurrency');
+      await Promise.all([
+        ledgerRepo.save(dupAccount1, dupEntry, { operatorId: adminA }),
+        ledgerRepo.save(dupAccount2, { ...dupEntry }, { operatorId: adminA }),
+      ]);
+      const afterDup = await ledgerRepo.findByCustomer(multiA.custId, orgA);
+      assert.equal(afterDup.currentBalance, baseBal + 40);
+      const dupLines = await tenantDbA.query(`SELECT COUNT(*)::int AS c FROM ledger_entries WHERE transaction_id = $1;`, [dupEntry.id]);
+      assert.equal(Number(dupLines.rows[0].c), 2);
+
+      // 3. Concurrent distinct credit & debit using stale snapshots -> authoritative DB balance preserved
+      const sCredit = await ledgerRepo.findByCustomer(multiA.custId, orgA);
+      const sDebit = await ledgerRepo.findByCustomer(multiA.custId, orgA);
+      const cEntry = sCredit.postCredit(100, 'Concurrent save credit');
+      const dEntry = sDebit.postDebit(30, 'FEED_DEBIT', 'Concurrent save debit');
+      await Promise.all([
+        ledgerRepo.save(sCredit, cEntry, { operatorId: adminA }),
+        ledgerRepo.save(sDebit, dEntry, { operatorId: adminA }),
+      ]);
+      const afterRace = await ledgerRepo.findByCustomer(multiA.custId, orgA);
+      assert.equal(afterRace.currentBalance, baseBal + 40 + 100 - 30);
+
+      // 4. Subsequent replay of already-committed entry -> zero balance change
+      await ledgerRepo.save(sCredit, cEntry, { operatorId: adminA });
+      assert.equal((await ledgerRepo.findByCustomer(multiA.custId, orgA)).currentBalance, baseBal + 110);
+    });
+
     await t.test('2.3 Ledger HTTP routes block cross-dairy requests, require org context & propagate outage 503', async () => {
       const crossDairyRes = await request(app)
         .get(`/api/v1/ledger/entries?organizationId=${orgB}`)

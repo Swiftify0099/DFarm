@@ -81,11 +81,14 @@ export interface ICollectionTransactionRepository {
 export interface IRateChartRepository {
     getActiveRateChart(centerId: string, organizationId: string, category: MilkCategory, businessDate: string): Promise<RateChart>;
 }
+export interface LedgerSaveActorOptions {
+    operatorId: string;
+    idempotencyKey?: string;
+}
 export interface ILedgerRepository {
     findByCustomer(customerId: string, organizationId: string): Promise<CustomerLedgerAccount | null>;
-    save(account: CustomerLedgerAccount, newEntry?: LedgerEntry, options?: {
-        operatorId?: string;
-    }): Promise<void>;
+    save(account: CustomerLedgerAccount): Promise<void>;
+    save(account: CustomerLedgerAccount, newEntry: LedgerEntry, options: LedgerSaveActorOptions): Promise<void>;
     listEntries(customerId: string, limit: number, offset: number, organizationId: string): Promise<LedgerEntry[]>;
 }
 export interface ITokenService {

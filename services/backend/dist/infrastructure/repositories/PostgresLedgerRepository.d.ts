@@ -1,4 +1,4 @@
-import { ILedgerRepository } from '../../application/ports/index.js';
+import { ILedgerRepository, LedgerSaveActorOptions } from '../../application/ports/index.js';
 import { CustomerLedgerAccount, LedgerEntry } from '../../domain/entities/CustomerLedgerAccount.js';
 export declare class PostgresLedgerRepository implements ILedgerRepository {
     private assertValidOrganizationId;
@@ -6,6 +6,8 @@ export declare class PostgresLedgerRepository implements ILedgerRepository {
     private isConstraintOrDomainError;
     private queryTenant;
     private validateCustomerCenterAndOperator;
+    private lockOrCreateLedgerAccount;
+    private executeJournalMutation;
     appendEntry(params: {
         organizationId: string;
         customerId: string;
@@ -24,9 +26,8 @@ export declare class PostgresLedgerRepository implements ILedgerRepository {
     }>;
     findById(accountId: string, organizationId: string): Promise<CustomerLedgerAccount | null>;
     findByCustomer(customerId: string, organizationId: string): Promise<CustomerLedgerAccount | null>;
-    save(account: CustomerLedgerAccount, newEntry?: LedgerEntry, options?: {
-        operatorId?: string;
-    }): Promise<void>;
+    save(account: CustomerLedgerAccount): Promise<void>;
+    save(account: CustomerLedgerAccount, newEntry: LedgerEntry, options: LedgerSaveActorOptions): Promise<void>;
     listEntries(customerId: string, limit?: number, offset?: number, organizationId?: string): Promise<LedgerEntry[]>;
 }
 //# sourceMappingURL=PostgresLedgerRepository.d.ts.map

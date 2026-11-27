@@ -9,6 +9,7 @@ import { PostgresCustomerMembershipRepository } from '../dist/infrastructure/rep
 import { PostgresCustomerRepository } from '../dist/infrastructure/repositories/PostgresCustomerRepository.js';
 import { PostgresCollectionTransactionRepository } from '../dist/infrastructure/repositories/PostgresCollectionTransactionRepository.js';
 import { PostgresLedgerRepository } from '../dist/infrastructure/repositories/PostgresLedgerRepository.js';
+import { doveOtpService } from '../dist/infrastructure/otp/DoveOtpService.js';
 
 describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation', () => {
   let server;
@@ -58,7 +59,7 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
     superAdminToken = tokenService.signToken({
       userId: '00000000-0000-0000-0000-000000000099',
       role: 'SUPER_ADMIN',
-      actorType: 'SUPER_ADMIN',
+      actorType: 'STAFF',
       organizationId: '00000000-0000-0000-0000-000000000001',
     });
 
@@ -203,12 +204,22 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
   });
 
   test('Step 2: Customer App OTP verify returns REAL customer name (NOT dairy name)', async () => {
+    doveOtpService.resetCooldown(testMobile);
+    const reqRes = await fetch(`${baseUrl}/api/v1/auth/customer/request-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mobileNumber: testMobile }),
+    });
+    assert.equal(reqRes.status, 200);
+    const reqBody = await reqRes.json();
+    assert.ok(reqBody.previewOtp, 'Test mode must return previewOtp');
+
     const res = await fetch(`${baseUrl}/api/v1/auth/customer/verify-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         mobileNumber: testMobile,
-        otp: '123456',
+        otp: reqBody.previewOtp,
       }),
     });
     assert.equal(res.status, 200);
@@ -340,7 +351,11 @@ describe('DFarm P0 End-to-End Customer Data Lifecycle & Multi-Tenant Isolation',
       });
     }
     const ledgerEntry = ledgerA.postCredit(861.0, 'Milk Intake Credit (COW 20.5L @ ₹42/L)', txn.id);
-    await ledgerRepo.save(ledgerA, ledgerEntry);
+    await assert.rejects(
+      () => ledgerRepo.save(ledgerA, ledgerEntry),
+      (err) => err.name === 'DomainValidationError' && err.code === 'INVALID_OPERATOR'
+    );
+    await ledgerRepo.save(ledgerA, ledgerEntry, { operatorId: operatorAId });
 
     // Verify balanced double-entry in physical tenant database: SUM(Debit) = SUM(Credit)
     const tenantDbA = await tenantDbManager.getTenantDb(dairyAId);
