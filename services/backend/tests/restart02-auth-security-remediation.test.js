@@ -325,7 +325,7 @@ test('RESTART-02: Complete Auth, Authorization, OTP, JWT & Secrets Remediation S
     // Default literal -> rejected
     assert.throws(() => loadEnv(buildValidProdEnv({ DATA_ENCRYPTION_KEY_HEX: defaultHex })), /DATA_ENCRYPTION_KEY_HEX/i);
     // 32-char (16-byte) hex -> rejected
-    assert.throws(() => loadEnv(buildValidProdEnv({ DATA_ENCRYPTION_KEY_HEX: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6' })), /64/i);
+    assert.throws(() => loadEnv(buildValidProdEnv({ DATA_ENCRYPTION_KEY_HEX: 'a1b2'.repeat(8) })), /64/i);
     // Reused JWT_SECRET -> rejected
     const sharedSecret = crypto.randomBytes(32).toString('hex');
     assert.throws(

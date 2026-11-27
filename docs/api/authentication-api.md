@@ -31,7 +31,7 @@ Used by administrators, center managers, registration officers, and operators to
   {
     "success": true,
     "data": {
-      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "token": "<JWT_ACCESS_TOKEN_PLACEHOLDER>",
       "user": {
         "id": "550e8400-e29b-41d4-a716-446655440001",
         "organizationId": "550e8400-e29b-41d4-a716-446655440000",
@@ -134,7 +134,7 @@ Verifies the submitted OTP token and returns customer authentication token.
   {
     "success": true,
     "data": {
-      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "token": "<JWT_ACCESS_TOKEN_PLACEHOLDER>",
       "actorType": "CUSTOMER"
     },
     "meta": { ... }

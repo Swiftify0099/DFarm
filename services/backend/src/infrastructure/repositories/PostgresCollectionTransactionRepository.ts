@@ -247,10 +247,10 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
       );
     }
 
-    const opRes = await this.queryTenant<{ id: string; organization_id: string | null; role: string | null; user_role: string | null; status: string }>(
+    const opRes = await this.queryTenant<{ id: string; organization_id: string | null; role: string | null; status: string }>(
       client,
       organizationId,
-      `SELECT id, organization_id, role, user_role, status FROM users WHERE id = $1 LIMIT 1;`,
+      `SELECT id, organization_id, role, status FROM users WHERE id = $1 LIMIT 1;`,
       [resolvedOperatorId]
     );
     if (opRes.rows.length === 0) {
@@ -260,7 +260,7 @@ export class PostgresCollectionTransactionRepository implements ICollectionTrans
       );
     }
     const op = opRes.rows[0]!;
-    const effRole = String(op.user_role || op.role || '').trim().toUpperCase();
+    const effRole = String(op.role || '').trim().toUpperCase();
     if (effRole === 'FARMER_CUSTOMER' || effRole === 'GUEST_FARMER' || effRole === 'CUSTOMER') {
       throw new ForbiddenError(`User '${resolvedOperatorId}' is not authorized to record collections.`, 'UNAUTHORIZED_OPERATOR');
     }

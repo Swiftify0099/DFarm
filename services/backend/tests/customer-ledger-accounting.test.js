@@ -69,9 +69,16 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
     const org1Id = crypto.randomUUID();
     const org2Id = crypto.randomUUID();
 
-    await MigrationRunner.runControlPlaneMigrations(poolCtrl);
-    await MigrationRunner.runTenantMigrations(poolOrg1, org1Id);
-    await MigrationRunner.runTenantMigrations(poolOrg2, org2Id);
+    const verRes = await poolOrg1.query(`SELECT current_setting('server_version_num')::int AS ver_num;`);
+    const verNum = Number(verRes.rows[0]?.ver_num || 0);
+    assert.ok(verNum >= 170000 && verNum < 180000, `Expected PostgreSQL 17.x, got ${verNum}`);
+
+    const ctrlMigs = await MigrationRunner.runControlPlaneMigrations(poolCtrl);
+    const org1Migs = await MigrationRunner.runTenantMigrations(poolOrg1, org1Id);
+    const org2Migs = await MigrationRunner.runTenantMigrations(poolOrg2, org2Id);
+    assert.ok(ctrlMigs.every((m) => m.status === 'APPLIED'));
+    assert.ok(org1Migs.every((m) => m.status === 'APPLIED'));
+    assert.ok(org2Migs.every((m) => m.status === 'APPLIED'));
 
     // Point backend singletons to disposable control-plane DB BEFORE importing app/db/manager
     process.env['NODE_ENV'] = 'test';
@@ -164,12 +171,12 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
           [center1Id, org1Id]
         );
         await targetPool.query(
-          `INSERT INTO users (id, organization_id, username, full_name, email, phone_number, role, user_role, status) VALUES
-             ($1, $5, 'l12_admin_' || $6, 'Admin L12', 'l12_admin_' || $6 || '@dfarm.test', '+9199' || $6 || '1', 'DAIRY_OWNER', 'DAIRY_OWNER', 'ACTIVE'),
-             ($2, $5, 'l12_sup_' || $6, 'Supervisor L12', 'l12_sup_' || $6 || '@dfarm.test', '+9199' || $6 || '2', 'SUPERVISOR', 'SUPERVISOR', 'ACTIVE'),
-             ($3, $5, 'l12_op_' || $6, 'Operator L12', 'l12_op_' || $6 || '@dfarm.test', '+9199' || $6 || '3', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE')
+          `INSERT INTO users (id, organization_id, username, full_name, email, phone_number, role, status) VALUES
+             ($1, $4, 'l12_admin_' || $5, 'Admin L12', 'l12_admin_' || $5 || '@dfarm.test', '+9199' || $5 || '1', 'DAIRY_OWNER', 'ACTIVE'),
+             ($2, $4, 'l12_sup_' || $5, 'Supervisor L12', 'l12_sup_' || $5 || '@dfarm.test', '+9199' || $5 || '2', 'SUPERVISOR', 'ACTIVE'),
+             ($3, $4, 'l12_op_' || $5, 'Operator L12', 'l12_op_' || $5 || '@dfarm.test', '+9199' || $5 || '3', 'COLLECTION_OPERATOR', 'ACTIVE')
            ON CONFLICT (id) DO NOTHING;`,
-          [adminUserId, supervisorUserId, operatorUserId, null, org1Id, suffix]
+          [adminUserId, supervisorUserId, operatorUserId, org1Id, suffix]
         );
         await targetPool.query(
           `INSERT INTO user_center_assignments (user_id, center_id, is_primary)
@@ -195,8 +202,8 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
           [center2Id, org2Id]
         );
         await targetPool.query(
-          `INSERT INTO users (id, organization_id, username, full_name, email, phone_number, role, user_role, status)
-           VALUES ($1, $2, 'l12_org2_admin_' || $3, 'Org2 Admin L12', 'l12_org2_' || $3 || '@dfarm.test', '+9199' || $3 || '4', 'DAIRY_OWNER', 'DAIRY_OWNER', 'ACTIVE')
+          `INSERT INTO users (id, organization_id, username, full_name, email, phone_number, role, status)
+           VALUES ($1, $2, 'l12_org2_admin_' || $3, 'Org2 Admin L12', 'l12_org2_' || $3 || '@dfarm.test', '+9199' || $3 || '4', 'DAIRY_OWNER', 'ACTIVE')
            ON CONFLICT (id) DO NOTHING;`,
           [org2AdminUserId, org2Id, suffix]
         );
@@ -366,7 +373,7 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
       assert.equal(creditEntry.account_type, 'CUSTOMER_PAYABLE');
 
       // Zero leakage to control plane or Tenant B
-      assert.equal(Number((await poolCtrl.query('SELECT COUNT(*)::int AS c FROM ledger_transactions;')).rows[0].c), 0);
+      assert.equal((await poolCtrl.query(`SELECT to_regclass('public.ledger_transactions') AS reg;`)).rows[0].reg, null);
       assert.equal(Number((await poolOrg2.query('SELECT COUNT(*)::int AS c FROM ledger_transactions;')).rows[0].c), 0);
     });
 

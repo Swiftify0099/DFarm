@@ -203,12 +203,11 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
       id: string;
       organization_id: string | null;
       role: string | null;
-      user_role: string | null;
       status: string;
     }>(
       tenantDb,
       organizationId,
-      `SELECT id, organization_id, role, user_role, status
+      `SELECT id, organization_id, role, status
        FROM users
        WHERE id = $1
        LIMIT 1;`,
@@ -223,7 +222,7 @@ export class PostgresShiftSessionRepository implements IShiftSessionRepository {
     }
 
     const user = userRes.rows[0]!;
-    const effectiveRole = String(user.user_role || user.role || '').trim().toUpperCase();
+    const effectiveRole = String(user.role || '').trim().toUpperCase();
     if (!effectiveRole || CUSTOMER_ROLES.has(effectiveRole)) {
       throw new ForbiddenError(
         `User '${operatorId}' is not an authorized shift operator.`,

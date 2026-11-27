@@ -273,7 +273,7 @@ test('DFarm Phase 11: Cross-Phase Integration & Milk Rate Management (20 Scenari
         encryptedTemplate: {
           ciphertextBase64: Buffer.from(new Float32Array(128).fill(0.088).buffer).toString('base64'),
           ivBase64: 'MDEyMzQ1Njc4OTAx',
-          authTagBase64: 'MDEyMzQ1Njc4OTAxMjM0NQ==',
+          authTagBase64: Buffer.from('test-auth-tag-16').toString('base64'),
           keyReference: 'key-v1-2026',
           algorithm: 'AES-256-GCM',
         },

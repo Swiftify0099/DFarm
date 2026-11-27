@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const migrationsDir = path.resolve(__dirname, '../../../supabase/migrations');
+import {
+  MigrationRunner,
+  MIGRATION_MANIFEST,
+  CONTROL_PLANE_MIGRATIONS,
+  TENANT_OPERATIONAL_MIGRATIONS,
+  QUARANTINED_MIGRATIONS,
+  MigrationTarget,
+} from '../dist/infrastructure/database/MigrationRunner.js';
 
 // Only run against an explicit, disposable PostgreSQL test URL. Never touch production.
 const TEST_PG_URL = process.env['TEST_POSTGRES_URL'] || '';
@@ -22,6 +24,20 @@ async function canConnectRealPostgres(url) {
     return false;
   } finally {
     await pool.end().catch(() => {});
+  }
+}
+
+function assertTrackAppliedInOrder(results, expectedTrack, trackLabel) {
+  assert.equal(
+    results.length,
+    expectedTrack.length,
+    `${trackLabel}: expected ${expectedTrack.length} migrations, executed ${results.length}`
+  );
+  for (let i = 0; i < expectedTrack.length; i++) {
+    assert.equal(results[i].version, expectedTrack[i].version, `${trackLabel}: version order mismatch at index ${i}`);
+    assert.equal(results[i].filename, expectedTrack[i].filename, `${trackLabel}: filename mismatch at index ${i}`);
+    assert.notEqual(results[i].status, 'FAILED', `${trackLabel}: migration ${results[i].filename} FAILED`);
+    assert.equal(results[i].status, 'APPLIED', `${trackLabel}: expected APPLIED for ${results[i].filename}, got ${results[i].status}`);
   }
 }
 
@@ -55,17 +71,8 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
   let poolA;
   let poolB;
 
-  const migrationFiles = fs
-    .readdirSync(migrationsDir)
-    .filter((f) => /^\d{3}_.*\.sql$/i.test(f) && f !== '031_remove_dairy_admin_7507495615.sql')
-    .sort();
-
-  const applyMigrations = async (pool) => {
-    for (const file of migrationFiles) {
-      const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
-      await pool.query(sql);
-    }
-  };
+  const orgA = crypto.randomUUID();
+  const orgB = crypto.randomUUID();
 
   try {
     await adminPool.query(`CREATE DATABASE ${dbNameCtrl};`);
@@ -76,21 +83,52 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
     poolA = new pg.Pool({ connectionString: makeDbUrl(dbNameA), max: 10 });
     poolB = new pg.Pool({ connectionString: makeDbUrl(dbNameB), max: 5 });
 
-    await applyMigrations(poolCtrl);
-    await applyMigrations(poolA);
-    await applyMigrations(poolB);
+    const ctrlResults = await MigrationRunner.runControlPlaneMigrations(poolCtrl);
+    const tenantAResults = await MigrationRunner.runTenantMigrations(poolA, orgA);
+    const tenantBResults = await MigrationRunner.runTenantMigrations(poolB, orgB);
 
-    const orgA = crypto.randomUUID();
-    const orgB = crypto.randomUUID();
     const centerA = crypto.randomUUID();
     const centerB = crypto.randomUUID();
     const opA = crypto.randomUUID();
     const opB = crypto.randomUUID();
     const devA = 'PG17-KIOSK-A';
 
-    await suite.test('1. Verifies PostgreSQL server version and migration 045 partial unique index exists', async () => {
-      const vRes = await poolA.query(`SELECT version() AS v;`);
+    await suite.test('1. Verifies PostgreSQL 17.x version, MigrationRunner tracks, DF-020 manifest invariants & 045 index', async () => {
+      const vRes = await poolA.query(
+        `SELECT version() AS v, current_setting('server_version_num')::int AS ver_num;`
+      );
       assert.match(String(vRes.rows[0].v), /PostgreSQL/i);
+      const verNum = Number(vRes.rows[0].ver_num);
+      assert.ok(verNum >= 170000 && verNum < 180000, `Expected PostgreSQL 17.x (170000..179999), got ${verNum}`);
+
+      assertTrackAppliedInOrder(ctrlResults, CONTROL_PLANE_MIGRATIONS, 'CONTROL_PLANE');
+      assertTrackAppliedInOrder(tenantAResults, TENANT_OPERATIONAL_MIGRATIONS, 'TENANT_A');
+      assertTrackAppliedInOrder(tenantBResults, TENANT_OPERATIONAL_MIGRATIONS, 'TENANT_B');
+
+      // Regression checks (Phase 2.D)
+      assert.ok(ctrlResults.some((m) => m.version === '044' && m.status === 'APPLIED'));
+      assert.ok(!ctrlResults.some((m) => m.version === '045'));
+      assert.ok(tenantAResults.some((m) => m.version === '045' && m.status === 'APPLIED'));
+      assert.ok(!tenantAResults.some((m) => m.version === '044'));
+      assert.ok(
+        QUARANTINED_MIGRATIONS.some(
+          (m) => m.filename === '031_remove_dairy_admin_7507495615.sql' && m.target === MigrationTarget.MANUAL_REVIEW_REQUIRED
+        )
+      );
+      assert.ok(!ctrlResults.some((m) => m.filename === '031_remove_dairy_admin_7507495615.sql'));
+      assert.ok(!tenantAResults.some((m) => m.filename === '031_remove_dairy_admin_7507495615.sql'));
+
+      // Duplicate 031 prefix & 040 tier discrepancy remain accurately tracked in manifest
+      const all031 = MIGRATION_MANIFEST.filter((m) => m.filename.startsWith('031_'));
+      assert.equal(all031.length, 2);
+      const entry040 = MIGRATION_MANIFEST.find((m) => m.version === '040');
+      assert.equal(entry040?.filename, '040_device_auth_challenges.sql');
+
+      const ctrlChecks = await poolCtrl.query(
+        `SELECT to_regclass('public.revoked_tokens') AS ctrl_tbl, to_regclass('public.kiosk_shift_sessions') AS tenant_tbl;`
+      );
+      assert.ok(ctrlChecks.rows[0].ctrl_tbl, 'Control-plane DB must have revoked_tokens (044)');
+      assert.equal(ctrlChecks.rows[0].tenant_tbl, null, 'Control-plane DB must NOT have tenant-only kiosk_shift_sessions');
 
       const idxRes = await poolA.query(
         `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'kiosk_shift_sessions' AND indexname = 'uq_kiosk_shift_sessions_active_open';`
@@ -110,8 +148,8 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
         [centerA, orgA]
       );
       await poolA.query(
-        `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, user_role, status)
-         VALUES ($1, $2, 'pg17_op_a', 'PG17 Op A', '+919800000011', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE');`,
+        `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+         VALUES ($1, $2, 'pg17_op_a', 'PG17 Op A', '+919800000011', 'COLLECTION_OPERATOR', 'ACTIVE');`,
         [opA, orgA]
       );
 
@@ -125,8 +163,8 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
         [centerB, orgB]
       );
       await poolB.query(
-        `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, user_role, status)
-         VALUES ($1, $2, 'pg17_op_b', 'PG17 Op B', '+919800000022', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE');`,
+        `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+         VALUES ($1, $2, 'pg17_op_b', 'PG17 Op B', '+919800000022', 'COLLECTION_OPERATOR', 'ACTIVE');`,
         [opB, orgB]
       );
 
@@ -143,11 +181,11 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
         (err) => err.code === '23503'
       );
 
-      // Zero rows written to Tenant B or Central DB
+      // Zero rows written to Tenant B and tenant table remains absent from Central DB
       const cntB = await poolB.query(`SELECT COUNT(*)::int AS c FROM kiosk_shift_sessions;`);
       assert.equal(cntB.rows[0].c, 0);
-      const cntCtrl = await poolCtrl.query(`SELECT COUNT(*)::int AS c FROM kiosk_shift_sessions;`);
-      assert.equal(cntCtrl.rows[0].c, 0);
+      const ctrlTbl = await poolCtrl.query(`SELECT to_regclass('public.kiosk_shift_sessions') AS reg;`);
+      assert.equal(ctrlTbl.rows[0].reg, null);
     });
 
     await suite.test('3. Concurrent PG transactions attempting duplicate OPEN session hit uq_kiosk_shift_sessions_active_open (23505)', async () => {
@@ -205,9 +243,9 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
     await poolCtrl?.end().catch(() => {});
     await poolA?.end().catch(() => {});
     await poolB?.end().catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameA};`).catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameB};`).catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameCtrl};`).catch(() => {});
+    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameA} WITH (FORCE);`).catch(() => {});
+    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameB} WITH (FORCE);`).catch(() => {});
+    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameCtrl} WITH (FORCE);`).catch(() => {});
     await adminPool.end().catch(() => {});
   }
 });

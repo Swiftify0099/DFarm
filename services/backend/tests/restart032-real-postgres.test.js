@@ -1,13 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const migrationsDir = path.resolve(__dirname, '../../../supabase/migrations');
+import {
+  MigrationRunner,
+  CONTROL_PLANE_MIGRATIONS,
+  TENANT_OPERATIONAL_MIGRATIONS,
+} from '../dist/infrastructure/database/MigrationRunner.js';
 
 // Only run against an explicit, disposable PostgreSQL test URL. Never touch production.
 const TEST_PG_URL = process.env['TEST_POSTGRES_URL'] || '';
@@ -55,17 +54,8 @@ test('RESTART-03.2 Real PostgreSQL 17 Operational Repository Isolation & Concurr
   let poolA;
   let poolB;
 
-  const migrationFiles = fs
-    .readdirSync(migrationsDir)
-    .filter((f) => /^\d{3}_.*\.sql$/i.test(f) && f !== '031_remove_dairy_admin_7507495615.sql')
-    .sort();
-
-  const applyMigrations = async (pool) => {
-    for (const file of migrationFiles) {
-      const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
-      await pool.query(sql);
-    }
-  };
+  const orgA = crypto.randomUUID();
+  const orgB = crypto.randomUUID();
 
   try {
     await adminPool.query(`CREATE DATABASE ${dbNameCtrl};`);
@@ -76,30 +66,38 @@ test('RESTART-03.2 Real PostgreSQL 17 Operational Repository Isolation & Concurr
     poolA = new pg.Pool({ connectionString: makeDbUrl(dbNameA), max: 10 });
     poolB = new pg.Pool({ connectionString: makeDbUrl(dbNameB), max: 5 });
 
-    await applyMigrations(poolCtrl);
-    await applyMigrations(poolA);
-    await applyMigrations(poolB);
+    const verRes = await poolA.query(`SELECT current_setting('server_version_num')::int AS ver_num;`);
+    const verNum = Number(verRes.rows[0]?.ver_num || 0);
+    assert.ok(verNum >= 170000 && verNum < 180000, `Expected PostgreSQL 17.x, got ${verNum}`);
 
-    const orgA = crypto.randomUUID();
-    const orgB = crypto.randomUUID();
+    const ctrlResults = await MigrationRunner.runControlPlaneMigrations(poolCtrl);
+    const tenantAResults = await MigrationRunner.runTenantMigrations(poolA, orgA);
+    const tenantBResults = await MigrationRunner.runTenantMigrations(poolB, orgB);
+
+    assert.equal(ctrlResults.length, CONTROL_PLANE_MIGRATIONS.length);
+    assert.equal(tenantAResults.length, TENANT_OPERATIONAL_MIGRATIONS.length);
+    assert.equal(tenantBResults.length, TENANT_OPERATIONAL_MIGRATIONS.length);
+    assert.ok(ctrlResults.every((r) => r.status === 'APPLIED'));
+    assert.ok(tenantAResults.every((r) => r.status === 'APPLIED'));
+    assert.ok(tenantBResults.every((r) => r.status === 'APPLIED'));
+
     const centerA = crypto.randomUUID();
     const centerB = crypto.randomUUID();
     const opA = crypto.randomUUID();
     const opB = crypto.randomUUID();
     const custA = crypto.randomUUID();
     const custB = crypto.randomUUID();
-    const shiftSessA = crypto.randomUUID();
 
     await poolCtrl.query(`INSERT INTO organizations (id, name, code, status) VALUES ($1, 'PG17 A', 'PGA', 'ACTIVE'), ($2, 'PG17 B', 'PGB', 'ACTIVE');`, [orgA, orgB]);
     await poolA.query(`INSERT INTO organizations (id, name, code, status) VALUES ($1, 'PG17 A', 'PGA', 'ACTIVE');`, [orgA]);
     await poolA.query(`INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status) VALUES ($1, $2, 'CA1', 'Center A', 'R1', 'T1', 'Pune', 'MH', '411001', '+919800000001', 'ACTIVE');`, [centerA, orgA]);
-    await poolA.query(`INSERT INTO users (id, organization_id, username, full_name, phone_number, role, user_role, status) VALUES ($1, $2, 'pg17_op_a', 'PG17 Op A', '+919800000011', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE');`, [opA, orgA]);
+    await poolA.query(`INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status) VALUES ($1, $2, 'pg17_op_a', 'PG17 Op A', '+919800000011', 'COLLECTION_OPERATOR', 'ACTIVE');`, [opA, orgA]);
     await poolA.query(`INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted) VALUES ($1, $2, $3, 'FA-1', 'PG17 Farmer A', '+919800000101', 'ACTIVE', 'APPROVED', FALSE);`, [custA, orgA, centerA]);
     await poolA.query(`INSERT INTO customer_ledger_accounts (id, customer_id, organization_id, currency, current_balance) VALUES ($1, $2, $3, 'INR', 0.00);`, [crypto.randomUUID(), custA, orgA]);
 
     await poolB.query(`INSERT INTO organizations (id, name, code, status) VALUES ($1, 'PG17 B', 'PGB', 'ACTIVE');`, [orgB]);
     await poolB.query(`INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status) VALUES ($1, $2, 'CB1', 'Center B', 'R2', 'T2', 'Pune', 'MH', '411002', '+919800000002', 'ACTIVE');`, [centerB, orgB]);
-    await poolB.query(`INSERT INTO users (id, organization_id, username, full_name, phone_number, role, user_role, status) VALUES ($1, $2, 'pg17_op_b', 'PG17 Op B', '+919800000022', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE');`, [opB, orgB]);
+    await poolB.query(`INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status) VALUES ($1, $2, 'pg17_op_b', 'PG17 Op B', '+919800000022', 'COLLECTION_OPERATOR', 'ACTIVE');`, [opB, orgB]);
     await poolB.query(`INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted) VALUES ($1, $2, $3, 'FB-1', 'PG17 Farmer B', '+919800000102', 'ACTIVE', 'APPROVED', FALSE);`, [custB, orgB, centerB]);
     await poolB.query(`INSERT INTO customer_ledger_accounts (id, customer_id, organization_id, currency, current_balance) VALUES ($1, $2, $3, 'INR', 0.00);`, [crypto.randomUUID(), custB, orgB]);
 
@@ -113,9 +111,9 @@ test('RESTART-03.2 Real PostgreSQL 17 Operational Repository Isolation & Concurr
         (err) => err.code === '23503'
       );
 
-      // Zero rows leaked to B or Ctrl
+      // Zero rows leaked to B and tenant table remains absent from Central DB
       assert.equal(Number((await poolB.query(`SELECT COUNT(*)::int AS c FROM ledger_transactions;`)).rows[0].c), 0);
-      assert.equal(Number((await poolCtrl.query(`SELECT COUNT(*)::int AS c FROM ledger_transactions;`)).rows[0].c), 0);
+      assert.equal((await poolCtrl.query(`SELECT to_regclass('public.ledger_transactions') AS reg;`)).rows[0].reg, null);
     });
 
     await suite.test('2. Real PG17 concurrent FOR UPDATE ledger updates serialize cleanly without lost updates', async () => {
@@ -163,9 +161,9 @@ test('RESTART-03.2 Real PostgreSQL 17 Operational Repository Isolation & Concurr
     await poolCtrl?.end().catch(() => {});
     await poolA?.end().catch(() => {});
     await poolB?.end().catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameA};`).catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameB};`).catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameCtrl};`).catch(() => {});
+    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameA} WITH (FORCE);`).catch(() => {});
+    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameB} WITH (FORCE);`).catch(() => {});
+    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameCtrl} WITH (FORCE);`).catch(() => {});
     await adminPool.end().catch(() => {});
   }
 });

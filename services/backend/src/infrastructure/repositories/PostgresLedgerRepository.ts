@@ -153,12 +153,11 @@ export class PostgresLedgerRepository implements ILedgerRepository {
         id: string;
         organization_id: string | null;
         role: string | null;
-        user_role: string | null;
         status: string;
       }>(
         txClient,
         organizationId,
-        `SELECT id, organization_id, role, user_role, status
+        `SELECT id, organization_id, role, status
          FROM users
          WHERE id = $1
          LIMIT 1;`,
@@ -171,7 +170,7 @@ export class PostgresLedgerRepository implements ILedgerRepository {
         );
       }
       const op = userRes.rows[0]!;
-      const effRole = String(op.user_role || op.role || '').trim().toUpperCase();
+      const effRole = String(op.role || '').trim().toUpperCase();
       if (!effRole || effRole === 'FARMER_CUSTOMER' || effRole === 'GUEST_FARMER' || effRole === 'CUSTOMER') {
         throw new ForbiddenError(`User '${operatorId}' is not authorized to post ledger transactions.`, 'UNAUTHORIZED_OPERATOR');
       }

@@ -510,8 +510,8 @@ test('DFARM PROMPT 4.2.3: Device Proof-of-Possession & Production Signing Key Au
           loadEnv({
             NODE_ENV: 'production',
             SUPABASE_URL: 'https://demo.supabase.co',
-            SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy',
-            SUPABASE_SERVICE_ROLE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy',
+            SUPABASE_ANON_KEY: 'placeholder_supabase_anon_key_for_test',
+            SUPABASE_SERVICE_ROLE_KEY: 'placeholder_supabase_service_role_key_for_test',
             OFFLINE_LEASE_SIGNING_KEY: undefined, // Missing!
           });
         },
@@ -529,8 +529,8 @@ test('DFARM PROMPT 4.2.3: Device Proof-of-Possession & Production Signing Key Au
         loadEnv({
           NODE_ENV: 'production',
           SUPABASE_URL: 'https://demo.supabase.co',
-          SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy',
-          SUPABASE_SERVICE_ROLE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy',
+          SUPABASE_ANON_KEY: 'placeholder_supabase_anon_key_for_test',
+          SUPABASE_SERVICE_ROLE_KEY: 'placeholder_supabase_service_role_key_for_test',
           OFFLINE_LEASE_SIGNING_KEY: 'short-key-16-bytes-only!!',
         });
       },
@@ -544,9 +544,9 @@ test('DFARM PROMPT 4.2.3: Device Proof-of-Possession & Production Signing Key Au
         loadEnv({
           NODE_ENV: 'production',
           SUPABASE_URL: 'https://demo.supabase.co',
-          SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy',
-          SUPABASE_SERVICE_ROLE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy',
-          OFFLINE_LEASE_SIGNING_KEY: '0123456789abcdef0123456789abcdef', // 32 hex chars = 16 bytes!
+          SUPABASE_ANON_KEY: 'placeholder_supabase_anon_key_for_test',
+          SUPABASE_SERVICE_ROLE_KEY: 'placeholder_supabase_service_role_key_for_test',
+          OFFLINE_LEASE_SIGNING_KEY: 'abcd'.repeat(8), // 32 hex chars = 16 bytes!
         });
       },
       /hex format requires at least 64 hex characters \(32 bytes \/ 256 bits\)/
@@ -578,8 +578,8 @@ test('DFARM PROMPT 4.2.3: Device Proof-of-Possession & Production Signing Key Au
       loadEnv({
         NODE_ENV: 'production',
         SUPABASE_URL: 'https://demo.supabase.co',
-        SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy',
-        SUPABASE_SERVICE_ROLE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy',
+        SUPABASE_ANON_KEY: 'placeholder_supabase_anon_key_for_test',
+        SUPABASE_SERVICE_ROLE_KEY: 'placeholder_supabase_service_role_key_for_test',
         JWT_SECRET: crypto.randomBytes(32).toString('hex'),
         ADMIN_OTP_SECRET: crypto.randomBytes(32).toString('hex'),
         TENANT_DB_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'),

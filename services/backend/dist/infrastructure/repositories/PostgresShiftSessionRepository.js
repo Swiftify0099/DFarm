@@ -143,7 +143,7 @@ export class PostgresShiftSessionRepository {
         if (!operatorId || !UUID_REGEX.test(operatorId)) {
             throw new DomainValidationError(`Valid ${label} operator UUID is required for shift session persistence.`, label === 'opening' ? 'INVALID_OPENING_OPERATOR' : 'INVALID_CLOSING_OPERATOR');
         }
-        const userRes = await this.queryTenant(tenantDb, organizationId, `SELECT id, organization_id, role, user_role, status
+        const userRes = await this.queryTenant(tenantDb, organizationId, `SELECT id, organization_id, role, status
        FROM users
        WHERE id = $1
        LIMIT 1;`, [operatorId]);
@@ -151,7 +151,7 @@ export class PostgresShiftSessionRepository {
             throw new DomainValidationError(`Authoritative ${label} operator '${operatorId}' does not exist in tenant database.`, label === 'opening' ? 'INVALID_OPENING_OPERATOR' : 'INVALID_CLOSING_OPERATOR');
         }
         const user = userRes.rows[0];
-        const effectiveRole = String(user.user_role || user.role || '').trim().toUpperCase();
+        const effectiveRole = String(user.role || '').trim().toUpperCase();
         if (!effectiveRole || CUSTOMER_ROLES.has(effectiveRole)) {
             throw new ForbiddenError(`User '${operatorId}' is not an authorized shift operator.`, 'UNAUTHORIZED_SHIFT_OPERATOR');
         }

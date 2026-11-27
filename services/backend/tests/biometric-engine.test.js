@@ -45,7 +45,7 @@ test('DFarm Phase 07: Biometric Face Engine & Verification Suite (20 Scenarios)'
   const revokedConsentCustomerUuid = 'c4444444-4444-4444-a444-444444444444';
   const modelVersionId = 'f0000000-0000-4000-a000-000000000001';
 
-  const rawKeyHex = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+  const rawKeyHex = crypto.randomBytes(32).toString('hex');
   const encryptor = new BiometricEncryptionEngine(rawKeyHex, 'key-v1-2026');
 
   // Sign Registration Officer JWT token

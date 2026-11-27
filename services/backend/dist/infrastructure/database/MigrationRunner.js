@@ -49,7 +49,7 @@ export const MIGRATION_MANIFEST = [
     { version: '036', filename: '036_seed_warna_dairy_admin.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Provision Warna Dairy Admin (+917507495615) and expand role check constraint' },
     { version: '037', filename: '037_multi_dairy_customer_identity_and_membership.sql', target: MigrationTarget.SHARED, description: 'Global customer identities and multi-dairy membership discovery directory' },
     { version: '038', filename: '038_platform_federation_database_mapping.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Register platform federation control plane database mapping' },
-    { version: '039', filename: '039_milk_collections_organization_idempotency.sql', target: MigrationTarget.SHARED, description: 'Composite uniqueness constraint on organization_id and idempotency_key for concurrent idempotency' },
+    { version: '039', filename: '039_milk_collections_organization_idempotency.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Composite uniqueness constraint on organization_id and idempotency_key for concurrent idempotency' },
     { version: '040', filename: '040_device_auth_challenges.sql', target: MigrationTarget.SHARED, description: 'Distributed device authentication challenges, atomic single-use replay protection, and bounded failed attempt tracking' },
     { version: '041', filename: '041_dairy_admin_realtime_and_station_monitoring.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Dairy admin realtime events outbox and station monitoring' },
     { version: '042', filename: '042_union_bank_farmer_payout_and_settlement_system.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Union Bank farmer payout and settlement system tables' },

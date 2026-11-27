@@ -78,7 +78,7 @@ export class PostgresLedgerRepository {
             if (!operatorId || !UUID_REGEX.test(operatorId)) {
                 throw new DomainValidationError('Valid authenticated operator ID is required for ledger transactions.', 'INVALID_OPERATOR');
             }
-            const userRes = await this.queryTenant(txClient, organizationId, `SELECT id, organization_id, role, user_role, status
+            const userRes = await this.queryTenant(txClient, organizationId, `SELECT id, organization_id, role, status
          FROM users
          WHERE id = $1
          LIMIT 1;`, [operatorId]);
@@ -86,7 +86,7 @@ export class PostgresLedgerRepository {
                 throw new DomainValidationError(`Authoritative operator '${operatorId}' does not exist in tenant database.`, 'INVALID_OPERATOR');
             }
             const op = userRes.rows[0];
-            const effRole = String(op.user_role || op.role || '').trim().toUpperCase();
+            const effRole = String(op.role || '').trim().toUpperCase();
             if (!effRole || effRole === 'FARMER_CUSTOMER' || effRole === 'GUEST_FARMER' || effRole === 'CUSTOMER') {
                 throw new ForbiddenError(`User '${operatorId}' is not authorized to post ledger transactions.`, 'UNAUTHORIZED_OPERATOR');
             }

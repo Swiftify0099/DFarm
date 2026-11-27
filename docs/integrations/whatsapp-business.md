@@ -17,7 +17,7 @@ WHATSAPP_PHONE_NUMBER_ID=109283746501928
 WHATSAPP_BUSINESS_ACCOUNT_ID=982736450192837
 WHATSAPP_ACCESS_TOKEN=EAAG...
 WHATSAPP_WEBHOOK_VERIFY_TOKEN=dfarm_whatsapp_webhook_verify_secret_token
-WHATSAPP_APP_SECRET=a1b2c3d4e5f60718293a4b5c6d7e8f90
+WHATSAPP_APP_SECRET=placeholder_whatsapp_app_secret_for_hmac_sha256
 ```
 
 ### Unconfigured / Blocked Integration Policy

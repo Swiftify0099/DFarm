@@ -129,7 +129,7 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
 
     await tenantDbManager.initialize();
 
-    // Seed Dairy A tenant DB
+    // Seed Dairy A tenant DB (003_user_identity_foundation.sql uses role column)
     await poolA.query(`INSERT INTO organizations (id, name, code, status) VALUES ($1, 'PG17 Repo Dairy A', $2, 'ACTIVE');`, [orgA, `R33_A_${suffix}`]);
     await poolA.query(
       `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
@@ -137,10 +137,10 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
       [centerA, orgA]
     );
     await poolA.query(
-      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, user_role, status) VALUES
-         ($1, $4, 'r33_op_a', 'R33 Op A', '+919800000201', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE'),
-         ($2, $4, 'r33_op_inact', 'R33 Inactive', '+919800000202', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'SUSPENDED'),
-         ($3, $4, 'r33_cust_role', 'R33 Cust Role', '+919800000203', 'FARMER_CUSTOMER', 'FARMER_CUSTOMER', 'ACTIVE');`,
+      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status) VALUES
+         ($1, $4, 'r33_op_a', 'R33 Op A', '+919800000201', 'COLLECTION_OPERATOR', 'ACTIVE'),
+         ($2, $4, 'r33_op_inact', 'R33 Inactive', '+919800000202', 'COLLECTION_OPERATOR', 'SUSPENDED'),
+         ($3, $4, 'r33_cust_role', 'R33 Cust Role', '+919800000203', 'FARMER_CUSTOMER', 'ACTIVE');`,
       [opA, opInactive, opCustomerRole, orgA]
     );
     await poolA.query(
@@ -158,8 +158,8 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
       [centerB, orgB]
     );
     await poolB.query(
-      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, user_role, status)
-       VALUES ($1, $2, 'r33_op_b', 'R33 Op B', '+919800000204', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE');`,
+      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+       VALUES ($1, $2, 'r33_op_b', 'R33 Op B', '+919800000204', 'COLLECTION_OPERATOR', 'ACTIVE');`,
       [opB, orgB]
     );
     await poolB.query(
@@ -173,12 +173,20 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
     const collectionRepo = new PostgresCollectionTransactionRepository();
     const sessionRepo = new PostgresShiftSessionRepository();
 
-    await suite.test('1. Migration manifests & TenantDatabaseManager strict real-PG resolution', async () => {
+    await suite.test('1. PostgreSQL 17.x version, migration manifests & TenantDatabaseManager strict real-PG resolution', async () => {
+      const verRes = await poolA.query(`SELECT current_setting('server_version_num')::int AS ver_num;`);
+      const verNum = Number(verRes.rows[0]?.ver_num || 0);
+      assert.ok(verNum >= 170000 && verNum < 180000, `Expected PostgreSQL 17.x, got ${verNum}`);
+
+      assert.ok(ctrlMigrations.every((m) => m.status === 'APPLIED'));
+      assert.ok(tenantAMigrations.every((m) => m.status === 'APPLIED'));
+      assert.ok(tenantBMigrations.every((m) => m.status === 'APPLIED'));
       assert.ok(ctrlMigrations.some((m) => m.version === '044' && m.status === 'APPLIED'));
       assert.ok(!ctrlMigrations.some((m) => m.version === '045'));
       assert.ok(!ctrlMigrations.some((m) => m.filename === '031_remove_dairy_admin_7507495615.sql'));
       assert.ok(tenantAMigrations.some((m) => m.version === '045' && m.status === 'APPLIED'));
       assert.ok(tenantBMigrations.some((m) => m.version === '045' && m.status === 'APPLIED'));
+      assert.ok(!tenantAMigrations.some((m) => m.version === '044'));
 
       const tenantDbA = await tenantDbManager.getStrictTenantDb(orgA);
       const tenantDbB = await tenantDbManager.getStrictTenantDb(orgB);
@@ -336,8 +344,8 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
       await ledgerRepo.appendEntry({ organizationId: orgB, customerId: sharedCustUuid, operatorId: opB, entryType: 'CREDIT', amount: 45, description: 'Shared UUID Dairy B' });
       assert.equal((await ledgerRepo.findByCustomer(sharedCustUuid, orgA)).currentBalance, 310);
       assert.equal((await ledgerRepo.findByCustomer(sharedCustUuid, orgB)).currentBalance, 45);
-      assert.equal(Number((await poolCtrl.query(`SELECT COUNT(*)::int AS c FROM ledger_transactions;`)).rows[0].c), 0);
-      assert.equal(Number((await poolCtrl.query(`SELECT COUNT(*)::int AS c FROM customer_ledger_accounts;`)).rows[0].c), 0);
+      assert.equal((await poolCtrl.query(`SELECT to_regclass('public.ledger_transactions') AS reg;`)).rows[0].reg, null);
+      assert.equal((await poolCtrl.query(`SELECT to_regclass('public.customer_ledger_accounts') AS reg;`)).rows[0].reg, null);
     });
 
     await suite.test('3. PostgresShiftSessionRepository: PG17 isolation, 045 concurrent open conflict, real not-found vs 503', async () => {
@@ -403,7 +411,7 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
         () => sessionRepo.findById(sessionA.id, crypto.randomUUID()),
         (e) => e.statusCode === 503 && e.code === 'TENANT_MAPPING_MISSING'
       );
-      assert.equal(Number((await poolCtrl.query(`SELECT COUNT(*)::int AS c FROM kiosk_shift_sessions;`)).rows[0].c), 0);
+      assert.equal((await poolCtrl.query(`SELECT to_regclass('public.kiosk_shift_sessions') AS reg;`)).rows[0].reg, null);
     });
 
     await suite.test('4. PostgresCollectionTransactionRepository: atomic intake, concurrency, idempotency, isolation & rollback on PG17', async () => {
@@ -537,8 +545,64 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
         (e) => e.code === 'INVALID_CUSTOMER'
       );
 
-      // 4d. Zero leakage to control plane or Dairy B
-      assert.equal(Number((await poolCtrl.query(`SELECT COUNT(*)::int AS c FROM milk_collections;`)).rows[0].c), 0);
+      // 4d. Mid-transaction saveAtomicIntake rollback leaves zero partial collection, session, or ledger rows
+      const rollbackKey = `R33-COLL-RB-${crypto.randomUUID()}`;
+      const colCountBeforeRb = Number((await poolA.query(`SELECT COUNT(*)::int AS c FROM milk_collections WHERE organization_id = $1;`, [orgA])).rows[0].c);
+      const balBeforeRb = (await ledgerRepo.findByCustomer(custA, orgA)).currentBalance;
+      const sessBeforeRb = await sessionRepo.findById(activeSessA.id, orgA);
+
+      const origGetStrictColl = tenantDbManager.getStrictTenantDb.bind(tenantDbManager);
+      const realTenantDbAForColl = await origGetStrictColl(orgA);
+      tenantDbManager.getStrictTenantDb = async (id) => {
+        if (id !== orgA) return origGetStrictColl(id);
+        return {
+          query: (text, params) => realTenantDbAForColl.query(text, params),
+          withTransaction: (cb) =>
+            realTenantDbAForColl.withTransaction(async (client) => {
+              const origClientQuery = client.query.bind(client);
+              client.query = async (sql, params) => {
+                if (typeof sql === 'string' && sql.includes('UPDATE customer_ledger_accounts')) {
+                  throw new Error('Injected atomic intake rollback failure');
+                }
+                return origClientQuery(sql, params);
+              };
+              try {
+                return await cb(client);
+              } finally {
+                client.query = origClientQuery;
+              }
+            }),
+        };
+      };
+      try {
+        await assert.rejects(() =>
+          collectionRepo.saveAtomicIntake({
+            transaction: mkTxn(crypto.randomUUID(), rollbackKey, 6, 240),
+            session: activeSessA,
+            totalAmount: 240,
+            weightLiters: 6,
+            fatPercentage: 4.0,
+            snfPercentage: 8.5,
+            milkCategory: 'COW',
+            customerId: custA,
+            organizationId: orgA,
+            centerId: centerA,
+            operatorId: opA,
+            operatorName: 'R33 Op A',
+            appliedRate: 40,
+          })
+        );
+      } finally {
+        tenantDbManager.getStrictTenantDb = origGetStrictColl;
+      }
+
+      assert.equal(Number((await poolA.query(`SELECT COUNT(*)::int AS c FROM milk_collections WHERE organization_id = $1;`, [orgA])).rows[0].c), colCountBeforeRb);
+      assert.equal(Number((await poolA.query(`SELECT COUNT(*)::int AS c FROM milk_collections WHERE idempotency_key = $1;`, [rollbackKey])).rows[0].c), 0);
+      assert.equal((await ledgerRepo.findByCustomer(custA, orgA)).currentBalance, balBeforeRb);
+      assert.equal((await sessionRepo.findById(activeSessA.id, orgA)).totals.transactionCount, sessBeforeRb.totals.transactionCount);
+
+      // 4e. Zero leakage to control plane or Dairy B
+      assert.equal((await poolCtrl.query(`SELECT to_regclass('public.milk_collections') AS reg;`)).rows[0].reg, null);
       assert.equal(Number((await poolB.query(`SELECT COUNT(*)::int AS c FROM milk_collections;`)).rows[0].c), 0);
       assert.equal((await ledgerRepo.findByCustomer(custB, orgB))?.currentBalance || 0, dairyBCustBBalBefore);
     });

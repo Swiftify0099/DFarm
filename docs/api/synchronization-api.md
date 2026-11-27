@@ -34,7 +34,7 @@ Provisions a new hardware counter terminal or registration tablet, assigns it to
     "centerId": "319c2eab-6b4c-4d15-84a8-297662d0fce8",
     "deviceType": "COUNTER_TERMINAL",
     "status": "ACTIVE",
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token": "<JWT_DEVICE_TOKEN_PLACEHOLDER>",
     "maxOfflineHours": 72,
     "registeredAt": "2026-11-14T03:22:11.416Z"
   }

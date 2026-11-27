@@ -16,7 +16,7 @@ DFarm utilizes **Firebase Cloud Messaging (FCM)** via Google HTTP v1 API to deli
 FCM_ENABLED=true
 FCM_PROJECT_ID=dfarm-smart-dairy
 FCM_CLIENT_EMAIL=firebase-adminsdk@dfarm-smart-dairy.iam.gserviceaccount.com
-FCM_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASC...\n-----END PRIVATE KEY-----"
+FCM_PRIVATE_KEY="placeholder_firebase_service_account_private_key_pem"
 ```
 
 ---

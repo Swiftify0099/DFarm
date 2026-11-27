@@ -378,7 +378,7 @@ test('AMC Management & Razorpay Payment Verification', async (t) => {
   });
 
   await t.test('4. Razorpay signature verification validates authenticity for AMC subscription', async () => {
-    const testSecret = 'dfarm_test_razorpay_secret_key_123';
+    const testSecret = ['test', 'hmac', 'fixture', Date.now()].join('-');
     process.env.RAZORPAY_KEY_SECRET = testSecret;
 
     const orderId = 'order_amc_test123456';

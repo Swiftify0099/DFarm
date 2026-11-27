@@ -129,12 +129,12 @@ export class PostgresCollectionTransactionRepository {
         if (!resolvedOperatorId || !UUID_REGEX.test(resolvedOperatorId)) {
             throw new DomainValidationError('Valid authoritative operator ID is required for collection persistence.', 'INVALID_OPERATOR');
         }
-        const opRes = await this.queryTenant(client, organizationId, `SELECT id, organization_id, role, user_role, status FROM users WHERE id = $1 LIMIT 1;`, [resolvedOperatorId]);
+        const opRes = await this.queryTenant(client, organizationId, `SELECT id, organization_id, role, status FROM users WHERE id = $1 LIMIT 1;`, [resolvedOperatorId]);
         if (opRes.rows.length === 0) {
             throw new DomainValidationError(`Authoritative operator '${resolvedOperatorId}' does not exist in tenant database.`, 'INVALID_OPERATOR');
         }
         const op = opRes.rows[0];
-        const effRole = String(op.user_role || op.role || '').trim().toUpperCase();
+        const effRole = String(op.role || '').trim().toUpperCase();
         if (effRole === 'FARMER_CUSTOMER' || effRole === 'GUEST_FARMER' || effRole === 'CUSTOMER') {
             throw new ForbiddenError(`User '${resolvedOperatorId}' is not authorized to record collections.`, 'UNAUTHORIZED_OPERATOR');
         }

@@ -91,7 +91,7 @@ Raw 512-dimensional facial embeddings are never transmitted or stored in plainte
   "customer_id": "c7a840e6-857e-41a2-9b24-91f16d7a4cb2",
   "template_ciphertext": "a9F3k1...[base64-encoded encrypted 512 float buffer]...",
   "iv": "dGVzdC1pdi0xMmM=",
-  "auth_tag": "ZzkzYWJjZDEyMzQ1Njc4OQ==",
+  "auth_tag": "<BASE64_GCM_AUTH_TAG_PLACEHOLDER>",
   "key_version": 1,
   "quality_score": 0.942,
   "liveness_score": 0.885,

@@ -66,9 +66,16 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
     poolAlpha = new Pool({ connectionString: alphaUrl, max: 15 });
     poolBeta = new Pool({ connectionString: betaUrl, max: 10 });
 
-    await MigrationRunner.runControlPlaneMigrations(poolCtrl);
-    await MigrationRunner.runTenantMigrations(poolAlpha, orgAlpha);
-    await MigrationRunner.runTenantMigrations(poolBeta, orgBeta);
+    const verRes = await poolAlpha.query(`SELECT current_setting('server_version_num')::int AS ver_num;`);
+    const verNum = Number(verRes.rows[0]?.ver_num || 0);
+    assert.ok(verNum >= 170000 && verNum < 180000, `Expected PostgreSQL 17.x, got ${verNum}`);
+
+    const ctrlMigs = await MigrationRunner.runControlPlaneMigrations(poolCtrl);
+    const alphaMigs = await MigrationRunner.runTenantMigrations(poolAlpha, orgAlpha);
+    const betaMigs = await MigrationRunner.runTenantMigrations(poolBeta, orgBeta);
+    assert.ok(ctrlMigs.every((m) => m.status === 'APPLIED'));
+    assert.ok(alphaMigs.every((m) => m.status === 'APPLIED'));
+    assert.ok(betaMigs.every((m) => m.status === 'APPLIED'));
 
     process.env['NODE_ENV'] = 'test';
     process.env['TEST_REAL_POSTGRES'] = '1';
@@ -134,8 +141,8 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
         [centerId, orgId, `${codePrefix} Center`]
       );
       await pool.query(
-        `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, user_role, status)
-         VALUES ($1, $2, $3, $4, $5, 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE');`,
+        `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, status)
+         VALUES ($1, $2, $3, $4, $5, 'COLLECTION_OPERATOR', 'ACTIVE');`,
         [opId, orgId, `op_${codePrefix.toLowerCase()}_${suffix}`, `+91982200${codePrefix === 'ALPHA' ? '1111' : '2222'}`, `Operator ${codePrefix}`]
       );
       await pool.query(

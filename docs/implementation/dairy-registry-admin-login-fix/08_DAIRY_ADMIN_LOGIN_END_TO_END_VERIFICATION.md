@@ -44,8 +44,8 @@ Comprehensive automated tests were executed against the running backend server t
    ```json
    {
      "success": true,
-     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-     "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+     "token": "<REDACTED_JWT_TOKEN>",
+     "refreshToken": "<REDACTED_REFRESH_TOKEN>",
      "expiresIn": 86400,
      "user": {
        "id": "37b8de06-0023-4935-b1bb-3d7152065e6e",
@@ -77,7 +77,7 @@ Comprehensive automated tests were executed against the running backend server t
    ```json
    {
      "success": true,
-     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+     "token": "<REDACTED_JWT_TOKEN>",
      "user": {
        "id": "272d8a02-b1c8-4a70-b23a-da5565ea77b3",
        "phone": "+917507495615",

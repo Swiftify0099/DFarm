@@ -57,7 +57,7 @@ All responses conform to the standard DFarm `ApiResponse` format:
   {
     "success": true,
     "data": {
-      "token": "eyJhbGciOiJIUzI1NiIs...",
+      "token": "<JWT_ACCESS_TOKEN_PLACEHOLDER>",
       "customer": {
         "id": "3c5561be-aff5-4109-8485-2b0c392f9d56",
         "farmerCode": "FC-SANGLI-001",
