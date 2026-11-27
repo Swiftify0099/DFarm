@@ -16,13 +16,13 @@ export interface KioskShiftSessionProps {
     closingOperatorName?: string | null;
     deviceIdentifier: string;
     deviceName: string;
-    totalLiters: number;
-    cowLiters: number;
-    buffaloLiters: number;
-    transactionCount: number;
-    totalAmount: number;
-    averageFat: number;
-    averageSnf: number;
+    totalLiters?: number;
+    cowLiters?: number;
+    buffaloLiters?: number;
+    transactionCount?: number;
+    totalAmount?: number;
+    averageFat?: number;
+    averageSnf?: number;
     timezone?: string;
 }
 export declare class KioskShiftSession {
@@ -67,9 +67,9 @@ export declare class KioskShiftSession {
         shift: ShiftType;
         status: ShiftSessionStatus;
         openedAt: string;
-        closedAt: string | null | undefined;
+        closedAt: string | null;
         openingOperatorName: string;
-        closingOperatorName: string | null | undefined;
+        closingOperatorName: string | null;
         deviceId: string;
         deviceIdentifier: string;
         deviceName: string;

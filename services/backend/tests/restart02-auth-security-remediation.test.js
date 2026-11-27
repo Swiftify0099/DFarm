@@ -122,6 +122,29 @@ test('RESTART-02: Complete Auth, Authorization, OTP, JWT & Secrets Remediation S
     [farmerBId, orgBId, centerBId]
   );
 
+  // Seed control-plane global customer identities & memberships for AccountAuthorityService
+  const globalFarmerAId = '22222222-1111-4111-a111-000000000501';
+  const globalFarmerBId = '22222222-1111-4111-a111-000000000502';
+  await db.query(
+    `INSERT INTO global_customer_identities (id, normalized_mobile_number, phone_verified_at)
+     VALUES ($1, '+919822000001', NOW()), ($2, '+919822000002', NOW())
+     ON CONFLICT (normalized_mobile_number) DO NOTHING;`,
+    [globalFarmerAId, globalFarmerBId]
+  );
+  await db.query(
+    `INSERT INTO customer_dairy_memberships (
+       id, global_customer_id, organization_id, tenant_customer_id, farmer_code,
+       membership_status, dairy_name, dairy_code, center_id, center_name
+     ) VALUES
+       ($1, $2, $3, $4, 'R02-F1', 'APPROVED', 'Restart02 Dairy A', 'R02-A', $5, 'Main R02 Center'),
+       ($6, $7, $8, $9, 'R02-F2', 'APPROVED', 'Restart02 Dairy B', 'R02-B', $10, 'Main R02B Center')
+     ON CONFLICT (organization_id, global_customer_id) DO NOTHING;`,
+    [
+      crypto.randomUUID(), globalFarmerAId, orgAId, farmerAId, centerAId,
+      crypto.randomUUID(), globalFarmerBId, orgBId, farmerBId, centerBId,
+    ]
+  );
+
   const superAdminToken = tokenService.signToken({
     userId: superAdminId,
     organizationId: orgAId,

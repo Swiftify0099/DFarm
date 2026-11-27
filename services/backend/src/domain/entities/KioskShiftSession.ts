@@ -19,21 +19,41 @@ export interface KioskShiftSessionProps {
   closingOperatorName?: string | null;
   deviceIdentifier: string;
   deviceName: string;
-  totalLiters: number;
-  cowLiters: number;
-  buffaloLiters: number;
-  transactionCount: number;
-  totalAmount: number;
-  averageFat: number;
-  averageSnf: number;
+  // Totals are optional on construction — newly opened shifts start at zero.
+  // The repository always reads them from the DB row on subsequent loads.
+  totalLiters?: number;
+  cowLiters?: number;
+  buffaloLiters?: number;
+  transactionCount?: number;
+  totalAmount?: number;
+  averageFat?: number;
+  averageSnf?: number;
   timezone?: string;
 }
 
 export class KioskShiftSession {
-  private props: KioskShiftSessionProps;
+  private props: Required<KioskShiftSessionProps>;
 
   constructor(props: KioskShiftSessionProps) {
-    this.props = { ...props };
+    // Apply domain-level defaults for all numeric totals so a newly opened
+    // shift never carries undefined/null into NOT NULL database columns.
+    const safeNum = (v: number | undefined | null): number =>
+      typeof v === 'number' && Number.isFinite(v) ? v : 0;
+
+    this.props = {
+      ...props,
+      timezone: props.timezone as any,
+      closedAt: props.closedAt ?? null,
+      closingOperatorId: props.closingOperatorId ?? null,
+      closingOperatorName: props.closingOperatorName ?? null,
+      totalLiters: safeNum(props.totalLiters),
+      cowLiters: safeNum(props.cowLiters),
+      buffaloLiters: safeNum(props.buffaloLiters),
+      transactionCount: safeNum(props.transactionCount),
+      totalAmount: safeNum(props.totalAmount),
+      averageFat: safeNum(props.averageFat),
+      averageSnf: safeNum(props.averageSnf),
+    };
   }
 
   public get id(): string {

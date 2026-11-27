@@ -406,25 +406,47 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
       assert.equal(Number((await poolOrg2.query('SELECT COUNT(*)::int AS c FROM ledger_transactions;')).rows[0].c), 0);
     });
 
-    await t.test('2. Advance debit: emergency cash advance reduces dairy liability balance & creates active advance', async () => {
+    await t.test('2. Advance debit: emergency cash advance reduces dairy liability balance, returns consistent balanceAfter & handles idempotent replay', async () => {
       const prevBalance = parseFloat(
         (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance
       );
       const advanceAmount = 200.0;
+      const advIdemKey = `IDEM-L12-ADV-${suffix}`;
       const advRes = await poolOrg1.query(
         `SELECT public.post_customer_advance(
            $1::uuid, $2::uuid, $3::uuid, $4::numeric, $5::text, 'MONTHLY_BILL_DEDUCTION'::varchar, $6::varchar, CURRENT_DATE
          ) AS result;`,
-        [customer1Id, center1Id, supervisorUserId, advanceAmount, 'Emergency purchase of veterinary medicines', `IDEM-L12-ADV-${suffix}`]
+        [customer1Id, center1Id, supervisorUserId, advanceAmount, 'Emergency purchase of veterinary medicines', advIdemKey]
       );
       const data = advRes.rows[0].result;
       assert.ok(data.advanceId);
       testAdvanceId = data.advanceId;
       assert.equal(Number(data.principalAmount), advanceAmount);
       assert.equal(data.status, 'ACTIVE');
+      assert.equal(data.isIdempotentReplay, false);
+      assert.equal(Number(data.previousBalance), prevBalance);
 
       const expectedBalance = parseFloat((prevBalance - advanceAmount).toFixed(2));
       assert.equal(Number(data.balanceAfter), expectedBalance);
+      assert.equal(Number(data.newBalance), expectedBalance);
+
+      // Idempotent replay must return matching balanceAfter & newBalance without double-debiting
+      const replayAdvRes = await poolOrg1.query(
+        `SELECT public.post_customer_advance(
+           $1::uuid, $2::uuid, $3::uuid, $4::numeric, $5::text, 'MONTHLY_BILL_DEDUCTION'::varchar, $6::varchar, CURRENT_DATE
+         ) AS result;`,
+        [customer1Id, center1Id, supervisorUserId, advanceAmount, 'Emergency purchase of veterinary medicines', advIdemKey]
+      );
+      const replayData = replayAdvRes.rows[0].result;
+      assert.equal(replayData.isIdempotentReplay, true);
+      assert.equal(replayData.advanceId, testAdvanceId);
+      assert.equal(Number(replayData.balanceAfter), expectedBalance);
+      assert.equal(Number(replayData.newBalance), expectedBalance);
+
+      const balAfterReplay = parseFloat(
+        (await poolOrg1.query('SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;', [customer1Id])).rows[0].current_balance
+      );
+      assert.equal(balAfterReplay, expectedBalance);
 
       const lt = await poolOrg1.query("SELECT * FROM ledger_transactions WHERE reference_id = $1 AND transaction_type = 'CUSTOMER_ADVANCE_DEBIT';", [testAdvanceId]);
       assert.equal(lt.rows.length, 1);
@@ -749,10 +771,15 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
         adminUserId,
       ]);
       const report = recRes.rows[0].result;
-      assert.equal(report.customerId, customer1Id);
-      assert.equal(report.isReconciled, true);
-      assert.equal(report.discrepancyCount, 0);
-      assert.equal(Number(report.accountBalance), Number(report.computedBalance));
+      const reportJson = JSON.stringify(report, null, 2);
+      assert.equal(report.customerId, customer1Id, reportJson);
+      assert.equal(report.isReconciled, true, `Expected clean ledger to reconcile cleanly; discrepancies: ${reportJson}`);
+      assert.equal(report.discrepancyCount, 0, reportJson);
+      assert.deepEqual(report.discrepancies, [], reportJson);
+      assert.equal(Number(report.accountBalance), Number(report.computedBalance), reportJson);
+      const netFromSummary = parseFloat((Number(report.summary.totalCredits) - Number(report.summary.totalDebits)).toFixed(2));
+      assert.equal(Number(report.accountBalance), netFromSummary, reportJson);
+      assert.equal(Number(report.summary.journalTotalDebits), Number(report.summary.journalTotalCredits), reportJson);
     });
 
     await t.test('18. Reconciliation mismatch detection: detects running balance drift without auto-correcting', async () => {
@@ -870,6 +897,136 @@ test('DFarm Phase 12: Customer Financial Accounting & Double-Entry Ledger Suite 
         .get(`/api/v1/ledger/entries?customerId=${customer1Id}`)
         .set('Authorization', `Bearer ${operatorToken}`);
       assert.equal(opEntriesRes.status, 403);
+    });
+
+    await t.test('23. Fix D: Customer auth resolves tenant DB strictly, enforces ownership/status & fails closed on outage', async () => {
+      // 23a. Valid customer authentication succeeds (200) and resolves from tenant DB, never control-plane customers
+      const validSummary = await request(app)
+        .get('/api/v1/ledger/summary')
+        .set('Authorization', `Bearer ${customer1Token}`);
+      assert.equal(validSummary.status, 200);
+      assert.equal(validSummary.body.data.customerId, customer1Id);
+
+      // 23b. Customer attempting to read another customer's ledger -> 403
+      const crossCustLedger = await request(app)
+        .get(`/api/v1/ledger/accounts/${customer2Id}`)
+        .set('Authorization', `Bearer ${customer1Token}`);
+      assert.equal(crossCustLedger.status, 403);
+
+      // 23c. Wrong tenant ID in JWT (customer1 belongs to org1Id, token claims org2Id) -> 403 TENANT_CONTEXT_MISMATCH
+      const wrongTenantToken = tokenService.signToken({
+        userId: customer1Id,
+        organizationId: org2Id,
+        centerId: center2Id,
+        globalCustomerId: globalCust1Id,
+        role: 'FARMER_CUSTOMER',
+        actorType: 'CUSTOMER',
+        fullName: 'Ramesh L12',
+      });
+      const wrongTenantRes = await request(app)
+        .get('/api/v1/ledger/summary')
+        .set('Authorization', `Bearer ${wrongTenantToken}`);
+      assert.equal(wrongTenantRes.status, 403);
+
+      // 23d. Customer belonging to another dairy (org2CustomerId with org1Id claim) -> 403
+      const otherDairyCustomerToken = tokenService.signToken({
+        userId: org2CustomerId,
+        organizationId: org1Id,
+        centerId: center1Id,
+        globalCustomerId: globalCustOrg2Id,
+        role: 'FARMER_CUSTOMER',
+        actorType: 'CUSTOMER',
+        fullName: 'Anand L12',
+      });
+      const otherDairyRes = await request(app)
+        .get('/api/v1/ledger/summary')
+        .set('Authorization', `Bearer ${otherDairyCustomerToken}`);
+      assert.equal(otherDairyRes.status, 403);
+
+      // 23e. Missing membership -> fail closed (401)
+      const unmappedCustToken = tokenService.signToken({
+        userId: crypto.randomUUID(),
+        organizationId: org1Id,
+        globalCustomerId: crypto.randomUUID(),
+        role: 'FARMER_CUSTOMER',
+        actorType: 'CUSTOMER',
+      });
+      const missingMemRes = await request(app)
+        .get('/api/v1/ledger/summary')
+        .set('Authorization', `Bearer ${unmappedCustToken}`);
+      assert.equal(missingMemRes.status, 401);
+
+      // 23f. Suspended and soft-deleted customer -> 403
+      const suspCustId = crypto.randomUUID();
+      const suspGlobalId = crypto.randomUUID();
+      const delCustId = crypto.randomUUID();
+      const delGlobalId = crypto.randomUUID();
+      await poolOrg1.query(
+        `INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted, global_customer_id)
+         VALUES
+           ($1, $3, $4, 'FC-SUSP', 'Suspended Farmer', '+9198' || $5 || '8', 'SUSPENDED', 'APPROVED', FALSE, $6),
+           ($2, $3, $4, 'FC-DEL', 'Deleted Farmer', '+9198' || $5 || '9', 'ACTIVE', 'APPROVED', TRUE, $7);`,
+        [suspCustId, delCustId, org1Id, center1Id, suffix, suspGlobalId, delGlobalId]
+      );
+      await poolCtrl.query(
+        `INSERT INTO global_customer_identities (id, normalized_mobile_number, phone_verified_at)
+         VALUES ($1, '+9198' || $3 || '8', NOW()), ($2, '+9198' || $3 || '9', NOW());`,
+        [suspGlobalId, delGlobalId, suffix]
+      );
+      await poolCtrl.query(
+        `INSERT INTO customer_dairy_memberships (id, global_customer_id, organization_id, tenant_customer_id, farmer_code, membership_status, dairy_name, dairy_code, center_id, center_name)
+         VALUES
+           ($1, $2, $3, $4, 'FC-SUSP', 'APPROVED', 'L12 Isolated Dairy A', $5, $6, 'L12 Center A'),
+           ($7, $8, $3, $9, 'FC-DEL', 'APPROVED', 'L12 Isolated Dairy A', $5, $6, 'L12 Center A');`,
+        [crypto.randomUUID(), suspGlobalId, org1Id, suspCustId, org1Code, center1Id, crypto.randomUUID(), delGlobalId, delCustId]
+      );
+      const suspToken = tokenService.signToken({
+        userId: suspCustId,
+        organizationId: org1Id,
+        globalCustomerId: suspGlobalId,
+        role: 'FARMER_CUSTOMER',
+        actorType: 'CUSTOMER',
+      });
+      const delToken = tokenService.signToken({
+        userId: delCustId,
+        organizationId: org1Id,
+        globalCustomerId: delGlobalId,
+        role: 'FARMER_CUSTOMER',
+        actorType: 'CUSTOMER',
+      });
+      assert.equal((await request(app).get('/api/v1/ledger/summary').set('Authorization', `Bearer ${suspToken}`)).status, 403);
+      assert.equal((await request(app).get('/api/v1/ledger/summary').set('Authorization', `Bearer ${delToken}`)).status, 403);
+
+      // 23g. Control-plane DB unavailable -> fail closed 503 AUTH_DB_UNAVAILABLE
+      const origCtrlQuery = controlPlaneAdapter.query;
+      controlPlaneAdapter.query = async (sql, params) => {
+        if (typeof sql === 'string' && sql.includes('customer_dairy_memberships')) {
+          throw new Error('Simulated control-plane outage');
+        }
+        return origCtrlQuery(sql, params);
+      };
+      try {
+        const ctrlOutageRes = await request(app)
+          .get('/api/v1/ledger/summary')
+          .set('Authorization', `Bearer ${customer1Token}`);
+        assert.equal(ctrlOutageRes.status, 503);
+      } finally {
+        controlPlaneAdapter.query = origCtrlQuery;
+      }
+
+      // 23h. Tenant DB unavailable -> fail closed 503 AUTH_DB_UNAVAILABLE / TENANT_DATABASE_UNAVAILABLE
+      const origGetStrict = tenantDbManager.getStrictTenantDb.bind(tenantDbManager);
+      tenantDbManager.getStrictTenantDb = async () => {
+        throw new Error('Simulated tenant DB outage');
+      };
+      try {
+        const tenantOutageRes = await request(app)
+          .get('/api/v1/ledger/summary')
+          .set('Authorization', `Bearer ${customer1Token}`);
+        assert.equal(tenantOutageRes.status, 503);
+      } finally {
+        tenantDbManager.getStrictTenantDb = origGetStrict;
+      }
     });
   } finally {
     try {

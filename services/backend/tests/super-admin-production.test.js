@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import request from 'supertest';
 import { createApp } from '../dist/app.js';
 import { db } from '../dist/infrastructure/database/PostgresPool.js';
+import { tenantDbManager } from '../dist/infrastructure/database/TenantDatabaseManager.js';
 import { HmacJwtTokenService } from '../dist/infrastructure/security/HmacJwtTokenService.js';
 import { CredentialEncryption } from '../dist/infrastructure/security/CredentialEncryption.js';
 import { superAdminRepo } from '../dist/infrastructure/repositories/PostgresSuperAdminRepository.js';
@@ -63,6 +64,46 @@ test('Super Admin Access Control & Role Boundary Verification', async (t) => {
      VALUES ('00000000-0000-0000-0000-000000000002', $1, $2, 'F-SA2', 'Ramesh Patil', '+919800010002', 'ACTIVE', 'APPROVED', FALSE)
      ON CONFLICT (id) DO NOTHING;`,
     [testOrgId, testCenterId]
+  );
+
+  const saFarmerGlobalId = '00000000-0000-0000-0000-000000000202';
+  await db.query(
+    `INSERT INTO global_customer_identities (id, normalized_mobile_number, phone_verified_at)
+     VALUES ($1, '+919800010002', NOW())
+     ON CONFLICT (normalized_mobile_number) DO NOTHING;`,
+    [saFarmerGlobalId]
+  );
+  await tenantDbManager.provisionTenantDatabase({
+    dairyId: testOrgId,
+    dairyCode: 'SA-TEST-10',
+    dairyName: 'SuperAdmin Test Org',
+  });
+  const tenantSaDb = await tenantDbManager.getStrictTenantDb(testOrgId);
+  await tenantSaDb.query(
+    `INSERT INTO organizations (id, name, code, status)
+     VALUES ($1, 'SuperAdmin Test Org', 'SA-TEST-10', 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING;`,
+    [testOrgId]
+  );
+  await tenantSaDb.query(
+    `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+     VALUES ($1, $2, 'C-SA10', 'SA Test Center', 'Road 1', 'V1', 'D1', 'MH', '416001', '+919800010010', 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING;`,
+    [testCenterId, testOrgId]
+  );
+  await tenantSaDb.query(
+    `INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted, global_customer_id)
+     VALUES ('00000000-0000-0000-0000-000000000002', $1, $2, 'F-SA2', 'Ramesh Patil', '+919800010002', 'ACTIVE', 'APPROVED', FALSE, $3)
+     ON CONFLICT (id) DO NOTHING;`,
+    [testOrgId, testCenterId, saFarmerGlobalId]
+  );
+  await db.query(
+    `INSERT INTO customer_dairy_memberships (
+       id, global_customer_id, organization_id, tenant_customer_id, farmer_code,
+       membership_status, dairy_name, dairy_code, center_id, center_name
+     ) VALUES ($1, $2, $3, '00000000-0000-0000-0000-000000000002', 'F-SA2', 'APPROVED', 'SuperAdmin Test Org', 'SA-TEST-10', $4, 'SA Test Center')
+     ON CONFLICT (organization_id, global_customer_id) DO NOTHING;`,
+    [crypto.randomUUID(), saFarmerGlobalId, testOrgId, testCenterId]
   );
 
   await t.test('1. Super Admin with SUPER_ADMIN role can access platform metrics', async () => {

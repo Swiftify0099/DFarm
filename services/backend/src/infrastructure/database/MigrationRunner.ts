@@ -65,6 +65,7 @@ export const MIGRATION_MANIFEST: MigrationManifestEntry[] = [
   { version: '044', filename: '044_revoked_tokens_durable_revocation.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Durable token revocation table for distributed fail-closed JWT invalidation (RESTART-02.1)' },
   { version: '045', filename: '045_kiosk_shift_session_concurrency_and_ownership.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Atomic partial unique index for active kiosk shift sessions and tenant-scoped lookup indexes (RESTART-03)' },
   { version: '046', filename: '046_complete_milk_collection_session_organization_id.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Include organization_id in complete_milk_collection_session milk_collections insert after 039 NOT NULL constraint' },
+  { version: '047', filename: '047_advance_response_contract_balanceAfter.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Fix post_customer_advance response contract: add balanceAfter alias to new-execution return for consistency with idempotent-replay path (RESTART-03.5 Fix F)' },
 ];
 
 export const CONTROL_PLANE_MIGRATIONS = MIGRATION_MANIFEST.filter(

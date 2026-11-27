@@ -26,6 +26,39 @@ export class Money {
         return this.amount.toFixed(digits);
     }
 }
+/**
+ * LedgerBalance — a signed running-balance value object.
+ *
+ * Unlike Money (which enforces non-negative amounts for individual transaction
+ * entries), a customer ledger running balance may legitimately be negative when
+ * the farmer owes the dairy (e.g. after a cash advance exceeds milk earnings).
+ *
+ * Key invariants:
+ *   • The running balance itself can be any finite number (positive, zero, or negative).
+ *   • Individual transaction amounts (credits, debits) are always non-negative — use Money.
+ *   • Round-half-up to 2 decimal places matches DFarm NUMERIC(12,2) PostgreSQL precision.
+ */
+export class LedgerBalance {
+    amount;
+    constructor(amount) {
+        if (isNaN(amount) || !isFinite(amount)) {
+            throw new DomainValidationError('Invalid ledger balance: must be a finite number (positive, zero, or negative)');
+        }
+        this.amount = roundHalfUp(amount, 2);
+    }
+    get value() {
+        return this.amount;
+    }
+    add(transactionAmount) {
+        return new LedgerBalance(this.amount + roundHalfUp(transactionAmount, 2));
+    }
+    subtract(transactionAmount) {
+        return new LedgerBalance(this.amount - roundHalfUp(transactionAmount, 2));
+    }
+    toFixed(digits = 2) {
+        return this.amount.toFixed(digits);
+    }
+}
 export class FatPercentage {
     val;
     constructor(val, milkCategory) {

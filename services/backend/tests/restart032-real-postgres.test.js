@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import pg from 'pg';
+import { assertDisposablePg17Cluster } from '../../../scripts/pg17-safety-guard.js';
 import {
   MigrationRunner,
   CONTROL_PLANE_MIGRATIONS,
@@ -38,7 +39,20 @@ test('RESTART-03.2 Real PostgreSQL 17 Operational Repository Isolation & Concurr
     return;
   }
 
-  const adminPool = new pg.Pool({ connectionString: TEST_PG_URL, connectionTimeoutMillis: 3000 });
+  await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
+
+  const poolErrors = [];
+  const attachPoolErrorGuard = (pool, label) => {
+    pool.on('error', (err) => {
+      poolErrors.push({ label, code: err?.code, message: err?.message || String(err) });
+    });
+    return pool;
+  };
+
+  const adminPool = attachPoolErrorGuard(
+    new pg.Pool({ connectionString: TEST_PG_URL, connectionTimeoutMillis: 3000 }),
+    'adminPool'
+  );
   const suffix = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
   const dbNameCtrl = `dfarm_r32_ctrl_${suffix}`;
   const dbNameA = `dfarm_r32_a_${suffix}`;
@@ -62,9 +76,9 @@ test('RESTART-03.2 Real PostgreSQL 17 Operational Repository Isolation & Concurr
     await adminPool.query(`CREATE DATABASE ${dbNameA};`);
     await adminPool.query(`CREATE DATABASE ${dbNameB};`);
 
-    poolCtrl = new pg.Pool({ connectionString: makeDbUrl(dbNameCtrl), max: 5 });
-    poolA = new pg.Pool({ connectionString: makeDbUrl(dbNameA), max: 10 });
-    poolB = new pg.Pool({ connectionString: makeDbUrl(dbNameB), max: 5 });
+    poolCtrl = attachPoolErrorGuard(new pg.Pool({ connectionString: makeDbUrl(dbNameCtrl), max: 5 }), 'poolCtrl');
+    poolA = attachPoolErrorGuard(new pg.Pool({ connectionString: makeDbUrl(dbNameA), max: 10 }), 'poolA');
+    poolB = attachPoolErrorGuard(new pg.Pool({ connectionString: makeDbUrl(dbNameB), max: 5 }), 'poolB');
 
     const verRes = await poolA.query(`SELECT current_setting('server_version_num')::int AS ver_num;`);
     const verNum = Number(verRes.rows[0]?.ver_num || 0);
@@ -157,13 +171,44 @@ test('RESTART-03.2 Real PostgreSQL 17 Operational Repository Isolation & Concurr
       const bal = Number((await poolA.query(`SELECT current_balance FROM customer_ledger_accounts WHERE customer_id = $1;`, [custA])).rows[0].current_balance);
       assert.equal(bal, 200);
     });
+
+    assert.deepEqual(poolErrors, [], `Unexpected async PostgreSQL pool errors: ${JSON.stringify(poolErrors)}`);
   } finally {
-    await poolCtrl?.end().catch(() => {});
-    await poolA?.end().catch(() => {});
-    await poolB?.end().catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameA} WITH (FORCE);`).catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameB} WITH (FORCE);`).catch(() => {});
-    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameCtrl} WITH (FORCE);`).catch(() => {});
-    await adminPool.end().catch(() => {});
+    const closePoolCleanly = async (pool) => {
+      if (!pool) return;
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline) {
+        if (pool.totalCount === pool.idleCount && pool.waitingCount === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await pool.end();
+    };
+
+    const waitForDbIdle = async (dbName) => {
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        const res = await adminPool.query(
+          `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+          [dbName]
+        );
+        if (Number(res.rows[0]?.cnt || 0) === 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    };
+
+    await closePoolCleanly(poolCtrl);
+    await closePoolCleanly(poolA);
+    await closePoolCleanly(poolB);
+
+    await waitForDbIdle(dbNameA);
+    await waitForDbIdle(dbNameB);
+    await waitForDbIdle(dbNameCtrl);
+
+    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameA} WITH (FORCE);`);
+    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameB} WITH (FORCE);`);
+    await adminPool.query(`DROP DATABASE IF EXISTS ${dbNameCtrl} WITH (FORCE);`);
+    await adminPool.end();
+
+    assert.deepEqual(poolErrors, [], `Unexpected async pool errors during shutdown: ${JSON.stringify(poolErrors)}`);
   }
 });

@@ -108,17 +108,30 @@ test('RESTART-02.1: Durable Token Revocation, Account Authority, Centers & Regis
     [activeCustId, suspCustId, delCustId, suspOrgCustId, orgActiveA, centerA1, orgSuspC]
   );
 
+  const suspCustGlobalId = '44444444-1111-4111-a111-000000000502';
+  const delCustGlobalId = '44444444-1111-4111-a111-000000000503';
+  const suspOrgCustGlobalId = '44444444-1111-4111-a111-000000000504';
+
   await db.query(
     `INSERT INTO global_customer_identities (id, normalized_mobile_number, phone_verified_at)
-     VALUES ($1, '+919900010401', NOW())
+     VALUES
+       ($1, '+919900010401', NOW()),
+       ($2, '+919900010402', NOW()),
+       ($3, '+919900010403', NOW()),
+       ($4, '+919900010404', NOW())
      ON CONFLICT (normalized_mobile_number) DO NOTHING;`,
-    [globalCustActiveId]
+    [globalCustActiveId, suspCustGlobalId, delCustGlobalId, suspOrgCustGlobalId]
   );
 
   await tenantDbManager.provisionTenantDatabase({
     dairyId: orgActiveA,
     dairyCode: 'R021_ALPHA',
     dairyName: 'R021 Dairy Alpha',
+  });
+  await tenantDbManager.provisionTenantDatabase({
+    dairyId: orgSuspC,
+    dairyCode: 'R021_SUSP',
+    dairyName: 'R021 Dairy Suspended',
   });
 
   const tenantDbA = await tenantDbManager.getTenantDb(orgActiveA);
@@ -135,10 +148,52 @@ test('RESTART-02.1: Durable Token Revocation, Account Authority, Centers & Regis
     [centerA1, orgActiveA]
   );
   await tenantDbA.query(
-    `INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted)
-     VALUES ($1, $2, $3, 'F-901', 'Active Farmer', '+919900010401', 'ACTIVE', 'APPROVED', FALSE)
+    `INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted, global_customer_id)
+     VALUES
+       ($1, $4, $5, 'F-901', 'Active Farmer', '+919900010401', 'ACTIVE', 'APPROVED', FALSE, $6),
+       ($2, $4, $5, 'F-902', 'Suspended Farmer', '+919900010402', 'SUSPENDED', 'APPROVED', FALSE, $7),
+       ($3, $4, $5, 'F-903', 'Deleted Farmer', '+919900010403', 'ACTIVE', 'APPROVED', TRUE, $8)
      ON CONFLICT (id) DO NOTHING;`,
-    [activeCustId, orgActiveA, centerA1]
+    [activeCustId, suspCustId, delCustId, orgActiveA, centerA1, globalCustActiveId, suspCustGlobalId, delCustGlobalId]
+  );
+
+  const centerC1 = '44444444-1111-4111-a111-000000000204';
+  const tenantDbC = await tenantDbManager.getTenantDb(orgSuspC);
+  await tenantDbC.query(
+    `INSERT INTO organizations (id, name, code, status)
+     VALUES ($1, 'R021 Dairy Suspended', 'R021_SUSP', 'SUSPENDED')
+     ON CONFLICT (id) DO NOTHING;`,
+    [orgSuspC]
+  );
+  await tenantDbC.query(
+    `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+     VALUES ($1, $2, 'R021-C1', 'Susp Center One', 'Road 4', 'V4', 'D3', 'MH', '416004', '+919900010204', 'ACTIVE')
+     ON CONFLICT (id) DO NOTHING;`,
+    [centerC1, orgSuspC]
+  );
+  await tenantDbC.query(
+    `INSERT INTO customers (id, organization_id, primary_center_id, farmer_code, full_name, normalized_mobile_number, status, registration_status, is_deleted, global_customer_id)
+     VALUES ($1, $2, $3, 'F-904', 'SuspOrg Farmer', '+919900010404', 'ACTIVE', 'APPROVED', FALSE, $4)
+     ON CONFLICT (id) DO NOTHING;`,
+    [suspOrgCustId, orgSuspC, centerC1, suspOrgCustGlobalId]
+  );
+
+  await db.query(
+    `INSERT INTO customer_dairy_memberships (
+       id, global_customer_id, organization_id, tenant_customer_id, farmer_code,
+       membership_status, dairy_name, dairy_code, center_id, center_name
+     ) VALUES
+       ($1, $2, $3, $4, 'F-901', 'APPROVED', 'R021 Dairy Alpha', 'R021_ALPHA', $5, 'Alpha Center One'),
+       ($6, $7, $3, $8, 'F-902', 'SUSPENDED', 'R021 Dairy Alpha', 'R021_ALPHA', $5, 'Alpha Center One'),
+       ($9, $10, $3, $11, 'F-903', 'APPROVED', 'R021 Dairy Alpha', 'R021_ALPHA', $5, 'Alpha Center One'),
+       ($12, $13, $14, $15, 'F-904', 'APPROVED', 'R021 Dairy Suspended', 'R021_SUSP', $16, 'Susp Center One')
+     ON CONFLICT (organization_id, global_customer_id) DO NOTHING;`,
+    [
+      crypto.randomUUID(), globalCustActiveId, orgActiveA, activeCustId, centerA1,
+      crypto.randomUUID(), suspCustGlobalId, suspCustId,
+      crypto.randomUUID(), delCustGlobalId, delCustId,
+      crypto.randomUUID(), suspOrgCustGlobalId, orgSuspC, suspOrgCustId, centerC1,
+    ]
   );
 
   const superAdminToken = tokenService.signToken({

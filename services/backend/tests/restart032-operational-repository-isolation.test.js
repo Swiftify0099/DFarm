@@ -691,4 +691,120 @@ test('RESTART-03.2: Operational Repositories, Multi-Dairy Discovery & Dairy Admi
       db.query = origCentralQ;
     }
   });
+
+  // ============================================================================
+  // 5. RESTART-03.5A DOMAIN, LEDGER, AUTH & MEMBERSHIP ALIGNMENT CHECKS
+  // ============================================================================
+  await suite.test('5. RESTART-03.5A domain defaults, signed ledger balance, manual adjustment entity & strict customer auth checks', async () => {
+    const { KioskShiftSession } = await import('../dist/domain/entities/KioskShiftSession.js');
+    const { CustomerLedgerAccount } = await import('../dist/domain/entities/CustomerLedgerAccount.js');
+    const { Money, LedgerBalance } = await import('../dist/domain/value-objects/index.js');
+    const { accountAuthorityService } = await import('../dist/infrastructure/security/AccountAuthorityService.js');
+
+    // 5a. KioskShiftSession zero-valued defaults even when omitted or undefined
+    const freshSession = new KioskShiftSession({
+      id: crypto.randomUUID(),
+      sessionCode: 'S-DEF-01',
+      organizationId: orgA,
+      centerId: centerA,
+      businessDate: '2026-11-27',
+      shift: 'MORNING',
+      status: 'OPEN',
+      openedAt: new Date().toISOString(),
+      openingOperatorId: adminA,
+      openingOperatorName: 'Admin A',
+      deviceIdentifier: 'KIOSK-DEF-1',
+      deviceName: 'Kiosk Default',
+      totalLiters: undefined,
+    });
+    assert.deepEqual(freshSession.totals, {
+      totalLiters: 0,
+      cowLiters: 0,
+      buffaloLiters: 0,
+      transactionCount: 0,
+      totalAmount: 0,
+      averageFat: 0,
+      averageSnf: 0,
+    });
+
+    // 5b. Signed LedgerBalance allows negative running balance while Money rejects negative transaction amount
+    assert.throws(() => new Money(-10), /non-negative/i);
+    assert.equal(new LedgerBalance(-650.005).value, -650.01);
+    const signedAcct = new CustomerLedgerAccount({
+      id: crypto.randomUUID(),
+      customerId: multiA.custId,
+      organizationId: orgA,
+      currentBalance: 100,
+      totalMilkEarnings: 100,
+      totalDeductions: 0,
+      lastUpdated: new Date().toISOString(),
+    });
+    const negDebitEntry = signedAcct.postDebit(750, 'FEED_DEBIT', 'Feed debit exceeding payable balance');
+    assert.equal(negDebitEntry.runningBalance, -650);
+    assert.equal(signedAcct.currentBalance, -650);
+    assert.throws(() => signedAcct.postDebit(-25, 'FEED_DEBIT', 'Negative amount invalid'), /non-negative/i);
+
+    // 5c. PostgresLedgerRepository.appendEntry with MANUAL_ADJUSTMENT writes MANUAL_ADJUSTMENT (never MILK_COLLECTION)
+    const adjRes = await ledgerRepo.appendEntry({
+      organizationId: orgA,
+      customerId: multiA.custId,
+      operatorId: adminA,
+      entryType: 'CREDIT',
+      amount: 150,
+      sourceModule: 'MANUAL_ADJUSTMENT',
+      description: 'Offline manual adjustment check',
+    });
+    const adjTxnRow = await tenantDbA.query(
+      `SELECT transaction_type, reference_entity FROM ledger_transactions WHERE id = $1;`,
+      [adjRes.ledgerTransactionId]
+    );
+    assert.equal(adjTxnRow.rows[0].transaction_type, 'LEDGER_ADJUSTMENT_CREDIT');
+    assert.equal(adjTxnRow.rows[0].reference_entity, 'MANUAL_ADJUSTMENT');
+
+    // 5d. AccountAuthorityService.verifyCustomer never queries central `customers` and rejects wrong tenant with 403
+    const ctrlDb = tenantDbManager.getControlPlaneDb();
+    const origCtrlQuery = ctrlDb.query.bind(ctrlDb);
+    ctrlDb.query = async (sql, params) => {
+      if (typeof sql === 'string' && /\bFROM\s+customers\b/i.test(sql)) {
+        throw new Error('FORBIDDEN_CENTRAL_CUSTOMERS_QUERY');
+      }
+      return origCtrlQuery(sql, params);
+    };
+    try {
+      const verified = await accountAuthorityService.verifyCustomer({
+        userId: multiA.custId,
+        claimedRole: 'FARMER_CUSTOMER',
+        organizationId: orgA,
+        globalCustomerId: multiA.globalCustomerId,
+        allowGuestFarmer: false,
+        strictActiveOnly: true,
+      });
+      assert.equal(verified?.userId, multiA.custId);
+      assert.equal(verified?.organizationId, orgA);
+
+      await assert.rejects(
+        () =>
+          accountAuthorityService.verifyCustomer({
+            userId: multiA.custId,
+            claimedRole: 'FARMER_CUSTOMER',
+            organizationId: orgB,
+            globalCustomerId: multiA.globalCustomerId,
+            allowGuestFarmer: false,
+            strictActiveOnly: true,
+          }),
+        (err) => err.statusCode === 403 && err.code === 'TENANT_CONTEXT_MISMATCH'
+      );
+
+      const missing = await accountAuthorityService.verifyCustomer({
+        userId: crypto.randomUUID(),
+        claimedRole: 'FARMER_CUSTOMER',
+        organizationId: orgA,
+        allowGuestFarmer: false,
+        strictActiveOnly: true,
+      });
+      assert.equal(missing, null);
+    } finally {
+      ctrlDb.query = origCtrlQuery;
+    }
+  });
 });

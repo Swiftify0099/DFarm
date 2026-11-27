@@ -257,6 +257,37 @@ export class PostgresLedgerRepository {
     }
     async appendEntry(params) {
         const isCredit = params.entryType === 'CREDIT';
+        const source = String(params.sourceModule || '').trim().toUpperCase();
+        let transactionType;
+        let referenceEntity;
+        let contraAccountType;
+        if (source === 'MANUAL_ADJUSTMENT') {
+            transactionType = isCredit ? 'LEDGER_ADJUSTMENT_CREDIT' : 'LEDGER_ADJUSTMENT_DEBIT';
+            referenceEntity = 'MANUAL_ADJUSTMENT';
+            contraAccountType = isCredit ? 'MILK_PURCHASE_EXPENSE' : 'CASH_BANK';
+        }
+        else if (source === 'COLLECTION_ADJUSTMENT') {
+            transactionType = isCredit ? 'LEDGER_ADJUSTMENT_CREDIT' : 'LEDGER_ADJUSTMENT_DEBIT';
+            referenceEntity = params.referenceId && UUID_REGEX.test(params.referenceId) ? 'MILK_COLLECTION' : 'MANUAL_ADJUSTMENT';
+            contraAccountType = 'MILK_PURCHASE_EXPENSE';
+        }
+        else if (source === 'MILK_COLLECTION' || (isCredit && params.referenceId && UUID_REGEX.test(params.referenceId) && !source)) {
+            transactionType = 'MILK_COLLECTION_CREDIT';
+            referenceEntity = 'MILK_COLLECTION';
+            contraAccountType = 'MILK_PURCHASE_EXPENSE';
+        }
+        else if (source === 'FEED_SALE' || !isCredit) {
+            transactionType = 'FEED_PURCHASE_DEBIT';
+            referenceEntity = 'FEED_SALE';
+            contraAccountType = 'FEED_INVENTORY';
+        }
+        else {
+            // Generic credit entry without a milk_collections referenceId must NOT claim
+            // reference_entity = 'MILK_COLLECTION', otherwise reconcile_customer_ledger flags it as ORPHAN_TRANSACTION.
+            transactionType = 'LEDGER_ADJUSTMENT_CREDIT';
+            referenceEntity = 'MANUAL_ADJUSTMENT';
+            contraAccountType = 'MILK_PURCHASE_EXPENSE';
+        }
         return this.executeJournalMutation({
             organizationId: params.organizationId,
             customerId: params.customerId,
@@ -264,12 +295,12 @@ export class PostgresLedgerRepository {
             entryId: crypto.randomUUID(),
             direction: params.entryType,
             amount: params.amount,
-            transactionType: isCredit ? 'MILK_COLLECTION_CREDIT' : 'FEED_PURCHASE_DEBIT',
-            referenceEntity: isCredit ? 'MILK_COLLECTION' : 'FEED_SALE',
+            transactionType,
+            referenceEntity,
             referenceId: params.referenceId,
             description: params.description,
             idempotencyKey: params.idempotencyKey || `LEDGER-${crypto.randomUUID()}`,
-            contraAccountType: isCredit ? 'MILK_PURCHASE_EXPENSE' : 'FEED_INVENTORY',
+            contraAccountType,
         });
     }
     async findById(accountId, organizationId) {

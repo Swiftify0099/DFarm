@@ -28,6 +28,20 @@ async function canConnectRealPostgres(url) {
   }
 }
 
+function normalizePgTextArray(value) {
+  if (Array.isArray(value)) {
+    return value.map(String);
+  }
+  if (typeof value === 'string' && value.startsWith('{') && value.endsWith('}')) {
+    return value
+      .slice(1, -1)
+      .split(',')
+      .map((s) => s.trim().replace(/^"(.*)"$/, '$1'))
+      .filter(Boolean);
+  }
+  return [];
+}
+
 function assertTrackAppliedInOrder(results, expectedTrack, trackLabel) {
   assert.equal(
     results.length,
@@ -137,13 +151,16 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
         `SELECT
            c.relname AS indexname,
            i.indisunique AS is_unique,
+           i.indisvalid AS is_valid,
            pg_get_expr(i.indpred, i.indrelid) AS predicate_expr,
            pg_get_indexdef(i.indexrelid) AS indexdef,
-           ARRAY(
-             SELECT a.attname
-             FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
-             JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
-             ORDER BY k.ord
+           array_to_json(
+             ARRAY(
+               SELECT a.attname::text
+               FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+               JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum
+               ORDER BY k.ord
+             )
            ) AS columns
          FROM pg_index i
          JOIN pg_class c ON c.oid = i.indexrelid
@@ -157,7 +174,15 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
       const idxRow = idxRes.rows[0];
       assert.equal(idxRow.indexname, 'uq_kiosk_shift_sessions_active_open');
       assert.equal(idxRow.is_unique, true);
-      assert.deepEqual(idxRow.columns, ['organization_id', 'center_id', 'device_identifier']);
+      assert.equal(idxRow.is_valid, true);
+      assert.ok(
+        Array.isArray(idxRow.columns),
+        `Expected columns to be a JavaScript Array via array_to_json, got ${typeof idxRow.columns}: ${JSON.stringify(idxRow.columns)}`
+      );
+      assert.deepEqual(
+        normalizePgTextArray(idxRow.columns),
+        ['organization_id', 'center_id', 'device_identifier']
+      );
       const predicate = String(idxRow.predicate_expr || '');
       assert.ok(predicate.length > 0, 'Expected partial index predicate on uq_kiosk_shift_sessions_active_open');
       assert.match(predicate, /\bstatus\b/i);
@@ -240,6 +265,22 @@ test('RESTART-03 Real PostgreSQL 17 Isolation, FK, Partial Index & Ownership Ver
         [orgA, centerA, devA]
       );
       assert.equal(openRows.rows[0].c, 1);
+
+      // CLOSED sessions for the same (organization_id, center_id, device_identifier) must NOT be blocked by the partial index
+      await poolA.query(
+        `INSERT INTO kiosk_shift_sessions (
+           id, session_code, organization_id, center_id, business_date, shift, status,
+           opened_at, closed_at, opening_operator_id, closing_operator_id, device_identifier, device_name
+         ) VALUES
+           ($1, 'SH-PG-CLOSED-1', $3, $4, CURRENT_DATE - 1, 'MORNING', 'CLOSED', NOW() - INTERVAL '1 day', NOW() - INTERVAL '20 hours', $5, $5, $6, 'Kiosk'),
+           ($2, 'SH-PG-CLOSED-2', $3, $4, CURRENT_DATE - 1, 'EVENING', 'CLOSED', NOW() - INTERVAL '12 hours', NOW() - INTERVAL '8 hours', $5, $5, $6, 'Kiosk');`,
+        [crypto.randomUUID(), crypto.randomUUID(), orgA, centerA, opA, devA]
+      );
+      const closedRows = await poolA.query(
+        `SELECT COUNT(*)::int AS c FROM kiosk_shift_sessions WHERE organization_id = $1 AND center_id = $2 AND device_identifier = $3 AND status = 'CLOSED';`,
+        [orgA, centerA, devA]
+      );
+      assert.equal(closedRows.rows[0].c, 2);
     });
 
     await suite.test('4. JOIN query on shift sessions + centers + operators works and rollback leaves zero partial state', async () => {

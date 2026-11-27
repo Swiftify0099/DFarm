@@ -1,4 +1,4 @@
-import { Money } from '../value-objects/index.js';
+import { Money, LedgerBalance } from '../value-objects/index.js';
 
 export interface LedgerEntry {
   id: string;
@@ -53,8 +53,10 @@ export class CustomerLedgerAccount {
   }
 
   public postCredit(amount: number, description: string, referenceId?: string): LedgerEntry {
+    // Transaction amount must be non-negative (enforced by Money)
     const credit = new Money(amount).value;
-    const newBal = new Money(this.props.currentBalance + credit).value;
+    // Running balance is signed — use LedgerBalance to allow negative values
+    const newBal = new LedgerBalance(this.props.currentBalance + credit).value;
     this.props.currentBalance = newBal;
     this.props.totalMilkEarnings = new Money(this.props.totalMilkEarnings + credit).value;
     this.props.lastUpdated = new Date().toISOString();
@@ -72,8 +74,10 @@ export class CustomerLedgerAccount {
   }
 
   public postDebit(amount: number, type: 'FEED_DEBIT' | 'CASH_ADVANCE_DEBIT' | 'BANK_PAYOUT', description: string, referenceId?: string): LedgerEntry {
+    // Transaction amount must be non-negative (enforced by Money)
     const debit = new Money(amount).value;
-    const newBal = new Money(this.props.currentBalance - debit).value;
+    // Running balance is signed — use LedgerBalance so a negative balance is valid
+    const newBal = new LedgerBalance(this.props.currentBalance - debit).value;
     this.props.currentBalance = newBal;
     this.props.totalDeductions = new Money(this.props.totalDeductions + debit).value;
     this.props.lastUpdated = new Date().toISOString();

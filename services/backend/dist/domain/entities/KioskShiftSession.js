@@ -2,7 +2,23 @@ import { SessionClosedError } from '../errors/index.js';
 export class KioskShiftSession {
     props;
     constructor(props) {
-        this.props = { ...props };
+        // Apply domain-level defaults for all numeric totals so a newly opened
+        // shift never carries undefined/null into NOT NULL database columns.
+        const safeNum = (v) => typeof v === 'number' && Number.isFinite(v) ? v : 0;
+        this.props = {
+            ...props,
+            timezone: props.timezone,
+            closedAt: props.closedAt ?? null,
+            closingOperatorId: props.closingOperatorId ?? null,
+            closingOperatorName: props.closingOperatorName ?? null,
+            totalLiters: safeNum(props.totalLiters),
+            cowLiters: safeNum(props.cowLiters),
+            buffaloLiters: safeNum(props.buffaloLiters),
+            transactionCount: safeNum(props.transactionCount),
+            totalAmount: safeNum(props.totalAmount),
+            averageFat: safeNum(props.averageFat),
+            averageSnf: safeNum(props.averageSnf),
+        };
     }
     get id() {
         return this.props.id;

@@ -223,34 +223,62 @@ export class PostgresShiftSessionRepository {
         }
         // 6. Validate device association if registered in devices table
         const cleanDeviceId = session.deviceIdentifier.trim();
-        const checkRegisteredDevice = async (client) => {
+        const validateDeviceRow = (dev) => {
+            if (String(dev.organization_id || '').toLowerCase() !== orgId.toLowerCase()) {
+                throw new ForbiddenTenantError(`Cross-tenant device '${cleanDeviceId}' does not belong to organization '${orgId}'.`);
+            }
+            if (dev.is_blocked === true ||
+                dev.revoked_at != null ||
+                ['BLOCKED', 'REVOKED', 'DECOMMISSIONED', 'INACTIVE'].includes(String(dev.status || '').toUpperCase())) {
+                throw new ForbiddenError(`Device '${cleanDeviceId}' is ${dev.status || 'BLOCKED'} and cannot operate shift sessions.`, 'DEVICE_BLOCKED');
+            }
+        };
+        const isUndefinedTableError = (err) => err?.code === '42P01' || /relation\s+"?devices"?\s+does not exist/i.test(String(err?.message || ''));
+        const isUndefinedColumnError = (err) => err?.code === '42703' || /column\s+"?(?:is_blocked|revoked_at)"?\s+does not exist/i.test(String(err?.message || ''));
+        const checkRegisteredDevice = async (client, isControlPlane) => {
             try {
                 const devRes = await client.query(`SELECT id, organization_id, center_id, status, is_blocked, revoked_at
            FROM devices
            WHERE device_identifier = $1 OR id::text = $1
            LIMIT 1;`, [cleanDeviceId]);
                 if (devRes.rows.length > 0) {
-                    const dev = devRes.rows[0];
-                    if (String(dev.organization_id || '').toLowerCase() !== orgId.toLowerCase()) {
-                        throw new ForbiddenTenantError(`Cross-tenant device '${cleanDeviceId}' does not belong to organization '${orgId}'.`);
-                    }
-                    if (dev.is_blocked === true ||
-                        dev.revoked_at != null ||
-                        ['BLOCKED', 'REVOKED', 'DECOMMISSIONED', 'INACTIVE'].includes(String(dev.status || '').toUpperCase())) {
-                        throw new ForbiddenError(`Device '${cleanDeviceId}' is ${dev.status || 'BLOCKED'} and cannot operate shift sessions.`, 'DEVICE_BLOCKED');
-                    }
+                    validateDeviceRow(devRes.rows[0]);
                 }
             }
             catch (err) {
-                if (err instanceof ForbiddenTenantError || err instanceof ForbiddenError) {
+                if (err instanceof ForbiddenTenantError ||
+                    err instanceof ForbiddenError ||
+                    err instanceof TenantDatabaseUnavailableError) {
                     throw err;
                 }
-                // Ignore only if devices table lacks optional columns in minimal test doubles
+                // Minimal test doubles may have `devices` without 041 columns (`is_blocked`, `revoked_at`).
+                // Retry with core columns instead of silently skipping device authorization.
+                if (isUndefinedColumnError(err)) {
+                    const fallbackRes = await client.query(`SELECT id, organization_id, center_id, status
+             FROM devices
+             WHERE device_identifier = $1 OR id::text = $1
+             LIMIT 1;`, [cleanDeviceId]);
+                    if (fallbackRes.rows.length > 0) {
+                        validateDeviceRow(fallbackRes.rows[0]);
+                    }
+                    return;
+                }
+                // `devices` is a TENANT_OPERATIONAL table (migration 010) and is intentionally absent
+                // from the separate control-plane DB. On tenantDb, only allow missing `devices` table
+                // in minimal offline unit test doubles (never when REQUIRE_REAL_POSTGRES=1).
+                if (isUndefinedTableError(err)) {
+                    if (isControlPlane || process.env['REQUIRE_REAL_POSTGRES'] !== '1') {
+                        return;
+                    }
+                    throw new TenantDatabaseUnavailableError(orgId, 'SCHEMA_MISSING', 'Required tenant table "devices" is missing in tenant database');
+                }
+                // Do not hide unrelated schema, permission, or connection failures.
+                throw new TenantDatabaseUnavailableError(orgId, 'QUERY_FAILED', err?.message || 'Device registry verification failed');
             }
         };
-        await checkRegisteredDevice(tenantDb);
+        await checkRegisteredDevice(tenantDb, false);
         if (tenantDb !== controlDb) {
-            await checkRegisteredDevice(controlDb);
+            await checkRegisteredDevice(controlDb, true);
         }
         const totals = session.totals;
         const upsertSql = `

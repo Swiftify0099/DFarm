@@ -90,10 +90,12 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
       PostgresLedgerRepository,
       PostgresCollectionTransactionRepository,
       PostgresShiftSessionRepository,
+      PostgresCustomerMembershipRepository,
     } = await import('../dist/infrastructure/index.js');
     const { MilkCollectionTransaction } = await import('../dist/domain/entities/MilkCollectionTransaction.js');
     const { KioskShiftSession } = await import('../dist/domain/entities/KioskShiftSession.js');
     const { CustomerLedgerAccount } = await import('../dist/domain/entities/CustomerLedgerAccount.js');
+    const { CustomerMembership } = await import('../dist/domain/entities/CustomerMembership.js');
 
     const controlPlaneAdapter = {
       query: (text, params) => poolCtrl.query(text, params),
@@ -197,6 +199,7 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
     const ledgerRepo = new PostgresLedgerRepository();
     const collectionRepo = new PostgresCollectionTransactionRepository();
     const sessionRepo = new PostgresShiftSessionRepository();
+    const membershipRepo = new PostgresCustomerMembershipRepository();
 
     await suite.test('1. PostgreSQL 17.x version, migration manifests & TenantDatabaseManager strict real-PG resolution', async () => {
       const verRes = await poolA.query(`SELECT current_setting('server_version_num')::int AS ver_num;`);
@@ -388,9 +391,28 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
         deviceIdentifier: 'R33-KIOSK-1',
         deviceName: 'Kiosk 1',
       });
+      assert.deepEqual(sessionA.totals, {
+        totalLiters: 0,
+        cowLiters: 0,
+        buffaloLiters: 0,
+        transactionCount: 0,
+        totalAmount: 0,
+        averageFat: 0,
+        averageSnf: 0,
+      });
       await sessionRepo.save(sessionA);
 
-      assert.equal((await sessionRepo.findById(sessionA.id, orgA))?.id, sessionA.id);
+      const savedSessA = await sessionRepo.findById(sessionA.id, orgA);
+      assert.equal(savedSessA?.id, sessionA.id);
+      assert.deepEqual(savedSessA?.totals, {
+        totalLiters: 0,
+        cowLiters: 0,
+        buffaloLiters: 0,
+        transactionCount: 0,
+        totalAmount: 0,
+        averageFat: 0,
+        averageSnf: 0,
+      });
       assert.equal(await sessionRepo.findById(sessionA.id, orgB), null);
       assert.equal(await sessionRepo.findByCode(sessionA.sessionCode, orgB), null);
       assert.equal(await sessionRepo.findActiveSession(centerA, 'R33-KIOSK-1', orgB), null);
@@ -437,6 +459,48 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
         (e) => e.statusCode === 503 && e.code === 'TENANT_MAPPING_MISSING'
       );
       assert.equal((await poolCtrl.query(`SELECT to_regclass('public.kiosk_shift_sessions') AS reg;`)).rows[0].reg, null);
+
+      // Device registry lookup must NOT swallow unrelated DB failures on tenantDb
+      const origGetStrictSess = tenantDbManager.getStrictTenantDb.bind(tenantDbManager);
+      const realTenantDbForDevErr = await origGetStrictSess(orgA);
+      tenantDbManager.getStrictTenantDb = async (id) => {
+        if (id !== orgA) return origGetStrictSess(id);
+        return {
+          query: async (sql, params) => {
+            if (typeof sql === 'string' && sql.includes('FROM devices')) {
+              const err = new Error('Simulated permission/schema failure on devices');
+              err.code = '42501';
+              throw err;
+            }
+            return realTenantDbForDevErr.query(sql, params);
+          },
+          withTransaction: (cb) => realTenantDbForDevErr.withTransaction(cb),
+        };
+      };
+      try {
+        await assert.rejects(
+          () =>
+            sessionRepo.save(
+              new KioskShiftSession({
+                id: crypto.randomUUID(),
+                sessionCode: `R33-DEVERR-${suffix}`,
+                organizationId: orgA,
+                centerId: centerA,
+                businessDate: '2026-11-27',
+                shift: 'EVENING',
+                status: 'OPEN',
+                openedAt: new Date().toISOString(),
+                openingOperatorId: opA,
+                openingOperatorName: 'R33 Op A',
+                deviceIdentifier: 'R33-DEV-ERR',
+                deviceName: 'Kiosk Err',
+              })
+            ),
+          (e) => e.statusCode === 503 && e.status === 'QUERY_FAILED'
+        );
+      } finally {
+        tenantDbManager.getStrictTenantDb = origGetStrictSess;
+      }
     });
 
     await suite.test('4. PostgresCollectionTransactionRepository: atomic intake, concurrency, idempotency, isolation & rollback on PG17', async () => {
@@ -630,6 +694,102 @@ test('RESTART-03.3 Real PostgreSQL 17 Actual Repositories Integration, Concurren
       assert.equal((await poolCtrl.query(`SELECT to_regclass('public.milk_collections') AS reg;`)).rows[0].reg, null);
       assert.equal(Number((await poolB.query(`SELECT COUNT(*)::int AS c FROM milk_collections;`)).rows[0].c), 0);
       assert.equal((await ledgerRepo.findByCustomer(custB, orgB))?.currentBalance || 0, dairyBCustBBalBefore);
+    });
+
+    await suite.test('5. PostgresCustomerMembershipRepository: 037 schema alignment, tenant customerName hydration, save/upsert, status update & cross-tenant isolation', async () => {
+      // 5a. Verify migration 037 authoritative control-plane columns (no customer_name PII column)
+      const colsRes = await poolCtrl.query(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'customer_dairy_memberships';`
+      );
+      const colNames = colsRes.rows.map((r) => r.column_name);
+      assert.ok(!colNames.includes('customer_name'), 'customer_dairy_memberships must NOT define customer_name');
+      assert.ok(colNames.includes('dairy_name'));
+      assert.ok(colNames.includes('dairy_code'));
+      assert.ok(colNames.includes('dairy_address'));
+      assert.ok(colNames.includes('center_name'));
+
+      // 5b. Global identity create & lookup
+      const memPhone = `+919855${suffix.replace(/[^0-9]/g, '1').slice(0, 6).padEnd(6, '7')}`;
+      const gIdentity = await membershipRepo.createGlobalIdentity(memPhone);
+      assert.ok(gIdentity.id);
+      const foundIdentity = await membershipRepo.findGlobalIdentityByPhone(memPhone);
+      assert.equal(foundIdentity?.id, gIdentity.id);
+
+      // 5c. Save/upsert memberships for sharedCustUuid across Dairy A & Dairy B
+      const memAId = crypto.randomUUID();
+      const memBId = crypto.randomUUID();
+      await membershipRepo.saveMembership(
+        new CustomerMembership({
+          id: memAId,
+          globalCustomerId: gIdentity.id,
+          organizationId: orgA,
+          tenantCustomerId: sharedCustUuid,
+          farmerCode: 'FA-SHARED',
+          membershipStatus: 'PENDING_APPROVAL',
+          dairyName: 'PG17 Repo Dairy A',
+          dairyCode: `R33_A_${suffix}`,
+          dairyAddress: 'Road A',
+          centerId: centerA,
+          centerName: 'Center A33',
+        })
+      );
+      // Upsert same (organization_id, global_customer_id) -> updates cleanly without duplicate row
+      await membershipRepo.saveMembership(
+        new CustomerMembership({
+          id: crypto.randomUUID(),
+          globalCustomerId: gIdentity.id,
+          organizationId: orgA,
+          tenantCustomerId: sharedCustUuid,
+          farmerCode: 'FA-SHARED-UPD',
+          membershipStatus: 'APPROVED',
+          dairyName: 'PG17 Repo Dairy A',
+          dairyCode: `R33_A_${suffix}`,
+          dairyAddress: 'Road A Updated',
+          centerId: centerA,
+          centerName: 'Center A33',
+        })
+      );
+      await membershipRepo.saveMembership(
+        new CustomerMembership({
+          id: memBId,
+          globalCustomerId: gIdentity.id,
+          organizationId: orgB,
+          tenantCustomerId: sharedCustUuid,
+          farmerCode: 'FB-SHARED',
+          membershipStatus: 'APPROVED',
+          dairyName: 'PG17 Repo Dairy B',
+          dairyCode: `R33_B_${suffix}`,
+          dairyAddress: 'Road B',
+          centerId: centerB,
+          centerName: 'Center B33',
+        })
+      );
+
+      // 5d. List & findMembership resolve exact tenant customerName from each tenant DB strictly
+      const list = await membershipRepo.listMembershipsByGlobalId(gIdentity.id);
+      assert.equal(list.length, 2);
+      const itemA = list.find((m) => m.organizationId === orgA);
+      const itemB = list.find((m) => m.organizationId === orgB);
+      assert.equal(itemA?.customerName, 'Shared UUID A');
+      assert.equal(itemA?.farmerCode, 'FA-SHARED-UPD');
+      assert.equal(itemA?.dairyAddress, 'Road A Updated');
+      assert.equal(itemB?.customerName, 'Shared UUID B');
+
+      const singleA = await membershipRepo.findMembership(gIdentity.id, orgA);
+      assert.equal(singleA?.customerName, 'Shared UUID A');
+      const singleB = await membershipRepo.findMembership(gIdentity.id, orgB);
+      assert.equal(singleB?.customerName, 'Shared UUID B');
+
+      // 5e. updateMembershipStatus scoped strictly by (organizationId, tenantCustomerId)
+      await membershipRepo.updateMembershipStatus(orgA, sharedCustUuid, 'SUSPENDED', 'FA-SUSP');
+      const afterUpdateA = await membershipRepo.findMembership(gIdentity.id, orgA);
+      const afterUpdateB = await membershipRepo.findMembership(gIdentity.id, orgB);
+      assert.equal(afterUpdateA?.membershipStatus, 'SUSPENDED');
+      assert.equal(afterUpdateA?.farmerCode, 'FA-SUSP');
+      assert.equal(afterUpdateB?.membershipStatus, 'APPROVED');
+      assert.equal(afterUpdateB?.farmerCode, 'FB-SHARED');
     });
   } finally {
     try {
