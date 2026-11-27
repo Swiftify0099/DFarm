@@ -69,6 +69,14 @@ export class TenantDatabaseManager {
   private controlPlaneDb: IDatabaseClient | null = null;
   private isInitialized = false;
 
+  /**
+   * Per-pool in-flight or completed shutdown promises.
+   * Kept on success (so pg-mem or pools without `.ended` are not ended twice)
+   * and cleared on rejection so a failed shutdown can be retried.
+   */
+  private readonly poolShutdownPromises = new WeakMap<pg.Pool, Promise<void>>();
+  private readonly closingTenantPools = new Map<string, Promise<void>>();
+
   private constructor() {}
 
   public static getInstance(): TenantDatabaseManager {
@@ -130,11 +138,40 @@ export class TenantDatabaseManager {
   }
 
   private async endPoolSafely(pool: pg.Pool): Promise<void> {
+    const inflight = this.poolShutdownPromises.get(pool);
+    if (inflight) {
+      return inflight;
+    }
+
     const anyPool = pool as any;
-    if (anyPool.ending || anyPool.ended) {
+    if (anyPool.ended) {
       return;
     }
-    await pool.end();
+
+    // Create and register a single shared shutdown promise BEFORE any await so
+    // concurrent callers share it and rejections propagate without creating an
+    // unawaited detached promise.
+    const shutdownPromise = (async () => {
+      if (anyPool.ending) {
+        const deadline = Date.now() + 10000;
+        while (!anyPool.ended && Date.now() < deadline) {
+          await new Promise<void>((r) => setTimeout(r, 25));
+        }
+        if (!anyPool.ended) {
+          throw new Error('Timed out waiting for externally initiated tenant pool shutdown to complete.');
+        }
+        return;
+      }
+      await pool.end();
+    })();
+
+    this.poolShutdownPromises.set(pool, shutdownPromise);
+    try {
+      await shutdownPromise;
+    } catch (err) {
+      this.poolShutdownPromises.delete(pool);
+      throw err;
+    }
   }
 
   public getTenantPool(dairyId: string): pg.Pool | undefined {
@@ -324,8 +361,9 @@ export class TenantDatabaseManager {
       );
     }
 
-    if (this.tenantPools.has(dairyId)) {
-      return this.wrapPgPool(this.tenantPools.get(dairyId)!);
+    const existingPool = this.tenantPools.get(dairyId);
+    if (existingPool && !(existingPool as any).ending && !(existingPool as any).ended) {
+      return this.wrapPgPool(existingPool, dairyId);
     }
     if (this.tenantMemDbs.has(dairyId)) {
       return this.tenantMemDbs.get(dairyId)!;
@@ -357,9 +395,13 @@ export class TenantDatabaseManager {
 
     try {
       const decryptedUri = CredentialEncryption.decrypt(mapping.connectionUriEncrypted);
+      const concurrentPool = this.tenantPools.get(dairyId);
+      if (concurrentPool && !(concurrentPool as any).ending && !(concurrentPool as any).ended) {
+        return this.wrapPgPool(concurrentPool, dairyId);
+      }
       const tenantPool = this.createTenantPool(dairyId, decryptedUri);
       this.tenantPools.set(dairyId, tenantPool);
-      return this.wrapPgPool(tenantPool);
+      return this.wrapPgPool(tenantPool, dairyId);
     } catch (err: any) {
       throw new TenantDatabaseUnavailableError(
         dairyId,
@@ -473,6 +515,12 @@ export class TenantDatabaseManager {
         connectionTimeoutMillis: config.TENANT_POOL_CONNECTION_TIMEOUT_MS || 30000,
         ssl: this.getSslConfig(adminUri),
       });
+      adminPool.on('error', (poolErr: any) => {
+        logger.error(
+          { dairyId, dbName, code: poolErr?.code, error: poolErr?.message || String(poolErr) },
+          'Unexpected error on PostgreSQL provisioning admin pool'
+        );
+      });
 
       try {
         // Check if database exists
@@ -483,7 +531,7 @@ export class TenantDatabaseManager {
         } else {
           logger.info({ dbName }, 'Target tenant database already exists on cluster; reusing.');
         }
-        await adminPool.end();
+        await this.endPoolSafely(adminPool);
 
         currentMapping.provisioningStatus = 'DATABASE_CREATED';
         await this.persistMappingStatus(controlDb, currentMapping);
@@ -493,7 +541,14 @@ export class TenantDatabaseManager {
         currentMapping.connectionUriEncrypted = CredentialEncryption.encrypt(tenantUri);
         currentMapping.resourceType = 'PHYSICAL_DATABASE';
       } catch (err: any) {
-        await adminPool.end().catch(() => {});
+        try {
+          await this.endPoolSafely(adminPool);
+        } catch (closeErr: any) {
+          logger.error(
+            { dairyId, dbName, error: closeErr?.message || String(closeErr) },
+            'Error closing provisioning admin pool after failure'
+          );
+        }
 
         // If physical Postgres is unreachable and running in test or development mode, allow isolated test double
         if ((this.isTestEnvironment() || config.NODE_ENV === 'development') && !process.env.TEST_REAL_POSTGRES && !this.isRealPostgresRequired()) {
@@ -600,6 +655,16 @@ export class TenantDatabaseManager {
       logger.info({ dairyId, dairyCode: code, dbName, status: 'ACTIVE' }, 'Separate tenant database successfully provisioned and active.');
       return currentMapping;
     } catch (err: any) {
+      // Close and evict any partially initialized tenant pool or test double
+      // created before migration/verification failed so connections do not leak.
+      try {
+        await this.closeTenantPool(dairyId);
+      } catch (closeErr: any) {
+        logger.error(
+          { dairyId, dbName, error: closeErr?.message || String(closeErr) },
+          'Error closing partially initialized tenant pool after provisioning failure'
+        );
+      }
       currentMapping.provisioningStatus = 'FAILED';
       currentMapping.provisioningError = `Tenant migration or verification failed: ${err.message}`;
       await this.persistMappingStatus(controlDb, currentMapping);
@@ -617,8 +682,9 @@ export class TenantDatabaseManager {
     }
 
     // 1. Check active pool cache
-    if (this.tenantPools.has(dairyId)) {
-      return this.wrapPgPool(this.tenantPools.get(dairyId)!);
+    const cachedPool = this.tenantPools.get(dairyId);
+    if (cachedPool && !(cachedPool as any).ending && !(cachedPool as any).ended) {
+      return this.wrapPgPool(cachedPool, dairyId);
     }
 
     // 2. Check memory test DB cache (test mode only)
@@ -751,10 +817,14 @@ export class TenantDatabaseManager {
     }
 
     const decryptedUri = CredentialEncryption.decrypt(mapping.connectionUriEncrypted);
+    const concurrentPool = this.tenantPools.get(dairyId);
+    if (concurrentPool && !(concurrentPool as any).ending && !(concurrentPool as any).ended) {
+      return this.wrapPgPool(concurrentPool, dairyId);
+    }
     const tenantPool = this.createTenantPool(dairyId, decryptedUri);
 
     this.tenantPools.set(dairyId, tenantPool);
-    return this.wrapPgPool(tenantPool);
+    return this.wrapPgPool(tenantPool, dairyId);
   }
 
   public async verifyTenantDatabase(dairyId: string): Promise<{
@@ -780,11 +850,41 @@ export class TenantDatabaseManager {
   }
 
   public async closeTenantPool(dairyId: string): Promise<void> {
+    const existingClose = this.closingTenantPools.get(dairyId);
+    if (existingClose) {
+      return existingClose;
+    }
+
     const pool = this.tenantPools.get(dairyId);
-    this.tenantPools.delete(dairyId);
-    this.tenantMemDbs.delete(dairyId);
-    if (pool) {
-      await this.endPoolSafely(pool);
+    const memDb = this.tenantMemDbs.get(dairyId);
+    if (!pool && !memDb) {
+      return;
+    }
+
+    const closeOp = (async () => {
+      if (pool) {
+        await this.endPoolSafely(pool);
+        if (this.tenantPools.get(dairyId) === pool) {
+          this.tenantPools.delete(dairyId);
+        }
+      }
+      if (memDb) {
+        if (typeof memDb.close === 'function') {
+          await memDb.close();
+        }
+        if (this.tenantMemDbs.get(dairyId) === memDb) {
+          this.tenantMemDbs.delete(dairyId);
+        }
+      }
+    })();
+
+    this.closingTenantPools.set(dairyId, closeOp);
+    try {
+      await closeOp;
+    } finally {
+      if (this.closingTenantPools.get(dairyId) === closeOp) {
+        this.closingTenantPools.delete(dairyId);
+      }
     }
   }
 
@@ -793,21 +893,31 @@ export class TenantDatabaseManager {
   }
 
   public async closeAllPools(): Promise<void> {
-    const entries = Array.from(this.tenantPools.entries());
-    this.tenantPools.clear();
-    this.tenantMemDbs.clear();
+    const dairyIds = new Set<string>([
+      ...this.tenantPools.keys(),
+      ...this.tenantMemDbs.keys(),
+      ...this.closingTenantPools.keys(),
+    ]);
 
     const errors: Error[] = [];
-    for (const [dairyId, pool] of entries) {
-      try {
-        await this.endPoolSafely(pool);
-      } catch (err: any) {
-        logger.error({ dairyId, error: err.message }, 'Error closing tenant pool');
-        errors.push(err instanceof Error ? err : new Error(String(err)));
+    const results = await Promise.allSettled(
+      Array.from(dairyIds, (dairyId) => this.closeTenantPool(dairyId))
+    );
+    for (const res of results) {
+      if (res.status === 'rejected') {
+        const err = res.reason instanceof Error ? res.reason : new Error(String(res.reason));
+        logger.error({ error: err.message }, 'Error closing tenant pool');
+        errors.push(err);
       }
     }
-    if (errors.length > 0) {
+    if (errors.length === 1) {
       throw errors[0];
+    }
+    if (errors.length > 1) {
+      throw new AggregateError(
+        errors,
+        `Failed to close ${errors.length} tenant pool(s): ${errors.map((e) => e.message).join('; ')}`
+      );
     }
   }
 
@@ -965,7 +1075,7 @@ export class TenantDatabaseManager {
     };
   }
 
-  private wrapPgPool(pool: pg.Pool): IDatabaseClient {
+  private wrapPgPool(pool: pg.Pool, dairyId?: string): IDatabaseClient {
     return {
       query: (text: string, params?: any[]) => pool.query(text, params),
       withTransaction: async <T>(callback: (client: pg.PoolClient) => Promise<T>): Promise<T> => {
@@ -982,7 +1092,17 @@ export class TenantDatabaseManager {
           client.release();
         }
       },
-      close: async () => this.endPoolSafely(pool),
+      close: async () => {
+        if (dairyId && this.tenantPools.get(dairyId) === pool) {
+          return this.closeTenantPool(dairyId);
+        }
+        await this.endPoolSafely(pool);
+        for (const [id, mappedPool] of this.tenantPools.entries()) {
+          if (mappedPool === pool) {
+            this.tenantPools.delete(id);
+          }
+        }
+      },
     };
   }
 

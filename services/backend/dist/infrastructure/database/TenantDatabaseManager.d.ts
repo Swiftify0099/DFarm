@@ -40,6 +40,13 @@ export declare class TenantDatabaseManager {
     private readonly tenantMemDbs;
     private controlPlaneDb;
     private isInitialized;
+    /**
+     * Per-pool in-flight or completed shutdown promises.
+     * Kept on success (so pg-mem or pools without `.ended` are not ended twice)
+     * and cleared on rejection so a failed shutdown can be retried.
+     */
+    private readonly poolShutdownPromises;
+    private readonly closingTenantPools;
     private constructor();
     static getInstance(): TenantDatabaseManager;
     private isRealPostgresRequired;

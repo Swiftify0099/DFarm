@@ -669,13 +669,31 @@ export class PostgresDatabase {
         }
         throw new Error('PostgreSQL central database connection is currently unavailable.');
     }
+    async waitForExternalPoolShutdown(pool) {
+        const poolAny = pool;
+        const deadline = Date.now() + 10000;
+        while (!poolAny.ended && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        if (!poolAny.ended) {
+            throw new Error('Timed out waiting for externally initiated PostgreSQL central pool shutdown to complete.');
+        }
+    }
     async close() {
+        // All callers must await the same in-flight close operation so a rejected
+        // close promise remains observable and duplicate pool.end() calls are avoided.
         if (this.closePromise) {
             return this.closePromise;
         }
         const poolAny = this.pool;
-        if (poolAny.ending || poolAny.ended) {
+        if (poolAny.ended) {
             return;
+        }
+        if (poolAny.ending) {
+            // Do not report shutdown complete while an independently started pool
+            // shutdown remains in progress, and do not call pool.end() a second time.
+            this.closePromise = this.waitForExternalPoolShutdown(this.pool);
+            return this.closePromise;
         }
         this.closePromise = this.pool.end();
         return this.closePromise;

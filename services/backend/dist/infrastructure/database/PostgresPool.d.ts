@@ -27,6 +27,7 @@ export declare class PostgresDatabase {
     query<T extends pg.QueryResultRow = any>(text: string, params?: any[]): Promise<pg.QueryResult<T>>;
     getClient(): Promise<any>;
     withTransaction<T>(callback: (client: pg.PoolClient) => Promise<T>): Promise<T>;
+    private waitForExternalPoolShutdown;
     close(): Promise<void>;
 }
 export declare const db: PostgresDatabase;

@@ -9,18 +9,78 @@ const { Pool } = pg;
 const TEST_PG_URL = process.env['TEST_POSTGRES_URL'] || '';
 const REQUIRE_REAL_PG = process.env['REQUIRE_REAL_POSTGRES'] === '1';
 
+const CONNECTION_UNAVAILABLE_CODES = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ETIMEDOUT',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  '28P01',
+  '28000',
+  '3D000',
+  '57P01',
+  '57P02',
+  '57P03',
+]);
+
+function isConnectionUnavailableError(err) {
+  if (!err) return false;
+  if (CONNECTION_UNAVAILABLE_CODES.has(err.code)) return true;
+  const msg = String(err.message || '');
+  return (
+    msg.includes('timeout') ||
+    msg.includes('timed out') ||
+    msg.includes('Connection terminated') ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('ENOTFOUND') ||
+    msg.includes('socket hang up')
+  );
+}
+
 async function canConnectRealPostgres(url) {
   if (!url) return false;
   const probe = new Pool({ connectionString: url, connectionTimeoutMillis: 2000 });
-  probe.on('error', () => {});
+  const probeErrors = [];
+  probe.on('error', (err) => {
+    probeErrors.push(err);
+  });
+
+  let reachable = false;
+  let queryErr = null;
+  let endErr = null;
+
   try {
     const res = await probe.query('SELECT version() AS v;');
-    return Boolean(res.rows[0]?.v);
-  } catch {
-    return false;
+    reachable = Boolean(res.rows[0]?.v);
+  } catch (err) {
+    queryErr = err;
+    reachable = false;
   } finally {
-    await probe.end().catch(() => {});
+    try {
+      await probe.end();
+    } catch (err) {
+      endErr = err;
+    }
   }
+
+  // Genuine shutdown failures must surface rather than being silently ignored.
+  if (endErr && (reachable || !isConnectionUnavailableError(endErr) || process.env['REQUIRE_REAL_POSTGRES'] === '1')) {
+    throw endErr;
+  }
+
+  // Async pool errors when PostgreSQL appeared reachable or in strict mode must fail closed.
+  if (probeErrors.length > 0 && (reachable || process.env['REQUIRE_REAL_POSTGRES'] === '1')) {
+    throw probeErrors[0];
+  }
+
+  // Unexpected non-connection query failures in strict mode must fail closed.
+  if (queryErr && !isConnectionUnavailableError(queryErr) && process.env['REQUIRE_REAL_POSTGRES'] === '1') {
+    throw queryErr;
+  }
+
+  return reachable;
 }
 
 function makeDbUrl(baseUrl, dbName) {
@@ -76,58 +136,109 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
   const closedPools = new WeakSet();
   let cleanupPromise = null;
 
+  // Per-pool in-flight shutdown promises so that concurrent callers await the
+  // same Promise rather than returning early or racing.
+  const poolShutdownPromises = new WeakMap();
+
   const closePoolCleanly = async (pool, label, closeAction) => {
-    if (!pool || closedPools.has(pool)) return;
-    closedPools.add(pool);
+    if (!pool) return;
 
-    const deadline = Date.now() + 8000;
-    while (Date.now() < deadline) {
-      if (pool.totalCount === pool.idleCount && pool.waitingCount === 0) break;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    if (pool.totalCount !== pool.idleCount || pool.waitingCount > 0) {
-      throw new Error(
-        `Pool '${label}' still had checked-out or waiting clients before teardown (total=${pool.totalCount}, idle=${pool.idleCount}, waiting=${pool.waitingCount}).`
-      );
+    // If a shutdown is already in-flight for this pool, await the exact same
+    // Promise so concurrent callers never trigger duplicate shutdowns.
+    const inflight = poolShutdownPromises.get(pool);
+    if (inflight) {
+      return inflight;
     }
 
-    const expectedRemovals = Number(pool.totalCount || 0);
-    let removedCount = 0;
-    let resolveRemoved;
-    const removedPromise =
-      expectedRemovals > 0
-        ? new Promise((resolve) => {
-            resolveRemoved = resolve;
-          })
-        : Promise.resolve();
+    // Only skip if a previous shutdown completed cleanly.
+    if (closedPools.has(pool)) return;
 
-    const onRemove = () => {
-      removedCount += 1;
-      if (removedCount >= expectedRemovals && resolveRemoved) {
-        resolveRemoved();
+    const shutdownPromise = (async () => {
+      // Wait for all checked-out or waiting clients to settle before teardown.
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline) {
+        if (pool.totalCount === pool.idleCount && pool.waitingCount === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
       }
-    };
+      if (pool.totalCount !== pool.idleCount || pool.waitingCount > 0) {
+        throw new Error(
+          `Pool '${label}' still had checked-out or waiting clients before teardown (total=${pool.totalCount}, idle=${pool.idleCount}, waiting=${pool.waitingCount}).`
+        );
+      }
 
-    if (expectedRemovals > 0) {
-      pool.on('remove', onRemove);
-    }
+      const expectedRemovals = Number(pool.totalCount || 0);
+      let removedCount = 0;
+      let resolveRemoved;
+      const removedPromise =
+        expectedRemovals > 0
+          ? new Promise((resolve) => {
+              resolveRemoved = resolve;
+            })
+          : Promise.resolve();
 
+      const onRemove = () => {
+        removedCount += 1;
+        if (removedCount >= expectedRemovals && resolveRemoved) {
+          resolveRemoved();
+        }
+      };
+
+      if (expectedRemovals > 0) {
+        pool.on('remove', onRemove);
+      }
+
+      let removeTimer;
+      try {
+        if (closeAction) {
+          await closeAction();
+        } else if (pool.ending && !pool.ended) {
+          const endDeadline = Date.now() + 8000;
+          while (!pool.ended && Date.now() < endDeadline) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          if (!pool.ended) {
+            throw new Error(`Pool '${label}' external shutdown did not finish before timeout.`);
+          }
+        } else if (!pool.ended) {
+          await pool.end();
+        }
+
+        if (expectedRemovals > 0 && removedCount < expectedRemovals) {
+          await Promise.race([
+            removedPromise,
+            new Promise((resolve) => {
+              removeTimer = setTimeout(resolve, 3000);
+            }),
+          ]);
+        }
+
+        if (removedCount < expectedRemovals && (pool.totalCount > 0 || !pool.ended)) {
+          throw new Error(
+            `Pool '${label}' did not remove all expected clients during teardown (removed=${removedCount}, expected=${expectedRemovals}, totalCount=${pool.totalCount}, ended=${pool.ended}).`
+          );
+        }
+
+        // Mark successfully closed ONLY after clients and shutdown have verified clean completion.
+        closedPools.add(pool);
+      } finally {
+        if (removeTimer) {
+          clearTimeout(removeTimer);
+        }
+        if (expectedRemovals > 0) {
+          pool.off('remove', onRemove);
+        }
+      }
+    })();
+
+    poolShutdownPromises.set(pool, shutdownPromise);
     try {
-      if (closeAction) {
-        await closeAction();
-      } else if (!pool.ending && !pool.ended) {
-        await pool.end();
-      }
-
-      if (expectedRemovals > 0) {
-        await Promise.race([
-          removedPromise,
-          new Promise((resolve) => setTimeout(resolve, 3000)),
-        ]);
-      }
+      await shutdownPromise;
     } finally {
-      if (expectedRemovals > 0) {
-        pool.off('remove', onRemove);
+      // Clear in-flight entry once settled so a failed close (e.g. checked-out
+      // client) can be retried after releasing the client rather than replaying
+      // a stale rejection or skipping the pool.
+      if (poolShutdownPromises.get(pool) === shutdownPromise) {
+        poolShutdownPromises.delete(pool);
       }
     }
   };
@@ -537,6 +648,198 @@ test('DFarm P0: Concurrent Collection Idempotency & Financial Atomicity Integrat
       );
       assert.strictEqual(Number(mcRetryCheck.rows[0].count), 1);
     });
+
+    // ─── PHASE 2: Pool / Shutdown Lifecycle Regression Tests ─────────────────
+    // These tests verify the corrected lifecycle invariants introduced in
+    // RESTART-03.7 against real PostgreSQL 17 and do NOT use
+    // DROP DATABASE ... WITH (FORCE) or pg_terminate_backend() as workarounds.
+
+    const registerExtraTenantDb = async (dairyId, dairyCode, dbName) => {
+      const dbUrl = makeDbUrl(TEST_PG_URL, dbName);
+      await adminPool.query(`CREATE DATABASE ${dbName};`);
+      createdDatabases.push(dbName);
+      await poolCtrl.query(
+        `INSERT INTO organizations (id, name, code, status) VALUES ($1, $2, $3, 'ACTIVE') ON CONFLICT DO NOTHING;`,
+        [dairyId, `Lifecycle Dairy ${dairyCode}`, dairyCode]
+      );
+      await poolCtrl.query(
+        `INSERT INTO dairy_database_mappings (
+           id, dairy_id, dairy_code, database_name, resource_type,
+           connection_uri_encrypted, schema_version, provisioning_status, provisioned_at, last_verified_at
+         ) VALUES ($1, $2, $3, $4, 'PHYSICAL_DATABASE', $5, 'v1.0.0', 'ACTIVE', NOW(), NOW());`,
+        [crypto.randomUUID(), dairyId, dairyCode, dbName, CredentialEncryption.encrypt(dbUrl)]
+      );
+      return dbUrl;
+    };
+
+    await suite.test('4. Repeated closeTenantPool() calls on the same dairy end the real pool once and are idempotent', async () => {
+      const orgLifecycle = crypto.randomUUID();
+      const dbLifecycle = `dfarm_lc_${suffix}`;
+      await registerExtraTenantDb(orgLifecycle, `LC-${suffix}`, dbLifecycle);
+
+      const client = await tenantDbManagerRef.getStrictTenantDb(orgLifecycle);
+      assert.equal((await client.query('SELECT current_database() AS d;')).rows[0].d, dbLifecycle);
+      const livePool = tenantDbManagerRef.getTenantPool(orgLifecycle);
+      assert.ok(livePool, 'Pool should be created after getStrictTenantDb()');
+      attachPoolErrorGuard(livePool, 'tenantPoolLifecycle');
+
+      await tenantDbManagerRef.closeTenantPool(orgLifecycle);
+      assert.strictEqual(livePool.ended, true, 'Underlying pg.Pool must be ended after first closeTenantPool()');
+      assert.strictEqual(tenantDbManagerRef.getTenantPool(orgLifecycle), undefined, 'Pool must be evicted after close');
+
+      // Second close must succeed without calling pool.end() again.
+      await tenantDbManagerRef.closeTenantPool(orgLifecycle);
+      assert.strictEqual(livePool.ended, true);
+      await waitForDbIdle(dbLifecycle);
+    });
+
+    await suite.test('5. Concurrent closeTenantPool() and closeAllPools() await the same shutdown without premature completion', async () => {
+      const orgConcA = crypto.randomUUID();
+      const orgConcB = crypto.randomUUID();
+      const dbConcA = `dfarm_cca_${suffix}`;
+      const dbConcB = `dfarm_ccb_${suffix}`;
+      await registerExtraTenantDb(orgConcA, `CCA-${suffix}`, dbConcA);
+      await registerExtraTenantDb(orgConcB, `CCB-${suffix}`, dbConcB);
+
+      const clientA = await tenantDbManagerRef.getStrictTenantDb(orgConcA);
+      const clientB = await tenantDbManagerRef.getStrictTenantDb(orgConcB);
+      assert.equal((await clientA.query('SELECT 1 AS ok;')).rows[0].ok, 1);
+      assert.equal((await clientB.query('SELECT 1 AS ok;')).rows[0].ok, 1);
+
+      const poolA = tenantDbManagerRef.getTenantPool(orgConcA);
+      const poolB = tenantDbManagerRef.getTenantPool(orgConcB);
+      assert.ok(poolA && poolB, 'Both tenant pools must be active');
+      attachPoolErrorGuard(poolA, 'tenantPoolConcA');
+      attachPoolErrorGuard(poolB, 'tenantPoolConcB');
+
+      // Race closeTenantPool(orgConcA) twice alongside closeAllPools().
+      const results = await Promise.allSettled([
+        tenantDbManagerRef.closeTenantPool(orgConcA),
+        tenantDbManagerRef.closeTenantPool(orgConcA),
+        tenantDbManagerRef.closeAllPools(),
+      ]);
+
+      for (const r of results) {
+        assert.strictEqual(r.status, 'fulfilled', `Concurrent shutdown failed: ${r.reason?.message}`);
+      }
+      assert.strictEqual(poolA.ended, true, 'poolA must be fully ended when closeAllPools() resolves');
+      assert.strictEqual(poolB.ended, true, 'poolB must be fully ended when closeAllPools() resolves');
+      assert.strictEqual(tenantDbManagerRef.getTenantPool(orgConcA), undefined);
+      assert.strictEqual(tenantDbManagerRef.getTenantPool(orgConcB), undefined);
+
+      await waitForDbIdle(dbConcA);
+      await waitForDbIdle(dbConcB);
+    });
+
+    await suite.test('6. wrapPgPool().close() interacts safely with manager-level shutdown (no double-end)', async () => {
+      const orgWrap = crypto.randomUUID();
+      const dbWrap = `dfarm_wp_${suffix}`;
+      await registerExtraTenantDb(orgWrap, `WP-${suffix}`, dbWrap);
+
+      const wrappedClient = await tenantDbManagerRef.getStrictTenantDb(orgWrap);
+      assert.equal((await wrappedClient.query('SELECT 1 AS ok;')).rows[0].ok, 1);
+      const rawPool = tenantDbManagerRef.getTenantPool(orgWrap);
+      assert.ok(rawPool, 'Pool must be open');
+      attachPoolErrorGuard(rawPool, 'tenantPoolWrap');
+
+      const [wr, mr, ar] = await Promise.allSettled([
+        wrappedClient.close?.(),
+        tenantDbManagerRef.closeTenantPool(orgWrap),
+        tenantDbManagerRef.closeAllPools(),
+      ]);
+      assert.strictEqual(wr.status, 'fulfilled', `wrappedClient.close(): ${wr.reason?.message}`);
+      assert.strictEqual(mr.status, 'fulfilled', `closeTenantPool(): ${mr.reason?.message}`);
+      assert.strictEqual(ar.status, 'fulfilled', `closeAllPools(): ${ar.reason?.message}`);
+      assert.strictEqual(rawPool.ended, true, 'Underlying pg.Pool must be ended');
+      assert.strictEqual(tenantDbManagerRef.getTenantPool(orgWrap), undefined,
+        'Pool must be absent from manager after wrapPgPool().close() + closeTenantPool()');
+
+      await waitForDbIdle(dbWrap);
+    });
+
+    await suite.test('7. Real pg.Pool error event capture and canConnectRealPostgres() unreachable handling', async () => {
+      // 7a. Real pg.Pool emits an async 'error' event on a guarded pool -> captured cleanly.
+      const captured = [];
+      const testPool = new Pool({ connectionString: alphaUrl, max: 1, connectionTimeoutMillis: 5000 });
+      testPool.on('error', (err) => {
+        captured.push({ code: err?.code, message: err?.message || String(err) });
+      });
+      await testPool.query('SELECT 1;');
+      const syntheticErr = Object.assign(new Error('Simulated idle pool error'), { code: 'ECONNRESET' });
+      testPool.emit('error', syntheticErr);
+      assert.strictEqual(captured.length, 1);
+      assert.strictEqual(captured[0].code, 'ECONNRESET');
+      await closePoolCleanly(testPool, 'errorCaptureTestPool');
+
+      // 7b. Unavailable endpoint returns false cleanly and closes probe without leaking handles.
+      const unreachable = await canConnectRealPostgres('postgresql://postgres:postgres@127.0.0.1:59998/nonexistent');
+      assert.strictEqual(unreachable, false);
+    });
+
+    await suite.test('8. Database deletion only proceeds after all dependent connections are gone and partial setup cleans up', async () => {
+      // 8a. Live connection prevents waitForDbIdle and DROP DATABASE; after clean close, DROP DATABASE succeeds without FORCE.
+      const dbIdle = `dfarm_wi_${suffix}`;
+      const idleUrl = makeDbUrl(TEST_PG_URL, dbIdle);
+      await adminPool.query(`CREATE DATABASE ${dbIdle};`);
+      createdDatabases.push(dbIdle);
+
+      const idlePool = new Pool({ connectionString: idleUrl, max: 1, connectionTimeoutMillis: 5000 });
+      attachPoolErrorGuard(idlePool, 'idlePool');
+
+      const client = await idlePool.connect();
+      let idleThrew = false;
+      try {
+        await waitForDbIdle(dbIdle);
+      } catch (err) {
+        idleThrew = true;
+        assert.ok(
+          err.message.includes('still had') || err.message.includes('active'),
+          `waitForDbIdle must report remaining connections, got: ${err.message}`
+        );
+      }
+      assert.strictEqual(idleThrew, true,
+        'waitForDbIdle must throw when a live client connection is still open');
+
+      client.release();
+      await closePoolCleanly(idlePool, 'idlePool');
+      await waitForDbIdle(dbIdle);
+      await adminPool.query(`DROP DATABASE ${dbIdle};`);
+      const idx = createdDatabases.indexOf(dbIdle);
+      if (idx !== -1) createdDatabases.splice(idx, 1);
+
+      // 8b. Partial setup failure: invalid encrypted URI does not leave a pool registered.
+      const orgBroken = crypto.randomUUID();
+      await poolCtrl.query(
+        `INSERT INTO organizations (id, name, code, status) VALUES ($1, 'Broken Dairy', $2, 'ACTIVE') ON CONFLICT DO NOTHING;`,
+        [orgBroken, `BRK-${suffix}`]
+      );
+      await poolCtrl.query(
+        `INSERT INTO dairy_database_mappings (
+           id, dairy_id, dairy_code, database_name, resource_type,
+           connection_uri_encrypted, schema_version, provisioning_status, provisioned_at, last_verified_at
+         ) VALUES ($1, $2, $3, $4, 'PHYSICAL_DATABASE', 'not-valid-ciphertext', 'v1.0.0', 'ACTIVE', NOW(), NOW());`,
+        [crypto.randomUUID(), orgBroken, `BRK-${suffix}`, `dfarm_brk_${suffix}`]
+      );
+      await assert.rejects(
+        () => tenantDbManagerRef.getStrictTenantDb(orgBroken),
+        (err) => err?.code === 'CONNECTION_FAILED' || /Failed to initialize tenant database pool|decrypt/i.test(err?.message || '')
+      );
+      assert.strictEqual(tenantDbManagerRef.getTenantPool(orgBroken), undefined,
+        'Failed partial initialization must not leave a pool in tenantPools');
+    });
+
+    await suite.test('9. Repeated closeAllPools() and PostgresDatabase.close() calls are idempotent and settle cleanly', async () => {
+      await tenantDbManagerRef.closeAllPools();
+      await tenantDbManagerRef.closeAllPools();
+      const [c1, c2] = await Promise.allSettled([
+        dbRef.close(),
+        dbRef.close(),
+      ]);
+      assert.strictEqual(c1.status, 'fulfilled', `First db.close(): ${c1.reason?.message}`);
+      assert.strictEqual(c2.status, 'fulfilled', `Concurrent db.close(): ${c2.reason?.message}`);
+      assert.strictEqual(dbRef.pool.ended, true, 'Central db.pool must be ended after db.close()');
+    });
+    // ─── END Phase 2 lifecycle regression tests ───────────────────────────────
   } finally {
     await cleanup();
   }
