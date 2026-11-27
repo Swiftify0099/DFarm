@@ -2,13 +2,23 @@
 
 - **Repository:** `Swiftify0099/DFarm`
 - **Branch:** `fix/cloudflare-pages-production-deploy`
-- **Verified Public HEAD:** `9d0568b32e117dc93d8c62389c482b5a77d68f40` (`RESTART-03.5A` committed & pushed)
-- **Prior Baseline HEAD:** `805326112c6daf0c902a3abbefc5be1a8f740023` (`RESTART-03.5`)
-- **Overall Classification:** **`PASS (5-Suite PG17 Gate Passed in CI Run 45943003261 on 9d0568b)`** — All local builds, DB validations, 13 core offline backend suites (`230/230`), 4 frontend workspaces (`255/255`), and the live PostgreSQL `17.12` 5-suite CI gate (`44` passed, `0` failed, `0` skipped) passed on `9d0568b`. (`DF-003` full-history Gitleaks remains OPEN under `RESTART-12`.)
+- **Latest Verified Public HEAD:** `8eba95427ee2170ee46c02f3a08ffde86a2bde24` (`RESTART-04`; Parent: `9d0568b32e117dc93d8c62389c482b5a77d68f40`)
+- **RESTART-03.5A Historical Baseline HEAD:** `9d0568b32e117dc93d8c62389c482b5a77d68f40` (Prior: `805326112c6daf0c902a3abbefc5be1a8f740023`)
+- **Overall Classification:** **`RESTART-03` PG17 Gate PASS on `8eba954` (CI `45947088863`) / `RESTART-04` PG17 Gate FAIL on `8eba954` (CI `45947088946`, `users.user_role` fixture mismatch fixed locally in `RESTART-04.1`)** — `DF-003` full-history Gitleaks (`45947088844`, `54` findings across `42` commits) remains OPEN under `RESTART-12`.
 
 ---
 
-## 1. GitHub Actions Verified Runs (`9d0568b32e117dc93d8c62389c482b5a77d68f40`)
+## 0. Latest GitHub Actions Verified Runs (`8eba95427ee2170ee46c02f3a08ffde86a2bde24`)
+
+| Workflow | Run / Job | PostgreSQL / Scanner | Conclusion | Scope Summary |
+|---|---|---|---|---|
+| `RESTART-03 PostgreSQL 17 Repository Verification` | `45947088863` | PostgreSQL `17.12` | **`success`** | `RESTART-03` 5-suite real PG17 repository gate passed on HEAD `8eba954`. |
+| `RESTART-04 PostgreSQL 17 Device Sync & Security Gate` | `45947088946` / `140334160273` | PostgreSQL `17.12` | **`failure`** | Failed with SQLSTATE `42703` (`column "user_role" of relation "users" does not exist`) at `services/backend/tests/restart04-real-postgres-device-sync.test.js:182`; fixture remediated locally in `RESTART-04.1`, awaiting subsequent live PG17 run. |
+| `Secret Scanning (Gitleaks)` | `45947088844` | Gitleaks full history | **`failure`** | `54` findings across `42` commits (`DF-003` OPEN under `RESTART-12`; external rotations & approved history rewrite pending operator action). |
+
+---
+
+## 1. Historical GitHub Actions Verified Runs (`9d0568b32e117dc93d8c62389c482b5a77d68f40`)
 
 | Workflow | Run / Job | PostgreSQL / Scanner | Conclusion | Scope Summary |
 |---|---|---|---|---|

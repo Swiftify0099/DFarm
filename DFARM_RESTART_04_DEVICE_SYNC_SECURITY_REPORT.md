@@ -1,28 +1,27 @@
-# DFARM RESTART-04 — Device Authentication, Offline Sync Tenant Isolation & Route Security Report
+# DFARM RESTART-04 / RESTART-04.1 — Device Authentication, Offline Sync Tenant Isolation & Route Security Report
 
 **Repository:** `Swiftify0099/DFarm`  
 **Branch:** `fix/cloudflare-pages-production-deploy`  
-**Starting Public HEAD:** `9d0568b32e117dc93d8c62389c482b5a77d68f40`  
+**Verified Public HEAD:** `8eba95427ee2170ee46c02f3a08ffde86a2bde24` (Parent: `9d0568b32e117dc93d8c62389c482b5a77d68f40`)  
 **Target Issues:** `DF-007` (P0) & Device-Management Scope of `DF-018` (P1)  
-**Final Classification:** **BLOCKED ON LIVE PG17 / PARTIAL** *(All RESTART-04 code changes, build, `db:validate`, offline unit/route/auth/sync suites (`28/28`), core backend offline suites (`230/230`), and all `4` frontend test suites (`255/255`) PASS locally with `0` regressions; real PostgreSQL `17.12` execution of `restart04-real-postgres-device-sync.test.js` cannot run on this Windows host because `com.docker.service` is stopped, no native `psql`/PG17 instance is installed, and `git commit`/`push` to trigger GitHub Actions CI is prohibited by safety rules.)*
+**Final Classification:** **BLOCKED ON LIVE PG17 / PARTIAL (RESTART-04.1 Fixture Alignment Applied Locally; Pending Subsequent Live PG17 CI Run)** *(RESTART-04.1 fixed the three `users.user_role` fixture `INSERT` statements in `services/backend/tests/restart04-real-postgres-device-sync.test.js` that caused GitHub Actions Run `45947088946` / Job `140334160273` to fail with SQLSTATE `42703`. Post-edit `npm run build:backend`, `npm run db:validate` (`13/13`), `npm run db:test` (`22/22` offline, internal PG skipped), and all `15` backend offline suites (`258/258`) PASS locally. Live PostgreSQL `17.12` execution on this Windows host remains blocked because Docker Desktop (`com.docker.service` stopped; WSL/VM backend engine returns `HTTP 503` / `Docker Desktop is unable to start`) and native PostgreSQL 17 are unavailable, and `git commit`/`push` is prohibited by safety rules. RESTART-04 is NOT marked PG17 verified until a subsequent real PG17 run passes.)*
 
 ---
 
-## 1. Baseline Verification & RESTART-03.5A Reconciliation
+## 1. Baseline Verification, CI Failure & RESTART-04.1 Reconciliation
 
-Before modifying code, local repository state and RESTART-03.5A CI logs were reconciled:
+Before modifying code, local repository state and GitHub Actions CI evidence on HEAD `8eba95427ee2170ee46c02f3a08ffde86a2bde24` were reconciled:
 
-- **Git Baseline:** Checked out branch `fix/cloudflare-pages-production-deploy` at public HEAD `9d0568b32e117dc93d8c62389c482b5a77d68f40`.
-- **RESTART-03.5A Real PG17 Gate:** CI Run `45943003261` / Job `140321315106` on `9d0568b` passed build (`npm run build:backend`), migration validation (`npm run db:validate`), compatibility role bootstrap, and all 5 real PostgreSQL `17.12` suites (`44` passed, `0` failed, `0` skipped).
-- **Gitleaks Scan:** CI Run `45943003232` / Job `140321315158` failed on `54` historical findings across `41` commits (`DF-003`, kept under `RESTART-12`) with zero findings reported for commit `9d0568b`.
-- **Reconciled Baseline Docs:**
-  - `DFARM_RESTART_03_5_REAL_POSTGRES17_FAILURE_REMEDIATION_REPORT.md`
-  - `DFARM_RESTART_03_5_FINAL_CI_MATRIX.md`
-  - `DFARM_RESTART_01_MASTER_ISSUE_REGISTER.md` (updated for `DF-007`, `DF-018`, `DF-029`, and the `RESTART-04` Section 3 entry)
+- **Git Baseline:** Checked out branch `fix/cloudflare-pages-production-deploy` at public HEAD `8eba95427ee2170ee46c02f3a08ffde86a2bde24` (parent `9d0568b32e117dc93d8c62389c482b5a77d68f40`) with a clean working tree.
+- **RESTART-03 Real PG17 Gate (HEAD `8eba954`):** CI Run `45947088863` **PASSED** on PostgreSQL `17.12` (5-suite repository verification gate).
+- **RESTART-04 Real PG17 Gate (HEAD `8eba954`):** CI Run `45947088946` / Job `140334160273` (`RESTART-04 PostgreSQL 17 Device Sync & Security Gate`) **FAILED** with PostgreSQL SQLSTATE `42703` (`column "user_role" of relation "users" does not exist`) at `services/backend/tests/restart04-real-postgres-device-sync.test.js:182`.
+  - **Root Cause:** Authoritative migration `supabase/migrations/003_user_identity_foundation.sql` (`SHARED`) defines `users.role`, not `users.user_role`. (`user_role` is added only by control-plane migrations `029` and `030`, not tenant-operational migrations.) The PG17 test fixture inserted both `role` and `user_role` in three `INSERT INTO users` blocks (control-plane seed near line 149, Tenant A seed near line 183, Tenant B seed near line 216).
+  - **RESTART-04.1 Fix:** Removed `user_role` and the duplicated role literal from all three `INSERT INTO users` blocks in `services/backend/tests/restart04-real-postgres-device-sync.test.js`, preserving `role`, organization IDs, active/inactive states, usernames, and all security/authorization cases. Production schema and migrations were not altered.
+- **Gitleaks Scan (HEAD `8eba954`):** CI Run `45947088844` **FAILED** with `54` findings across `42` commits (kept under `DF-003` / `RESTART-12`; external credential rotations and approved history rewrite remain pending operator action).
+- **Prior `9d0568b` Baseline Reference:** CI Run `45943003261` / Job `140321315106` passed the 5-suite PG `17.12` gate (`44/44`), and Gitleaks Run `45943003232` failed on `54` findings across `41` commits.
+- **Independent Outbox Finding Preserved for `RESTART-09` (`DF-021`):** RESTART-04 CI logs recorded background `relation "dashboard_events_outbox" does not exist` errors because `RealtimeEventPublisher.processOutboxBatch()` (`services/backend/src/infrastructure/realtime/RealtimeEventPublisher.ts`) queries `dashboard_events_outbox` via central `db`, while `supabase/migrations/041_dairy_admin_realtime_and_station_monitoring.sql` creates `dashboard_events_outbox` on the `TENANT_OPERATIONAL` track. Deliberately left untouched in RESTART-04.1 for `RESTART-09`.
 - **Safety Preservation Verified:**
-  - `.temp/`: `0` files tracked by git (`git ls-files .temp`), `1829` files preserved untouched on disk.
-  - `services/backend/dist/`: rebuilt cleanly via `npm run build:backend` and kept tracked/updated.
-  - `.github/workflows/dfarm-restart03-postgres17.yml`: verified unmodified (`0` diff lines).
+  - `.temp/` and untracked/local files preserved untouched; no `git reset --hard`, `git clean`, `git stash`, commit, push, or history rewrite executed.
 
 ---
 
@@ -80,45 +79,48 @@ Before modifying code, local repository state and RESTART-03.5A CI logs were rec
 
 ---
 
-## 3. Exact Verification Matrix (Post-Final Edit)
+## 3. Exact Verification Matrix (Post-RESTART-04.1 Edit on HEAD `8eba954`)
 
 | Check / Suite | Command / Runner | Environment | Executed | Pass | Fail | Skip | Exit Code | Status |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| Backend TypeScript Build | `npm run build:backend` | Local Windows | - | - | 0 | 0 | `0` | **PASS** |
-| DB Migration Static Validation | `npm run db:validate` | Local Windows | 13 | 13 | 0 | 0 | `0` | **PASS** |
-| DB Package Runtime Suite | `npm run db:test` (`packages/database`) | `pg-mem` + PG gated | 22 (+1 file skip) | 22 | 0 | 1 | `0` | **PASS (`pg-mem`; internal PG file skipped)** |
-| **RESTART-04 Recovered Sync Suite** | `node --test services/backend/tests/offline-sync-22-scenarios.test.js` | `pg-mem` | **23** | **23** | **0** | **0** | **`0`** | **PASS** |
-| **RESTART-04 Device Auth & Route Security** | `node --test services/backend/tests/restart04-device-auth-and-route-security.test.js` | `pg-mem` | **5** | **5** | **0** | **0** | **`0`** | **PASS** |
-| `restart032-operational-repository-isolation.test.js` | `node --test ...` | `pg-mem` | 17 | 17 | 0 | 0 | `0` | **PASS** |
-| `restart03-tenant-isolation-and-ownership.test.js` | `node --test ...` | `pg-mem` | 18 | 18 | 0 | 0 | `0` | **PASS** |
-| `customer-data-lifecycle-e2e.test.js` | `node --test ...` | `pg-mem` | 9 | 9 | 0 | 0 | `0` | **PASS** |
-| `restart02-auth-security-remediation.test.js` | `node --test ...` | `pg-mem` | 9 | 9 | 0 | 0 | `0` | **PASS** |
-| `restart021-auth-session-integrity.test.js` | `node --test ...` | `pg-mem` | 7 | 7 | 0 | 0 | `0` | **PASS** |
-| `collection-kiosk-production.test.js` | `node --test ...` | `pg-mem` | 24 | 24 | 0 | 0 | `0` | **PASS** |
-| `customer-tenant-approval-e2e.test.js` | `node --test ...` | `pg-mem` | 11 | 11 | 0 | 0 | `0` | **PASS** |
-| `multi-dairy-membership.test.js` | `node --test ...` | `pg-mem` | 9 | 9 | 0 | 0 | `0` | **PASS** |
-| `tenant-database-isolation.test.js` | `node --test ...` | `pg-mem` | 7 | 7 | 0 | 0 | `0` | **PASS** |
-| `dairy-admin-production.test.js` | `node --test ...` | `pg-mem` | 36 | 36 | 0 | 0 | `0` | **PASS** |
-| `roadmap-phase-06-dairy-admin.test.js` | `node --test ...` | `pg-mem` | 41 | 41 | 0 | 0 | `0` | **PASS** |
-| `super-admin-production.test.js` | `node --test ...` | `pg-mem` | 33 | 33 | 0 | 0 | `0` | **PASS** |
-| `clean-architecture.test.js` | `node --test ...` | Node built-in | 9 | 9 | 0 | 0 | `0` | **PASS** |
-| **Customer App (`dfarm-customer-app`)** | `npm run --workspace=apps/dfarm-customer-app test` | Jest (`8/8` files) | 31 | 31 | 0 | 0 | `0` | **PASS** |
-| **Collection App (`dfarm-collection-app`)** | `npm run --workspace=apps/dfarm-collection-app test` | Vitest (`17/17` files) | 162 | 162 | 0 | 0 | `0` | **PASS** |
-| **Dairy Admin (`dfarm-dairy-admin`)** | `npm run --workspace=apps/dfarm-dairy-admin test` | Vitest (`5/5` files) | 14 | 14 | 0 | 0 | `0` | **PASS** |
-| **Super Admin (`dfarm-super-admin`)** | `npm run --workspace=apps/dfarm-super-admin test` | Vitest (`10/10` files) | 48 | 48 | 0 | 0 | `0` | **PASS** |
-| **RESTART-04 Real PG17 Suite (Default)** | `node --test services/backend/tests/restart04-real-postgres-device-sync.test.js` | No PG17 on host | 1 | 0 | 0 | **1** | `0` | **SKIP (no `pg-mem` fallback)** |
-| **RESTART-04 PG17 CI Runner (Strict Guard)** | `REQUIRE_REAL_POSTGRES=1 NODE_ENV=test DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1 node scripts/ci-run-restart04-pg17.js` | No `TEST_POSTGRES_URL` / PG17 | 0 | 0 | 0 | 0 | **`1`** | **FAIL CLOSED (`exit 1`)** |
+| Backend TypeScript Build | `npm run build:backend` | Local Windows (Post-edit) | - | - | 0 | 0 | `0` | **PASS** |
+| DB Migration Static Validation | `npm run db:validate` | Local Windows (Post-edit) | 13 | 13 | 0 | 0 | `0` | **PASS** |
+| DB Package Runtime Suite | `npm run db:test` (`packages/database`) | `pg-mem` + PG gated (Post-edit) | 22 (+1 suite skip) | 22 | 0 | 1 | `0` | **PASS (`pg-mem`; internal PG suite skipped)** |
+| **RESTART-04 Recovered Sync Suite** | `node --test services/backend/tests/offline-sync-22-scenarios.test.js` | `pg-mem` (Post-edit) | **23** | **23** | **0** | **0** | **`0`** | **PASS** |
+| **RESTART-04 Device Auth & Route Security** | `node --test services/backend/tests/restart04-device-auth-and-route-security.test.js` | `pg-mem` (Post-edit) | **5** | **5** | **0** | **0** | **`0`** | **PASS** |
+| `restart032-operational-repository-isolation.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 17 | 17 | 0 | 0 | `0` | **PASS** |
+| `restart03-tenant-isolation-and-ownership.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 18 | 18 | 0 | 0 | `0` | **PASS** |
+| `customer-data-lifecycle-e2e.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 9 | 9 | 0 | 0 | `0` | **PASS** |
+| `restart02-auth-security-remediation.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 9 | 9 | 0 | 0 | `0` | **PASS** |
+| `restart021-auth-session-integrity.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 7 | 7 | 0 | 0 | `0` | **PASS** |
+| `collection-kiosk-production.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 24 | 24 | 0 | 0 | `0` | **PASS** |
+| `customer-tenant-approval-e2e.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 11 | 11 | 0 | 0 | `0` | **PASS** |
+| `multi-dairy-membership.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 9 | 9 | 0 | 0 | `0` | **PASS** |
+| `tenant-database-isolation.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 7 | 7 | 0 | 0 | `0` | **PASS** |
+| `dairy-admin-production.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 36 | 36 | 0 | 0 | `0` | **PASS** |
+| `roadmap-phase-06-dairy-admin.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 41 | 41 | 0 | 0 | `0` | **PASS** |
+| `super-admin-production.test.js` | `node --test ...` | `pg-mem` (Post-edit) | 33 | 33 | 0 | 0 | `0` | **PASS** |
+| `clean-architecture.test.js` | `node --test ...` | Node built-in (Post-edit) | 9 | 9 | 0 | 0 | `0` | **PASS** |
+| **Customer App (`dfarm-customer-app`)** *(prior baseline; unchanged in 04.1)* | `npm run --workspace=apps/dfarm-customer-app test` | Jest (`8/8` files, baseline) | 31 | 31 | 0 | 0 | `0` | **BASELINE PASS (not re-run; no client/contract edits)** |
+| **Collection App (`dfarm-collection-app`)** *(prior baseline; unchanged in 04.1)* | `npm run --workspace=apps/dfarm-collection-app test` | Vitest (`17/17` files, baseline) | 162 | 162 | 0 | 0 | `0` | **BASELINE PASS (not re-run; no client/contract edits)** |
+| **Dairy Admin (`dfarm-dairy-admin`)** *(prior baseline; unchanged in 04.1)* | `npm run --workspace=apps/dfarm-dairy-admin test` | Vitest (`5/5` files, baseline) | 14 | 14 | 0 | 0 | `0` | **BASELINE PASS (not re-run; no client/contract edits)** |
+| **Super Admin (`dfarm-super-admin`)** *(prior baseline; unchanged in 04.1)* | `npm run --workspace=apps/dfarm-super-admin test` | Vitest (`10/10` files, baseline) | 48 | 48 | 0 | 0 | `0` | **BASELINE PASS (not re-run; no client/contract edits)** |
+| **RESTART-04 Real PG17 Suite (Default Local)** | `node --test services/backend/tests/restart04-real-postgres-device-sync.test.js` | No PG17 on host (Post-edit) | 1 | 0 | 0 | **1** | `0` | **SKIP (no `pg-mem` fallback)** |
+| **RESTART-04 PG17 CI Runner (Strict Guard Local)** | `REQUIRE_REAL_POSTGRES=1 NODE_ENV=test DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1 TEST_REAL_POSTGRES=1 node scripts/ci-run-restart04-pg17.js` | No `TEST_POSTGRES_URL` / PG17 (Post-edit) | 0 | 0 | 0 | 0 | **`1`** | **FAIL CLOSED (`exit 1`)** |
+| **RESTART-04 Real PG17 CI Gate (HEAD `8eba954` pre-fix)** | GitHub Actions Run `45947088946` / Job `140334160273` | GitHub Actions PG `17.12` | - | 0 | 1 | 0 | **`1`** | **FAIL (`42703` `users.user_role` at line 182; fixed locally in 04.1)** |
+| **RESTART-03 Real PG17 CI Gate (HEAD `8eba954`)** | GitHub Actions Run `45947088863` | GitHub Actions PG `17.12` | - | - | 0 | 0 | `0` | **PASS** |
+| **Secret Scanning (Gitleaks, HEAD `8eba954`)** | GitHub Actions Run `45947088844` | Gitleaks full history | - | - | 54 | 0 | `1` | **FAIL (`54` findings across `42` commits; `DF-003` / `RESTART-12`)** |
 
-**Aggregated Offline Totals:**  
+**Aggregated Offline Totals (Post-RESTART-04.1 Edit):**  
 - Backend offline suites executed: **`15/15` files PASS — `258/258` tests PASS, `0` failed, `0` skipped**.  
-- Frontend workspaces executed: **`4/4` apps (`40/40` test files) PASS — `255/255` tests PASS, `0` failed, `0` skipped**.
+- Frontend baseline preserved (not re-run in RESTART-04.1 because no shared contracts or client files changed): **`4/4` apps (`40/40` test files) — `255/255` tests PASS**.
 
 ---
 
 ## 4. Scope Boundaries & Remaining Blockers
 
-- **Out-of-Scope Tracks Preserved Unchanged:** Did not start `RESTART-05..12` (biometric module mounting / `customerBiometricRouter` under `RESTART-07`, static device telemetry stubs / `DF-019` under `RESTART-08`, outbox / SSE under `RESTART-09`, Union Bank under `RESTART-10`, migration `031`/`040` or financial formulas, Gitleaks full-history rewrite `DF-003` under `RESTART-12`).
-- **Live PostgreSQL `17.12` Verification Blocker:** `restart04-real-postgres-device-sync.test.js` has not yet been executed against a live PostgreSQL `17.12` server (`com.docker.service` is stopped, Docker named pipe is absent, `psql`/`pg_ctl` are not installed on this Windows host, and `git commit`/`push` to trigger `.github/workflows/dfarm-restart04-postgres17.yml` is prohibited). Once committed/pushed or run against `docker-compose.pg17-verify.yml` (`TEST_POSTGRES_URL=...`), run:
+- **Out-of-Scope Tracks Preserved Unchanged:** Did not start `RESTART-05..12` (biometric module mounting / `customerBiometricRouter` under `RESTART-07`, static device telemetry stubs / `DF-019` under `RESTART-08`, outbox `dashboard_events_outbox` / `RealtimeEventPublisher` under `RESTART-09`, Union Bank under `RESTART-10`, migration `031`/`040` or financial formulas, Gitleaks full-history rewrite `DF-003` under `RESTART-12`).
+- **Live PostgreSQL `17.12` Verification Blocker:** After the RESTART-04.1 fixture fix, `restart04-real-postgres-device-sync.test.js` could not execute locally against a live PostgreSQL `17.12` server because Docker Desktop's Linux VM backend failed to start (`com.docker.service` stopped; `docker desktop start` remained in `starting` with `HTTP 503` / `Docker Desktop is unable to start`), no native `psql`/PG17 server is installed on this Windows host, and `git commit`/`push` to trigger `.github/workflows/dfarm-restart04-postgres17.yml` is prohibited. Once committed/pushed or run against `docker-compose.pg17-verify.yml` (`TEST_POSTGRES_URL=...`), run:
   ```bash
-  REQUIRE_REAL_POSTGRES=1 NODE_ENV=test DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1 node scripts/ci-run-restart04-pg17.js
+  REQUIRE_REAL_POSTGRES=1 NODE_ENV=test DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1 TEST_REAL_POSTGRES=1 node scripts/ci-run-restart04-pg17.js
   ```

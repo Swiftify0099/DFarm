@@ -146,11 +146,11 @@ test('RESTART-04 Real PostgreSQL 17.12 Device Auth, Offline Sync Isolation & Ato
       [orgA, orgB, `R04_A_${suffix}`, `R04_B_${suffix}`]
     );
     await poolCtrl.query(
-      `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, user_role, status)
-       VALUES ($1, $2, $3, '+919700000001', 'Owner A', 'DAIRY_OWNER', 'DAIRY_OWNER', 'ACTIVE'),
-              ($4, $2, $5, '+919700000002', 'Op A', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE'),
-              ($6, $7, $8, '+919700000003', 'Owner B', 'DAIRY_OWNER', 'DAIRY_OWNER', 'ACTIVE'),
-              ($9, $7, $10, '+919700000004', 'Op B', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE');`,
+      `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, status)
+       VALUES ($1, $2, $3, '+919700000001', 'Owner A', 'DAIRY_OWNER', 'ACTIVE'),
+              ($4, $2, $5, '+919700000002', 'Op A', 'COLLECTION_OPERATOR', 'ACTIVE'),
+              ($6, $7, $8, '+919700000003', 'Owner B', 'DAIRY_OWNER', 'ACTIVE'),
+              ($9, $7, $10, '+919700000004', 'Op B', 'COLLECTION_OPERATOR', 'ACTIVE');`,
       [
         ownerA, orgA, `ownA_${suffix}`,
         opA, `opA_${suffix}`,
@@ -180,12 +180,12 @@ test('RESTART-04 Real PostgreSQL 17.12 Device Auth, Offline Sync Isolation & Ato
       [centerA1, orgA, centerA2]
     );
     await poolA.query(
-      `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, user_role, status)
-       VALUES ($1, $2, $3, '+919700000001', 'Owner A', 'DAIRY_OWNER', 'DAIRY_OWNER', 'ACTIVE'),
-              ($4, $2, $5, '+919700000002', 'Op A', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE'),
-              ($6, $2, $7, '+919700000005', 'Inactive Op', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'INACTIVE'),
-              ($8, $2, $9, '+919700000006', 'Wrong Center Op', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE'),
-              ($10, $2, $11, '+919700000007', 'Customer Role User', 'FARMER_CUSTOMER', 'FARMER_CUSTOMER', 'ACTIVE');`,
+      `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, status)
+       VALUES ($1, $2, $3, '+919700000001', 'Owner A', 'DAIRY_OWNER', 'ACTIVE'),
+              ($4, $2, $5, '+919700000002', 'Op A', 'COLLECTION_OPERATOR', 'ACTIVE'),
+              ($6, $2, $7, '+919700000005', 'Inactive Op', 'COLLECTION_OPERATOR', 'INACTIVE'),
+              ($8, $2, $9, '+919700000006', 'Wrong Center Op', 'COLLECTION_OPERATOR', 'ACTIVE'),
+              ($10, $2, $11, '+919700000007', 'Customer Role User', 'FARMER_CUSTOMER', 'ACTIVE');`,
       [
         ownerA, orgA, `ownA_${suffix}`,
         opA, `opA_${suffix}`,
@@ -213,9 +213,9 @@ test('RESTART-04 Real PostgreSQL 17.12 Device Auth, Offline Sync Isolation & Ato
       [centerB1, orgB]
     );
     await poolB.query(
-      `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, user_role, status)
-       VALUES ($1, $2, $3, '+919700000003', 'Owner B', 'DAIRY_OWNER', 'DAIRY_OWNER', 'ACTIVE'),
-              ($4, $2, $5, '+919700000004', 'Op B', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE');`,
+      `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, status)
+       VALUES ($1, $2, $3, '+919700000003', 'Owner B', 'DAIRY_OWNER', 'ACTIVE'),
+              ($4, $2, $5, '+919700000004', 'Op B', 'COLLECTION_OPERATOR', 'ACTIVE');`,
       [ownerB, orgB, `ownB_${suffix}`, opB, `opB_${suffix}`]
     );
     await poolB.query(
