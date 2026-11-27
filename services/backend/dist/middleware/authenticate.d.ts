@@ -22,11 +22,20 @@ export interface AuthContext {
     token: string;
     userSupabaseClient: SupabaseClient;
 }
+export interface DeviceAuthContext {
+    deviceId: string;
+    organizationId: string;
+    centerId: string;
+    deviceIdentifier: string;
+    deviceType?: string;
+    tokenHash: string;
+}
 declare global {
     namespace Express {
         interface Request {
             auth?: AuthContext;
             deviceId?: string;
+            device?: DeviceAuthContext;
         }
     }
 }

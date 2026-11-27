@@ -2,13 +2,31 @@ import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import crypto from 'node:crypto';
-import { createApp } from '../dist/app.js';
-import { query, pool } from '../dist/db.js';
-import { pool as configPool } from '../dist/config/db.js';
-import { signJwt } from '../dist/jwt.js';
+
+// Ensure isolated offline test mode unless an explicit real PG test URL is supplied
+if (!process.env.TEST_POSTGRES_URL) {
+  process.env.NODE_ENV = 'test';
+  process.env.DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
+  process.env.CENTRAL_DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
+  process.env.DATABASE_PROVISIONER_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
+  process.env.TENANT_POOL_CONNECTION_TIMEOUT_MS = '500';
+}
+
+const { createApp } = await import('../dist/app.js');
+const { query, pool } = await import('../dist/db.js');
+const { tenantDbManager } = await import('../dist/infrastructure/database/TenantDatabaseManager.js');
+const { HmacJwtTokenService } = await import('../dist/infrastructure/security/HmacJwtTokenService.js');
 
 const app = createApp();
+const tokenService = new HmacJwtTokenService();
 
+/**
+ * NOTE ON TEST SCOPE:
+ * - Scenarios marked [BACKEND INTEGRATION] execute live HTTP calls through Express + auth middleware +
+ *   DeviceRegistryService + SyncService against isolated tenant database instances (pg-mem offline mode).
+ * - Scenarios marked [SIMULATED LOCAL EDGE UNIT] model client-side Android/SQLite/WorkManager state logic
+ *   in memory; they are NOT proof of Android WorkManager or SQLite persistence on device hardware.
+ */
 describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Verification Suite (Phase 09)', async () => {
   let orgId;
   let centerId;
@@ -18,58 +36,105 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
   let deviceId;
   let deviceToken;
   let deviceIdentifier;
+  let tenantDb;
+  let rateChartVersionId;
 
   after(async () => {
-    await pool.end();
-    await configPool.end();
+    await tenantDbManager.closeAllPools().catch(() => {});
+    await pool.end().catch(() => {});
   });
 
-  it('Scenario 0: Provision test infrastructure and active device identity', async () => {
-    // 1. Create Organization
+  it('Scenario 0 [BACKEND INTEGRATION]: Provision test infrastructure, tenant mapping, and active device identity', async () => {
     orgId = crypto.randomUUID();
     const orgCode = 'SMF-' + crypto.randomUUID().slice(0, 8).toUpperCase();
+    centerId = crypto.randomUUID();
+    const centerCode = 'C-' + crypto.randomUUID().slice(0, 6).toUpperCase();
+    operatorUserId = crypto.randomUUID();
+    adminUserId = crypto.randomUUID();
+
+    // 1. Seed Control-Plane Organization, Users, and Tenant DB Mapping
     await query(
       `INSERT INTO organizations (id, name, code, status)
        VALUES ($1, 'Sangli Milk Federation Phase09', $2, 'ACTIVE');`,
       [orgId, orgCode]
     );
-
-    // 2. Create Center
-    centerId = crypto.randomUUID();
-    const centerCode = 'C-' + crypto.randomUUID().slice(0, 6).toUpperCase();
     await query(
       `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
        VALUES ($1, $2, $3, 'Tasgaon Procurement Hub', 'Station Road', 'Tasgaon', 'Sangli', 'Maharashtra', '416312', '+919999000000', 'ACTIVE');`,
       [centerId, orgId, centerCode]
     );
-
-    // 3. Create Operator User
-    operatorUserId = crypto.randomUUID();
     await query(
-      `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, status)
-       VALUES ($1, $2, $3, '+919999000001', 'Ankush Jadhav Operator', 'COLLECTION_OPERATOR', 'ACTIVE')
+      `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, user_role, status)
+       VALUES ($1, $2, $3, '+919999000001', 'Ankush Jadhav Operator', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE')
        ON CONFLICT DO NOTHING;`,
       [operatorUserId, orgId, `ankush_${operatorUserId.slice(0, 8)}`]
     );
-
-    // Create Admin User for authenticating device registration
-    adminUserId = crypto.randomUUID();
     await query(
-      `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, status)
-       VALUES ($1, $2, $3, '+919999000002', 'Sangli Dairy Owner', 'DAIRY_OWNER', 'ACTIVE')
+      `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, user_role, status)
+       VALUES ($1, $2, $3, '+919999000002', 'Sangli Dairy Owner', 'DAIRY_OWNER', 'DAIRY_OWNER', 'ACTIVE')
        ON CONFLICT DO NOTHING;`,
       [adminUserId, orgId, `owner_${adminUserId.slice(0, 8)}`]
     );
 
-    adminToken = signJwt({
-      sub: adminUserId,
+    await query(
+      `INSERT INTO dairy_database_mappings (
+         id, dairy_id, dairy_code, database_name, resource_type, schema_version, provisioning_status, provisioned_at, last_verified_at
+       ) VALUES ($1, $2, $3, $4, 'ISOLATED_TEST_INSTANCE', 'v1.0.0', 'ACTIVE', NOW(), NOW())
+       ON CONFLICT (dairy_id) DO UPDATE SET provisioning_status = 'ACTIVE';`,
+      [crypto.randomUUID(), orgId, orgCode, `dfarm_mem_${orgId.slice(0, 8)}`]
+    );
+
+    // 2. Seed Isolated Tenant DB Operational Fixtures
+    tenantDb = await tenantDbManager.getStrictTenantDb(orgId);
+    await tenantDb.query(
+      `INSERT INTO organizations (id, name, code, status)
+       VALUES ($1, 'Sangli Milk Federation Phase09', $2, 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [orgId, orgCode]
+    );
+    await tenantDb.query(
+      `INSERT INTO dairy_centers (id, organization_id, code, name, address_line1, village_town, district, state, postal_code, contact_phone, status)
+       VALUES ($1, $2, $3, 'Tasgaon Procurement Hub', 'Station Road', 'Tasgaon', 'Sangli', 'Maharashtra', '416312', '+919999000000', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [centerId, orgId, centerCode]
+    );
+    await tenantDb.query(
+      `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, user_role, status)
+       VALUES ($1, $2, $3, '+919999000001', 'Ankush Jadhav Operator', 'COLLECTION_OPERATOR', 'COLLECTION_OPERATOR', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [operatorUserId, orgId, `ankush_${operatorUserId.slice(0, 8)}`]
+    );
+    await tenantDb.query(
+      `INSERT INTO users (id, organization_id, username, phone_number, full_name, role, user_role, status)
+       VALUES ($1, $2, $3, '+919999000002', 'Sangli Dairy Owner', 'DAIRY_OWNER', 'DAIRY_OWNER', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [adminUserId, orgId, `owner_${adminUserId.slice(0, 8)}`]
+    );
+
+    // Seed active approved COW rate chart in tenant DB
+    const rcId = crypto.randomUUID();
+    rateChartVersionId = crypto.randomUUID();
+    await tenantDb.query(
+      `INSERT INTO rate_charts (id, organization_id, center_id, name, milk_category, pricing_type, is_active)
+       VALUES ($1, $2, $3, 'Tasgaon Cow Standard', 'COW', 'GRID', TRUE);`,
+      [rcId, orgId, centerId]
+    );
+    await tenantDb.query(
+      `INSERT INTO rate_chart_versions (id, rate_chart_id, version_number, effective_from, base_fat, base_snf, base_rate, is_approved)
+       VALUES ($1, $2, 1, NOW() - INTERVAL '1 day', 4.0, 8.5, 39.0, TRUE);`,
+      [rateChartVersionId, rcId]
+    );
+
+    adminToken = tokenService.signToken({
       userId: adminUserId,
       organizationId: orgId,
+      centerId,
       role: 'DAIRY_OWNER',
-      centerIds: [centerId],
+      actorType: 'STAFF',
+      fullName: 'Sangli Dairy Owner',
     });
 
-    // 4. Register Device (using valid deviceType and admin token)
+    // 3. Register Device through hardened presentation endpoint
     deviceIdentifier = `POS-TERM-${Math.floor(1000 + Math.random() * 9000)}`;
     const regRes = await request(app)
       .post('/api/v1/devices/register')
@@ -83,15 +148,14 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
         appVersion: '1.0.0',
       });
 
-    assert.equal(regRes.status, 200);
+    assert.equal(regRes.status, 200, `Register failed: ${JSON.stringify(regRes.body)}`);
     assert.ok(regRes.body.success);
-    deviceId = regRes.body.data.deviceId || regRes.body.data.id;
+    deviceId = regRes.body.data.deviceId;
     deviceToken = regRes.body.data.token;
     assert.ok(deviceToken, 'Device token must be issued');
   });
 
-  it('Scenario 1: Registration without Internet — Edge local draft persistence', async () => {
-    // Tablet generates local UUID and captures draft offline
+  it('Scenario 1 [SIMULATED LOCAL EDGE UNIT]: Offline draft model initializes pending sync state', async () => {
     const localDraftUuid = crypto.randomUUID();
     const draft = {
       localId: localDraftUuid,
@@ -110,8 +174,7 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
     assert.equal(draft.fullName, 'Balu Shripati Patil');
   });
 
-  it('Scenario 2: Local draft persistence across restarts — SQLite durability', async () => {
-    // Verifies draft data survives application close / memory flush
+  it('Scenario 2 [SIMULATED LOCAL EDGE UNIT]: Simulated in-memory draft store (not Android SQLite)', async () => {
     const draftStore = new Map();
     const draftId = crypto.randomUUID();
     draftStore.set(draftId, {
@@ -120,14 +183,13 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
       status: 'PENDING_SYNC',
     });
 
-    // Simulate process termination and re-reading from disk
     const reloadedDraft = draftStore.get(draftId);
     assert.ok(reloadedDraft);
     assert.equal(reloadedDraft.fullName, 'Shankar Mahadev Kadam');
     assert.equal(reloadedDraft.status, 'PENDING_SYNC');
   });
 
-  it('Scenario 3: Application restart during pending registration — Recoverable drafts', async () => {
+  it('Scenario 3 [SIMULATED LOCAL EDGE UNIT]: Pending draft queue filter logic', async () => {
     const uncommittedDrafts = [
       { id: 'draft-1', status: 'PENDING_SYNC', name: 'Farmer One' },
       { id: 'draft-2', status: 'SYNCED', name: 'Farmer Two' },
@@ -138,9 +200,10 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
   });
 
   let canonicalCustomerUuid;
-  const farmerMobile = `9822${Math.floor(100000 + Math.random() * 900000)}`;
+  const farmerMobile = `+919822${Math.floor(100000 + Math.random() * 900000)}`;
+  const farmerCode = `F-${Math.floor(100000 + Math.random() * 900000)}`;
 
-  it('Scenario 4: Online registration synchronization — Push commits & issues canonical server UUID', async () => {
+  it('Scenario 4 [BACKEND INTEGRATION]: Online registration synchronization — Push commits into tenant DB', async () => {
     canonicalCustomerUuid = crypto.randomUUID();
     const pushPayload = {
       deviceId,
@@ -154,9 +217,10 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
           idempotencyKey: `IDEMP-REG-${canonicalCustomerUuid}`,
           createdAt: new Date().toISOString(),
           payload: {
-            farmerCode: `F-${Math.floor(100000 + Math.random() * 900000)}`,
+            farmerCode,
             fullName: 'Balu Shripati Patil',
             mobileNumber: farmerMobile,
+            authorizedBy: operatorUserId,
             permittedCategories: ['COW', 'BUFFALO'],
             preferredMilkCategory: 'COW',
             bankName: 'State Bank of India',
@@ -179,18 +243,21 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
       .set('Authorization', `Bearer ${deviceToken}`)
       .send(pushPayload);
 
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 200, `Push failed: ${JSON.stringify(res.body)}`);
     assert.ok(res.body.success);
     assert.equal(res.body.data.applied, 1);
     assert.equal(res.body.data.results[0].status, 'COMMITTED');
 
-    // Verify row committed in Postgres
-    const dbCheck = await query('SELECT id, full_name, status FROM customers WHERE id = $1;', [canonicalCustomerUuid]);
+    // Verify row committed in isolated Tenant DB (NOT central control-plane DB)
+    const dbCheck = await tenantDb.query('SELECT id, full_name, status FROM customers WHERE id = $1;', [canonicalCustomerUuid]);
     assert.equal(dbCheck.rows.length, 1);
     assert.equal(dbCheck.rows[0].status, 'ACTIVE');
+
+    const ctrlCheck = await query('SELECT id FROM customers WHERE id = $1;', [canonicalCustomerUuid]);
+    assert.equal(ctrlCheck.rows.length, 0, 'Customer must NOT be written to control-plane DB');
   });
 
-  it('Scenario 5: Duplicate mobile conflict — Recorded in sync_conflict_records without duplicate insert', async () => {
+  it('Scenario 5 [BACKEND INTEGRATION]: Duplicate mobile conflict — Recorded in tenant sync_conflict_records without duplicate insert', async () => {
     const conflictingCustId = crypto.randomUUID();
     const pushPayload = {
       deviceId,
@@ -206,7 +273,8 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
           payload: {
             farmerCode: `F-${Math.floor(100000 + Math.random() * 900000)}`,
             fullName: 'Duplicate Mobile Impostor',
-            mobileNumber: farmerMobile, // Collides with Scenario 4 farmer
+            mobileNumber: farmerMobile,
+            authorizedBy: operatorUserId,
             permittedCategories: ['COW'],
           },
         },
@@ -224,18 +292,15 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
     assert.equal(res.body.data.results[0].status, 'CONFLICT');
     assert.equal(res.body.data.results[0].reason, 'DUPLICATE_MOBILE_NUMBER');
 
-    // Verify conflicting customer NOT created
-    const notCreated = await query('SELECT id FROM customers WHERE id = $1;', [conflictingCustId]);
+    const notCreated = await tenantDb.query('SELECT id FROM customers WHERE id = $1;', [conflictingCustId]);
     assert.equal(notCreated.rows.length, 0);
 
-    // Verify logged in sync_conflict_records
-    const conflictLog = await query('SELECT id, conflict_reason FROM sync_conflict_records WHERE entity_id = $1;', [conflictingCustId]);
+    const conflictLog = await tenantDb.query('SELECT id, conflict_reason FROM sync_conflict_records WHERE entity_id = $1;', [conflictingCustId]);
     assert.equal(conflictLog.rows.length, 1);
     assert.equal(conflictLog.rows[0].conflict_reason, 'DUPLICATE_MOBILE_NUMBER');
   });
 
-  it('Scenario 6: Registration sync retry — Idempotent recovery after network interruption', async () => {
-    // Replay the exact push event from Scenario 4
+  it('Scenario 6 [BACKEND INTEGRATION]: Registration sync retry — Idempotent recovery after network interruption', async () => {
     const pushPayload = {
       deviceId,
       centerId,
@@ -248,6 +313,7 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
           idempotencyKey: `IDEMP-REG-${canonicalCustomerUuid}`,
           createdAt: new Date().toISOString(),
           payload: {
+            farmerCode,
             fullName: 'Balu Shripati Patil',
           },
         },
@@ -263,11 +329,11 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
     assert.equal(res.body.data.results[0].status, 'DUPLICATE');
   });
 
-  let collectionRecordUuid = crypto.randomUUID();
-  let collectionSessionUuid = crypto.randomUUID();
+  const collectionRecordUuid = crypto.randomUUID();
+  const collectionSessionUuid = crypto.randomUUID();
   const collectionIdempotencyKey = `IDEMP-COL-${collectionRecordUuid}`;
 
-  it('Scenario 7: Collection queue persistence — Local milk transaction enqueued & committed', async () => {
+  it('Scenario 7 [BACKEND INTEGRATION]: Collection queue persistence — Local milk transaction enqueued & committed atomically', async () => {
     const pushPayload = {
       deviceId,
       centerId,
@@ -282,7 +348,9 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
           payload: {
             sessionId: collectionSessionUuid,
             customerId: canonicalCustomerUuid,
+            operatorId: operatorUserId,
             centerId,
+            rateChartVersionId,
             businessDate: new Date().toISOString().slice(0, 10),
             shiftType: 'MORNING',
             milkCategory: 'COW',
@@ -303,17 +371,17 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
       .set('Authorization', `Bearer ${deviceToken}`)
       .send(pushPayload);
 
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 200, `Collection push failed: ${JSON.stringify(res.body)}`);
     assert.equal(res.body.data.applied, 1);
     assert.equal(res.body.data.results[0].status, 'COMMITTED');
 
-    // Verify row committed in milk_collections
-    const colCheck = await query('SELECT id, total_amount FROM milk_collections WHERE id = $1;', [collectionRecordUuid]);
+    const colCheck = await tenantDb.query('SELECT id, organization_id, total_amount FROM milk_collections WHERE id = $1;', [collectionRecordUuid]);
     assert.equal(colCheck.rows.length, 1);
+    assert.equal(colCheck.rows[0].organization_id, orgId);
     assert.equal(Number(colCheck.rows[0].total_amount), 1111.50);
   });
 
-  it('Scenario 8: Duplicate event replay — Idempotently rejected with zero double ledger credit', async () => {
+  it('Scenario 8 [BACKEND INTEGRATION]: Duplicate event replay — Idempotently rejected with zero double ledger credit', async () => {
     const replayPayload = {
       deviceId,
       centerId,
@@ -328,6 +396,7 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
           payload: {
             sessionId: collectionSessionUuid,
             customerId: canonicalCustomerUuid,
+            operatorId: operatorUserId,
             totalAmount: 1111.50,
           },
         },
@@ -342,12 +411,10 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
     assert.equal(res.status, 200);
     assert.equal(res.body.data.results[0].status, 'DUPLICATE');
 
-    // CRITICAL: Ensure exactly 1 milk collection row exists
-    const countCheck = await query('SELECT COUNT(*) as count FROM milk_collections WHERE id = $1;', [collectionRecordUuid]);
+    const countCheck = await tenantDb.query('SELECT COUNT(*) as count FROM milk_collections WHERE id = $1;', [collectionRecordUuid]);
     assert.equal(parseInt(countCheck.rows[0].count, 10), 1);
 
-    // CRITICAL: Ensure exactly 2 double-entry ledger lines exist (1 debit, 1 credit)
-    const ledgerCount = await query(
+    const ledgerCount = await tenantDb.query(
       `SELECT COUNT(*) as count FROM ledger_entries le
        JOIN ledger_transactions lt ON le.transaction_id = lt.id
        WHERE lt.reference_id = $1;`,
@@ -356,7 +423,7 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
     assert.equal(parseInt(ledgerCount.rows[0].count, 10), 2);
   });
 
-  it('Scenario 9: Incremental pull cursor — Tracks delta updates since last cursor', async () => {
+  it('Scenario 9 [BACKEND INTEGRATION]: Incremental pull cursor — Tracks delta updates since last cursor', async () => {
     const res = await request(app)
       .get(`/api/v1/sync/pull?cursor=0&tombstoneCursor=0&centerId=${centerId}`)
       .set('Authorization', `Bearer ${deviceToken}`);
@@ -367,12 +434,25 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
     assert.ok(res.body.data.nextCursor >= 1);
   });
 
-  it('Scenario 10: Partial batch failure — PostgreSQL savepoint isolation preserves valid events', async () => {
+  it('Scenario 10 [BACKEND INTEGRATION]: Partial batch failure — Invalid event fails without blocking valid event', async () => {
     const validId = crypto.randomUUID();
+    const invalidId = crypto.randomUUID();
     const pushPayload = {
       deviceId,
       centerId,
       events: [
+        {
+          id: crypto.randomUUID(),
+          entityType: 'CUSTOMER_REGISTRATION',
+          entityId: invalidId,
+          action: 'INSERT',
+          idempotencyKey: `IDEMP-BATCH-INVALID-${invalidId}`,
+          createdAt: new Date().toISOString(),
+          payload: {
+            // Missing fullName, mobileNumber, farmerCode, authorizedBy -> must fail closed
+            permittedCategories: ['COW'],
+          },
+        },
         {
           id: crypto.randomUUID(),
           entityType: 'CUSTOMER_REGISTRATION',
@@ -383,7 +463,8 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
           payload: {
             farmerCode: `F-${Math.floor(100000 + Math.random() * 900000)}`,
             fullName: 'Valid Farmer Batch',
-            mobileNumber: `9833${Math.floor(100000 + Math.random() * 900000)}`,
+            mobileNumber: `+919833${Math.floor(100000 + Math.random() * 900000)}`,
+            authorizedBy: operatorUserId,
             permittedCategories: ['COW'],
           },
         },
@@ -397,49 +478,45 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
 
     assert.equal(res.status, 200);
     assert.equal(res.body.data.applied, 1);
+    assert.equal(res.body.data.results[0].status, 'ERROR');
+    assert.equal(res.body.data.results[1].status, 'COMMITTED');
   });
 
-  it('Scenario 11: Network interruption — Local journal retains pending state and retry count', async () => {
-    // Simulated local journal event with network failure
+  it('Scenario 11 [SIMULATED LOCAL EDGE UNIT]: Network interruption journal retry counter model', async () => {
     const journalItem = {
       idempotencyKey: 'IDEMP-OFFLINE-TEST',
       syncStatus: 'PENDING_SYNC',
       retryCount: 0,
     };
-    // Network fails -> retry count increments, status changes to RETRY_REQUIRED
     journalItem.retryCount++;
     journalItem.syncStatus = 'RETRY_REQUIRED';
     assert.equal(journalItem.retryCount, 1);
     assert.equal(journalItem.syncStatus, 'RETRY_REQUIRED');
   });
 
-  it('Scenario 12: Device restart during active collection session — State preserved', async () => {
+  it('Scenario 12 [SIMULATED LOCAL EDGE UNIT]: Local active session snapshot model', async () => {
     const savedActiveSession = {
       sessionId: 'sess-active-1',
       customerUuid: canonicalCustomerUuid,
       state: 'WAITING_FOR_MEASUREMENTS',
       businessDate: '2026-11-14',
     };
-    // Interrupted session is recognized and recovered
     assert.equal(savedActiveSession.state, 'WAITING_FOR_MEASUREMENTS');
     assert.equal(savedActiveSession.customerUuid, canonicalCustomerUuid);
   });
 
-  it('Scenario 13: Soft-delete tombstone — Cloud deletion propagates tombstone to downstream pull', async () => {
-    // 1. Soft delete customer
-    await query(
+  it('Scenario 13 [BACKEND INTEGRATION]: Soft-delete tombstone — Cloud deletion propagates tombstone to downstream pull', async () => {
+    await tenantDb.query(
       "UPDATE customers SET is_deleted = TRUE, deleted_at = NOW(), deletion_reason = 'Farmer deceased' WHERE id = $1;",
       [canonicalCustomerUuid]
     );
 
-    // 2. Insert tombstone
-    await query(
+    await tenantDb.query(
       `INSERT INTO sync_tombstones (organization_id, entity_type, entity_id, reason, deleted_at)
        VALUES ($1, 'CUSTOMER', $2, 'Farmer deceased', NOW());`,
       [orgId, canonicalCustomerUuid]
     );
 
-    // 3. Pull updates
     const pullRes = await request(app)
       .get(`/api/v1/sync/pull?cursor=0&tombstoneCursor=0&centerId=${centerId}`)
       .set('Authorization', `Bearer ${deviceToken}`);
@@ -450,20 +527,18 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
     assert.equal(tombstone.entityType, 'CUSTOMER');
   });
 
-  it('Scenario 14: Restore propagation — Authorized restore brings customer back to active state', async () => {
-    // Reactivate customer
-    await query(
+  it('Scenario 14 [BACKEND INTEGRATION]: Restore propagation — Authorized restore brings customer back to active state', async () => {
+    await tenantDb.query(
       'UPDATE customers SET is_deleted = FALSE, deleted_at = NULL, status = $1, updated_at = NOW() WHERE id = $2;',
       ['ACTIVE', canonicalCustomerUuid]
     );
 
-    const check = await query('SELECT status, is_deleted FROM customers WHERE id = $1;', [canonicalCustomerUuid]);
+    const check = await tenantDb.query('SELECT status, is_deleted FROM customers WHERE id = $1;', [canonicalCustomerUuid]);
     assert.equal(check.rows[0].status, 'ACTIVE');
     assert.equal(check.rows[0].is_deleted, false);
   });
 
-  it('Scenario 15: Face consent revocation — Purges template from local biometric index', async () => {
-    // Tombstone for biometric consent
+  it('Scenario 15 [SIMULATED LOCAL EDGE UNIT]: Face consent revocation tombstone shape', async () => {
     const consentTombstone = {
       entityType: 'FACE_TEMPLATE',
       entityId: canonicalCustomerUuid,
@@ -473,7 +548,7 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
     assert.equal(consentTombstone.reason, 'Consent withdrawn by farmer');
   });
 
-  it('Scenario 16: RFID revocation — Tag unbinding disallows customer collection', async () => {
+  it('Scenario 16 [SIMULATED LOCAL EDGE UNIT]: RFID card revocation status model', async () => {
     const cardAssignment = {
       cardNumber: 'RFID-987654',
       status: 'REVOKED',
@@ -482,7 +557,7 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
     assert.equal(cardAssignment.status, 'REVOKED');
   });
 
-  it('Scenario 17: Device revocation — /api/v1/devices/revoke immediately fails closed with 403', async () => {
+  it('Scenario 17 [BACKEND INTEGRATION]: Device revocation — /api/v1/devices/revoke immediately fails closed with 403', async () => {
     const revokeRes = await request(app)
       .post('/api/v1/devices/revoke')
       .set('Authorization', `Bearer ${adminToken}`)
@@ -508,23 +583,22 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
     assert.equal(pushAttempt.body.error.code, 'DEVICE_REVOKED');
   });
 
-  it('Scenario 18: Expired offline authorization — Fails closed after 72 hours', async () => {
+  it('Scenario 18 [SIMULATED LOCAL EDGE UNIT]: Offline authorization expiry calculation model (72h limit)', async () => {
     const maxOfflineHours = 72;
-    const lastSyncTime = Date.now() - (75 * 3600 * 1000); // 75h ago
+    const lastSyncTime = Date.now() - (75 * 3600 * 1000);
     const elapsedHours = (Date.now() - lastSyncTime) / (3600 * 1000);
-    const isExpired = elapsedHours > maxOfflineHours;
-    assert.ok(isExpired, 'Offline authorization must expire when older than 72 hours');
+    assert.ok(elapsedHours > maxOfflineHours, 'Offline authorization must expire when older than 72 hours');
   });
 
-  it('Scenario 19: Conflict detection & audit logging — Complete audit payload in DB', async () => {
-    const conflictRes = await query('SELECT * FROM sync_conflict_records LIMIT 1;');
+  it('Scenario 19 [BACKEND INTEGRATION]: Conflict detection & audit logging — Complete audit payload in tenant DB', async () => {
+    const conflictRes = await tenantDb.query('SELECT * FROM sync_conflict_records LIMIT 1;');
     assert.ok(conflictRes.rows.length > 0);
     assert.ok(conflictRes.rows[0].client_payload);
     assert.ok(conflictRes.rows[0].server_state);
   });
 
-  it('Scenario 20: No duplicate ledger credits — Double-entry subledger perfectly balanced', async () => {
-    const entries = await query(
+  it('Scenario 20 [BACKEND INTEGRATION]: No duplicate ledger credits — Double-entry subledger perfectly balanced in tenant DB', async () => {
+    const entries = await tenantDb.query(
       `SELECT le.account_type, le.entry_type, le.amount
        FROM ledger_entries le
        JOIN ledger_transactions lt ON le.transaction_id = lt.id
@@ -543,14 +617,12 @@ describe('DFarm Offline-First & Automatic Cloud Sync Engine — 22 Scenarios Ver
     assert.equal(debit.account_type, 'MILK_PURCHASE_EXPENSE');
   });
 
-  it('Scenario 21: Encryption at rest — Hardware Keystore AES-256-GCM', async () => {
-    // Face embeddings stored in Postgres are base64 encoded bytea (zero raw photos)
-    const faceCheck = await query('SELECT embedding_encrypted, embedding_iv FROM face_enrollments LIMIT 1;');
-    // In DB, embedding is encrypted bytea
-    assert.ok(true, 'Hardware Keystore AES-256-GCM verified');
+  it('Scenario 21 [SIMULATED LOCAL EDGE UNIT]: Encryption at rest contract assertion', async () => {
+    const faceCheck = await tenantDb.query('SELECT embedding_encrypted, embedding_iv FROM face_enrollments LIMIT 1;');
+    assert.ok(Array.isArray(faceCheck.rows));
   });
 
-  it('Scenario 22: WorkManager scheduling and recovery — Network constraints & exponential backoff', async () => {
+  it('Scenario 22 [SIMULATED LOCAL EDGE UNIT]: WorkManager sync policy configuration model (not Android WorkManager)', async () => {
     const workPolicy = {
       name: 'DFarmPeriodicSyncWork',
       networkConstraint: 'CONNECTED',

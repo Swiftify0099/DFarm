@@ -346,7 +346,7 @@ test('DFarm Collection App / Kiosk Counter Production Verification Suite', async
 
     await t.test('12. Offline batch push endpoint synchronizes locally queued weighments with atomic ledger credit', async () => {
       const res = await request(app)
-        .post('/api/v1/sync/push')
+        .post('/api/v1/sync/transactions')
         .set('Authorization', `Bearer ${operatorTokenA}`)
         .send({
           deviceId: 'KIOSK_MAIN_01',
@@ -377,7 +377,7 @@ test('DFarm Collection App / Kiosk Counter Production Verification Suite', async
 
     await t.test('13. Re-syncing the same offline batch returns idempotent replay without duplicate accounting', async () => {
       const res = await request(app)
-        .post('/api/v1/sync/push')
+        .post('/api/v1/sync/transactions')
         .set('Authorization', `Bearer ${operatorTokenA}`)
         .send({
           deviceId: 'KIOSK_MAIN_01',

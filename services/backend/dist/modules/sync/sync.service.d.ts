@@ -1,8 +1,11 @@
+import { DeviceAuthContext } from '../../middleware/authenticate.js';
 export declare class SyncService {
+    private static loadAuthorizedTenantDevice;
+    private static validateAuthoritativeActor;
     /**
-     * Push offline events to central database
+     * Push offline events strictly to the authenticated device's isolated tenant database
      */
-    static pushEvents(batchData: any): Promise<{
+    static pushEvents(deviceCtx: DeviceAuthContext, batchData: any): Promise<{
         success: boolean;
         applied: number;
         conflicts: number;
@@ -10,9 +13,9 @@ export declare class SyncService {
         processedAt: string;
     }>;
     /**
-     * Pull incremental changes from central database
+     * Pull incremental changes strictly from the device's tenant database
      */
-    static pullChanges(deviceId: string, cursor: number, tombstoneCursor: number, centerId?: string): Promise<{
+    static pullChanges(deviceCtx: DeviceAuthContext, cursor: number, tombstoneCursor: number): Promise<{
         customers: {
             id: any;
             farmerCode: any;
@@ -59,12 +62,12 @@ export declare class SyncService {
         offlineAuthPolicyApproved: boolean;
         offlinePolicyStatus: string;
         syncedAt: string;
-        centerId: any;
+        centerId: string;
     }>;
     /**
-     * Acknowledge cursor advance
+     * Acknowledge cursor advance strictly in the device's tenant database
      */
-    static acknowledge(deviceId: string, downstreamCursor: number, downstreamTombstoneCursor: number, clientAppVersion?: string): Promise<{
+    static acknowledge(deviceCtx: DeviceAuthContext, downstreamCursor: number, downstreamTombstoneCursor: number, clientAppVersion?: string): Promise<{
         acknowledged: boolean;
         deviceId: string;
         downstreamCursor: number;
@@ -72,13 +75,15 @@ export declare class SyncService {
         acknowledgedAt: string;
     }>;
     /**
-     * Get device synchronization status
+     * Get device synchronization status strictly from the device's tenant database
      */
-    static getStatus(deviceId: string): Promise<{
+    static getStatus(deviceCtx: DeviceAuthContext): Promise<{
         deviceId: any;
+        organizationId: any;
+        centerId: any;
         deviceIdentifier: any;
         status: any;
-        maxOfflineHours: any;
+        maxOfflineHours: number;
         lastSeenAt: any;
         lastSyncedAt: any;
         downstreamCursor: number;

@@ -2,11 +2,75 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { GetDeviceTelemetryUseCase } from '../../application/use-cases/index.js';
 import { tenantDbManager } from '../../infrastructure/database/TenantDatabaseManager.js';
 import { authenticate } from '../middleware/authenticate.js';
-import { authorizePermission } from '../middleware/authorize.js';
+import { authorizePermission, authorizeRoles } from '../middleware/authorize.js';
 import { realtimePublisher } from '../../infrastructure/realtime/RealtimeEventPublisher.js';
+import { DeviceRegistryService } from '../../modules/sync/device-registry.service.js';
+import { ApiResponse } from '../../shared/response/api-response.js';
 
 const router = Router();
 const getTelemetryUseCase = new GetDeviceTelemetryUseCase();
+
+// ============================================================================
+// 0A. HARDENED DEVICE REGISTRATION & REVOCATION
+// Endpoints: POST /api/v1/devices/register, POST /api/v1/devices/revoke
+// ============================================================================
+router.post(
+  '/register',
+  authenticate,
+  authorizeRoles('SUPER_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'DAIRY_OWNER', 'DAIRY_ADMIN', 'CENTER_MANAGER'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const headerOrgId =
+        (req.headers['x-dairy-tenant-id'] as string) ||
+        (req.headers['x-organization-id'] as string) ||
+        (req.headers['x-dairy-id'] as string);
+
+      const data = await DeviceRegistryService.registerDevice({
+        actor: {
+          userId: req.user!.userId,
+          role: req.user!.role,
+          organizationId: req.user!.organizationId,
+          centerIds: req.user!.centerIds,
+        },
+        body: req.body,
+        headerOrgId,
+      });
+
+      ApiResponse.success(res, data, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+router.post(
+  '/revoke',
+  authenticate,
+  authorizeRoles('SUPER_ADMIN', 'PRIMARY_DAIRY_ADMIN', 'DAIRY_OWNER', 'DAIRY_ADMIN', 'CENTER_MANAGER'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const headerOrgId =
+        (req.headers['x-dairy-tenant-id'] as string) ||
+        (req.headers['x-organization-id'] as string) ||
+        (req.headers['x-dairy-id'] as string);
+
+      const data = await DeviceRegistryService.revokeDevice({
+        actor: {
+          userId: req.user!.userId,
+          role: req.user!.role,
+          organizationId: req.user!.organizationId,
+          centerIds: req.user!.centerIds,
+        },
+        body: req.body,
+        headerOrgId,
+      });
+
+      ApiResponse.success(res, data, 200);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 // ============================================================================
 // 0. AUTHENTICATED STATION HEARTBEAT & TELEMETRY

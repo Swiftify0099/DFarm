@@ -1096,6 +1096,7 @@ export class TenantDatabaseManager {
       '008_collection_sessions_and_transactions.sql',
       '009_customer_ledger.sql',
       '010_devices_sync_and_audit.sql',
+      '012_sync_engine_enhancements.sql',
       '014_feed_inventory_procurement_and_sales.sql',
       '020_automated_monthly_billing_and_settlements.sql',
       '021_customer_payouts_batches_and_reconciliation.sql',
@@ -1169,6 +1170,13 @@ export class TenantDatabaseManager {
       db.public.none('ALTER TABLE users ADD COLUMN IF NOT EXISTS normalized_mobile_number VARCHAR(20);');
       db.public.none('ALTER TABLE users ADD COLUMN IF NOT EXISTS user_role VARCHAR(30);');
       db.public.none('ALTER TABLE users ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;');
+      db.public.none('ALTER TABLE devices ADD COLUMN IF NOT EXISTS offline_auth_policy_approved BOOLEAN NOT NULL DEFAULT FALSE;');
+      db.public.none('ALTER TABLE devices ADD COLUMN IF NOT EXISTS approved_max_offline_hours INT DEFAULT NULL;');
+      db.public.none('ALTER TABLE center_settings ADD COLUMN IF NOT EXISTS offline_auth_policy_approved BOOLEAN NOT NULL DEFAULT FALSE;');
+      db.public.none('ALTER TABLE center_settings ADD COLUMN IF NOT EXISTS approved_max_offline_hours INT DEFAULT NULL;');
+      db.public.none("ALTER TABLE center_settings ADD COLUMN IF NOT EXISTS limits_status VARCHAR(50) DEFAULT 'PENDING_OWNER_APPROVAL';");
+      db.public.none("ALTER TABLE rate_chart_versions ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'PUBLISHED';");
+      db.public.none("ALTER TABLE rate_chart_versions ADD COLUMN IF NOT EXISTS pricing_unit VARCHAR(20) NOT NULL DEFAULT 'PER_KG';");
     } catch {}
 
     try {
@@ -1284,6 +1292,7 @@ export class TenantDatabaseManager {
         await previous;
 
         const client = await pool.connect();
+        (client as any).__isPgMem = true;
         const backup = db.backup();
         try {
           await client.query('BEGIN');

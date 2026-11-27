@@ -391,6 +391,13 @@ export class PostgresDatabase {
       db.public.none('ALTER TABLE users ADD COLUMN IF NOT EXISTS normalized_mobile_number VARCHAR(20);');
       db.public.none('ALTER TABLE users ADD COLUMN IF NOT EXISTS user_role VARCHAR(30);');
       db.public.none('ALTER TABLE users ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;');
+      db.public.none('ALTER TABLE devices ADD COLUMN IF NOT EXISTS offline_auth_policy_approved BOOLEAN NOT NULL DEFAULT FALSE;');
+      db.public.none('ALTER TABLE devices ADD COLUMN IF NOT EXISTS approved_max_offline_hours INT DEFAULT NULL;');
+      db.public.none('ALTER TABLE center_settings ADD COLUMN IF NOT EXISTS offline_auth_policy_approved BOOLEAN NOT NULL DEFAULT FALSE;');
+      db.public.none('ALTER TABLE center_settings ADD COLUMN IF NOT EXISTS approved_max_offline_hours INT DEFAULT NULL;');
+      db.public.none("ALTER TABLE center_settings ADD COLUMN IF NOT EXISTS limits_status VARCHAR(50) DEFAULT 'PENDING_OWNER_APPROVAL';");
+      db.public.none("ALTER TABLE rate_chart_versions ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'PUBLISHED';");
+      db.public.none("ALTER TABLE rate_chart_versions ADD COLUMN IF NOT EXISTS pricing_unit VARCHAR(20) NOT NULL DEFAULT 'PER_KG';");
     } catch {}
 
     try {
@@ -645,7 +652,9 @@ export class PostgresDatabase {
     if (!this.isRealPostgresRequired() && (this.isTestEnvironment() || config.NODE_ENV === 'development')) {
       const adapter = this.getOrCreateTestMemDb();
       const memPool = new adapter.Pool();
-      return await memPool.connect();
+      const memClient = await memPool.connect();
+      (memClient as any).__isPgMem = true;
+      return memClient;
     }
 
     throw new Error('PostgreSQL central database connection is currently unavailable.');
@@ -691,6 +700,7 @@ export class PostgresDatabase {
       const adapter = this.getOrCreateTestMemDb();
       const pool = new adapter.Pool();
       const client = await pool.connect();
+      (client as any).__isPgMem = true;
       try {
         await client.query('BEGIN');
         const result = await callback(client);

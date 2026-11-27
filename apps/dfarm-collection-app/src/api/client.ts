@@ -1196,7 +1196,7 @@ export const syncApi = {
       isIdempotentReplay?: boolean
     }>
   }> => {
-    const res = await apiRequest<{ success: boolean; data: any }>('/sync/push', {
+    const res = await apiRequest<{ success: boolean; data: any }>('/sync/transactions', {
       method: 'POST',
       body: JSON.stringify(batch),
     })

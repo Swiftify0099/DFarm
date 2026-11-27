@@ -1,0 +1,68 @@
+name: RESTART-04 PostgreSQL 17 Device Sync & Security Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - fix/cloudflare-pages-production-deploy
+  push:
+    branches:
+      - fix/cloudflare-pages-production-deploy
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restart04-postgres17-device-sync-gate:
+    name: PostgreSQL 17 Device Auth & Offline Sync Isolation Gate
+    runs-on: ubuntu-latest
+
+    services:
+      postgres17:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: placeholder_ci_pg17_test_password
+          POSTGRES_DB: dfarm_central
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d dfarm_central"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=15
+
+    env:
+      NODE_ENV: test
+      DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS: "1"
+      TEST_POSTGRES_URL: postgresql://postgres:placeholder_ci_pg17_test_password@127.0.0.1:55432/dfarm_central
+      REQUIRE_REAL_POSTGRES: "1"
+      TEST_REAL_POSTGRES: "1"
+      DATABASE_TLS_MODE: disable
+      TENANT_POOL_CONNECTION_TIMEOUT_MS: "5000"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build backend and database packages
+        run: npm run build:backend
+
+      - name: Validate database migration manifests
+        run: npm run db:validate
+
+      - name: Bootstrap and validate PostgreSQL 17 compatibility roles
+        run: node scripts/ci-pg17-bootstrap.js
+
+      - name: Execute RESTART-04 PostgreSQL 17 Device Auth & Sync Gate
+        run: node scripts/ci-run-restart04-pg17.js

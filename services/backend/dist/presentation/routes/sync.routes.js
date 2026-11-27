@@ -98,8 +98,8 @@ const handleSyncBatch = async (req, res, next) => {
     }
 };
 router.post('/transactions', authenticate, authorizePermission('collections:intake', 'sessions:manage'), handleSyncBatch);
-router.post('/push', authenticate, authorizePermission('collections:intake', 'sessions:manage'), handleSyncBatch);
-// Mount the comprehensive syncRouter for /push, /pull, /acknowledge, /status
+// Mount device-authenticated syncRouter for /push, /pull, /acknowledge, /status (and /conflicts, /events)
+// /push must NEVER be shadowed by operator-authenticated handleSyncBatch.
 router.use('/', syncRouter);
 export const syncRoutes = router;
 //# sourceMappingURL=sync.routes.js.map

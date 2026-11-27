@@ -2,18 +2,19 @@
 
 - **Repository:** `Swiftify0099/DFarm`
 - **Branch:** `fix/cloudflare-pages-production-deploy`
-- **Public Baseline HEAD:** `805326112c6daf0c902a3abbefc5be1a8f740023`
-- **Local Worktree State:** `805326112c6daf0c902a3abbefc5be1a8f740023` + uncommitted `RESTART-03.5A` remediations (Fixes A–G, additive migration `047`, rebuilt `dist/`)
-- **Overall Classification:** **`BLOCKED`** — All local builds, DB validations, 13 core offline backend suites (`230/230`), 4 frontend workspaces (`255/255`), and `REQUIRE_REAL_POSTGRES=1` fail-closed guards pass post-final edit; live post-fix PostgreSQL `17.12` execution cannot run on this host (`com.docker.service` stopped / `Docker Desktop is unable to start`, no native PG17, `git commit`/`push` prohibited by safety rules).
+- **Verified Public HEAD:** `9d0568b32e117dc93d8c62389c482b5a77d68f40` (`RESTART-03.5A` committed & pushed)
+- **Prior Baseline HEAD:** `805326112c6daf0c902a3abbefc5be1a8f740023` (`RESTART-03.5`)
+- **Overall Classification:** **`PASS (5-Suite PG17 Gate Passed in CI Run 45943003261 on 9d0568b)`** — All local builds, DB validations, 13 core offline backend suites (`230/230`), 4 frontend workspaces (`255/255`), and the live PostgreSQL `17.12` 5-suite CI gate (`44` passed, `0` failed, `0` skipped) passed on `9d0568b`. (`DF-003` full-history Gitleaks remains OPEN under `RESTART-12`.)
 
 ---
 
-## 1. GitHub Actions Baseline (`805326112c6daf0c902a3abbefc5be1a8f740023`)
+## 1. GitHub Actions Verified Runs (`9d0568b32e117dc93d8c62389c482b5a77d68f40`)
 
 | Workflow | Run / Job | PostgreSQL / Scanner | Conclusion | Scope Summary |
 |---|---|---|---|---|
-| `RESTART-03 PostgreSQL 17 Repository Verification` | [`45938275998`](https://github.com/Swiftify0099/DFarm/actions/runs/45938275998) / [`140306423963`](https://github.com/Swiftify0099/DFarm/actions/runs/45938275998/job/140306423963) | PostgreSQL `17.12` | **`failure`** | Steps `1–8` (`build:backend`, `db:validate`, `ci-pg17-bootstrap.js`) passed; Step `9` failed on Fixes A–G (`restart03` array literal, `restart032` async cleanup error, `KioskShiftSession` null `total_liters`, `AccountAuthorityService` `customers` on central DB, `037` `customer_name`, `post_customer_advance` `balanceAfter`, signed `Money` / `reconcile_customer_ledger` orphan). |
-| `Gitleaks Secret & Profile Scan` | [`45938276023`](https://github.com/Swiftify0099/DFarm/actions/runs/45938276023) / [`140306423779`](https://github.com/Swiftify0099/DFarm/actions/runs/45938276023/job/140306423779) | Gitleaks full history | **`failure`** | `54` full-history findings across `40` commits (tracked separately under `DF-003` / `RESTART-12`). |
+| `RESTART-03 PostgreSQL 17 Repository Verification` | [`45943003261`](https://github.com/Swiftify0099/DFarm/actions/runs/45943003261) / [`140321315106`](https://github.com/Swiftify0099/DFarm/actions/runs/45943003261/job/140321315106) | PostgreSQL `17.12` | **`success`** | `build:backend`, `db:validate`, role bootstrap, and all 5 PG17 suites passed (`44` passed, `0` failed, `0` skipped). |
+| `Secret Scanning (Gitleaks)` | [`45943003232`](https://github.com/Swiftify0099/DFarm/actions/runs/45943003232) / [`140321315158`](https://github.com/Swiftify0099/DFarm/actions/runs/45943003232/job/140321315158) | Gitleaks full history | **`failure`** | `54` historical findings across `41` commits; no finding record reported for current HEAD `9d0568b` (`DF-003` OPEN under `RESTART-12`). |
+| *(Prior baseline `8053261`)* `RESTART-03 PostgreSQL 17` | [`45938275998`](https://github.com/Swiftify0099/DFarm/actions/runs/45938275998) / [`140306423963`](https://github.com/Swiftify0099/DFarm/actions/runs/45938275998/job/140306423963) | PostgreSQL `17.12` | **`failure`** | Superseded by `9d0568b` / Run `45943003261`. |
 
 ---
 
@@ -56,12 +57,12 @@
 | `apps/dfarm-super-admin` | Vitest | 10/10 | 48 | 48 | 0 | 0 | **PASS** |
 | **Total (4 Apps)** | — | **40/40** | **255** | **255** | **0** | **0** | **PASS** |
 
-### 2.4 Five Real PostgreSQL 17 Suites Gate Status
+### 2.4 Five Real PostgreSQL 17 Suites Gate Status (`9d0568b` — CI Run `45943003261`)
 
-| Suite | Default (No PG17) | `REQUIRE_REAL_POSTGRES=1` (No PG17) | Post-Fix Live PG17 Status |
+| Suite | Default (No Local PG17) | `REQUIRE_REAL_POSTGRES=1` (No Local PG17) | Live PG `17.12` CI Status (`45943003261`) |
 |---|---|---|---|
-| `restart03-real-postgres.test.js` | `tests=1 pass=0 fail=0 skipped=1 exit=0` | `tests=1 pass=0 fail=1 skipped=0 exit=1` | **BLOCKED (Awaiting PG17 Host/CI Run)** |
-| `restart032-real-postgres.test.js` | `tests=1 pass=0 fail=0 skipped=1 exit=0` | `tests=1 pass=0 fail=1 skipped=0 exit=1` | **BLOCKED (Awaiting PG17 Host/CI Run)** |
-| `restart033-real-postgres-repositories.test.js` | `tests=1 pass=0 fail=0 skipped=1 exit=0` | `tests=1 pass=0 fail=1 skipped=0 exit=1` | **BLOCKED (Awaiting PG17 Host/CI Run)** |
-| `customer-ledger-accounting.test.js` | `tests=1 pass=0 fail=0 skipped=1 exit=0` | `tests=1 pass=0 fail=1 skipped=0 exit=1` | **BLOCKED (Awaiting PG17 Host/CI Run)** |
-| `concurrent-idempotency-financial.test.js` | `tests=1 pass=0 fail=0 skipped=1 exit=0` | `tests=1 pass=0 fail=1 skipped=0 exit=1` | **BLOCKED (Awaiting PG17 Host/CI Run)** |
+| `restart03-real-postgres.test.js` | `tests=1 pass=0 fail=0 skipped=1 exit=0` | `tests=1 pass=0 fail=1 skipped=0 exit=1` | **PASS (CI `45943003261`: 5/5 suites, 44 passed, 0 failed, 0 skipped)** |
+| `restart032-real-postgres.test.js` | `tests=1 pass=0 fail=0 skipped=1 exit=0` | `tests=1 pass=0 fail=1 skipped=0 exit=1` | **PASS (CI `45943003261`)** |
+| `restart033-real-postgres-repositories.test.js` | `tests=1 pass=0 fail=0 skipped=1 exit=0` | `tests=1 pass=0 fail=1 skipped=0 exit=1` | **PASS (CI `45943003261`)** |
+| `customer-ledger-accounting.test.js` | `tests=1 pass=0 fail=0 skipped=1 exit=0` | `tests=1 pass=0 fail=1 skipped=0 exit=1` | **PASS (CI `45943003261`)** |
+| `concurrent-idempotency-financial.test.js` | `tests=1 pass=0 fail=0 skipped=1 exit=0` | `tests=1 pass=0 fail=1 skipped=0 exit=1` | **PASS (CI `45943003261`)** |
