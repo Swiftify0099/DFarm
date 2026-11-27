@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 export const MIGRATION_PATH = '../../supabase/migrations';
 export var MigrationTarget;
 (function (MigrationTarget) {
@@ -45,9 +47,9 @@ export const MIGRATION_MANIFEST = [
     { version: '035', filename: '035_customer_lifecycle_and_registration_hardening.sql', target: MigrationTarget.SHARED, description: 'Additive migration ensuring customer registration and lifecycle statuses across all databases' },
     { version: '036', filename: '036_seed_warna_dairy_admin.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Provision Warna Dairy Admin (+917507495615) and expand role check constraint' },
     { version: '037', filename: '037_multi_dairy_customer_identity_and_membership.sql', target: MigrationTarget.SHARED, description: 'Global customer identities and multi-dairy membership discovery directory' },
-    { version: '038', filename: '038_platform_federation_database_mapping.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Platform federation database mapping for multi-region deployments' },
-    { version: '039', filename: '039_milk_collections_organization_idempotency.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Milk collections organization idempotency constraints' },
-    { version: '040', filename: '040_device_auth_challenges.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Device authentication challenges table for kiosk OTP device proof' },
+    { version: '038', filename: '038_platform_federation_database_mapping.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Register platform federation control plane database mapping' },
+    { version: '039', filename: '039_milk_collections_organization_idempotency.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Composite uniqueness constraint on organization_id and idempotency_key for concurrent idempotency' },
+    { version: '040', filename: '040_device_auth_challenges.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Distributed device authentication challenges, atomic single-use replay protection, and bounded failed attempt tracking' },
     { version: '041', filename: '041_dairy_admin_realtime_and_station_monitoring.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Dairy admin realtime events outbox and station monitoring' },
     { version: '042', filename: '042_union_bank_farmer_payout_and_settlement_system.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Union Bank farmer payout and settlement system tables' },
     { version: '043', filename: '043_distributed_sse_tickets_and_retention.sql', target: MigrationTarget.CONTROL_PLANE, description: 'Distributed SSE tickets and event retention' },
@@ -59,4 +61,144 @@ export const MIGRATION_MANIFEST = [
 export const MIGRATION_FILES = MIGRATION_MANIFEST
     .filter(m => m.target !== MigrationTarget.MANUAL_REVIEW_REQUIRED)
     .map(m => m.filename);
+export const CONTROL_PLANE_MIGRATIONS = MIGRATION_MANIFEST.filter(m => m.target === MigrationTarget.CONTROL_PLANE || m.target === MigrationTarget.SHARED);
+export const TENANT_OPERATIONAL_MIGRATIONS = MIGRATION_MANIFEST.filter(m => m.target === MigrationTarget.TENANT_OPERATIONAL || m.target === MigrationTarget.SHARED);
+export const QUARANTINED_MIGRATIONS = MIGRATION_MANIFEST.filter(m => m.target === MigrationTarget.MANUAL_REVIEW_REQUIRED);
+export const QUARANTINED_MIGRATION_FILENAMES = new Set(QUARANTINED_MIGRATIONS.map(m => m.filename));
+export const QUARANTINED_MIGRATION_VERSIONS = new Set(QUARANTINED_MIGRATIONS.map(m => m.version));
+const VALID_TARGETS = new Set(Object.values(MigrationTarget));
+const MIGRATION_FILENAME_PATTERN = /^(\d{3})_[a-zA-Z0-9_]+\.sql$/;
+/**
+ * Validates canonical migration catalog invariants and optional on-disk SQL file reconciliation.
+ * Fails closed on duplicate active versions, unregistered SQL files, missing files,
+ * non-monotonic ordering, or unauthorized duplicate numeric prefixes.
+ */
+export function validateMigrationCatalog(options = {}) {
+    const manifest = options.manifest ?? MIGRATION_MANIFEST;
+    if (!Array.isArray(manifest) || manifest.length === 0) {
+        throw new Error('Migration manifest must be a non-empty array');
+    }
+    const seenVersions = new Set();
+    const seenFilenames = new Set();
+    const prefixEntries = new Map();
+    let previousPrefixNum = -1;
+    let previousActiveVersionNum = -1;
+    let activeCount = 0;
+    let quarantinedCount = 0;
+    for (const entry of manifest) {
+        if (!entry.version || !entry.filename || !entry.description) {
+            throw new Error(`Invalid migration manifest entry with missing metadata: ${JSON.stringify(entry)}`);
+        }
+        if (!VALID_TARGETS.has(entry.target)) {
+            throw new Error(`Invalid migration target '${entry.target}' for '${entry.filename}'`);
+        }
+        const match = MIGRATION_FILENAME_PATTERN.exec(entry.filename);
+        if (!match || !match[1]) {
+            throw new Error(`Migration filename '${entry.filename}' does not match NNN_name.sql format`);
+        }
+        const numericPrefix = match[1];
+        const prefixNum = Number.parseInt(numericPrefix, 10);
+        if (seenFilenames.has(entry.filename)) {
+            throw new Error(`Duplicate migration filename '${entry.filename}' in manifest`);
+        }
+        seenFilenames.add(entry.filename);
+        if (seenVersions.has(entry.version)) {
+            throw new Error(`Duplicate migration version '${entry.version}' in manifest`);
+        }
+        seenVersions.add(entry.version);
+        if (prefixNum < previousPrefixNum) {
+            throw new Error(`Non-deterministic migration ordering: '${entry.filename}' (prefix ${numericPrefix}) follows prefix ${String(previousPrefixNum).padStart(3, '0')}`);
+        }
+        previousPrefixNum = prefixNum;
+        const bucket = prefixEntries.get(numericPrefix) ?? [];
+        bucket.push(entry);
+        prefixEntries.set(numericPrefix, bucket);
+        if (entry.target === MigrationTarget.MANUAL_REVIEW_REQUIRED) {
+            quarantinedCount++;
+            if (!entry.version.endsWith('_quarantine') || !entry.version.startsWith(`${numericPrefix}_`)) {
+                throw new Error(`Quarantined migration '${entry.filename}' must use non-colliding version '${numericPrefix}_quarantine' (got '${entry.version}')`);
+            }
+        }
+        else {
+            activeCount++;
+            if (entry.version !== numericPrefix) {
+                throw new Error(`Active migration '${entry.filename}' must use exact version '${numericPrefix}' (got '${entry.version}')`);
+            }
+            if (prefixNum <= previousActiveVersionNum) {
+                throw new Error(`Duplicate or out-of-order active migration version '${entry.version}' for '${entry.filename}'`);
+            }
+            previousActiveVersionNum = prefixNum;
+        }
+    }
+    for (const [prefix, entries] of prefixEntries.entries()) {
+        if (entries.length > 1) {
+            const activeForPrefix = entries.filter(e => e.target !== MigrationTarget.MANUAL_REVIEW_REQUIRED);
+            const quarantinedForPrefix = entries.filter(e => e.target === MigrationTarget.MANUAL_REVIEW_REQUIRED);
+            if (activeForPrefix.length > 1) {
+                throw new Error(`Duplicate active migrations for numeric prefix '${prefix}': ${activeForPrefix.map(e => e.filename).join(', ')}`);
+            }
+            if (quarantinedForPrefix.length === 0) {
+                throw new Error(`Duplicate numeric prefix '${prefix}' is only permitted under the explicit MANUAL_REVIEW_REQUIRED quarantine rule`);
+            }
+        }
+    }
+    let diskSqlFilesChecked = 0;
+    if (options.diskFilenames !== undefined) {
+        const sqlFiles = options.diskFilenames.filter(f => f.endsWith('.sql')).sort((a, b) => a.localeCompare(b));
+        const diskSet = new Set(sqlFiles);
+        diskSqlFilesChecked = sqlFiles.length;
+        const unknownFiles = sqlFiles.filter(f => !seenFilenames.has(f));
+        if (unknownFiles.length > 0) {
+            throw new Error(`Unregistered migration SQL file(s) found on disk (must be registered or quarantined in MIGRATION_MANIFEST): ${unknownFiles.join(', ')}`);
+        }
+        const missingFiles = manifest.filter(m => !diskSet.has(m.filename)).map(m => m.filename);
+        if (missingFiles.length > 0) {
+            throw new Error(`Missing migration SQL file(s) declared in MIGRATION_MANIFEST: ${missingFiles.join(', ')}`);
+        }
+    }
+    const controlPlaneCount = manifest.filter(m => m.target === MigrationTarget.CONTROL_PLANE || m.target === MigrationTarget.SHARED).length;
+    const tenantOperationalCount = manifest.filter(m => m.target === MigrationTarget.TENANT_OPERATIONAL || m.target === MigrationTarget.SHARED).length;
+    return {
+        totalEntries: manifest.length,
+        activeEntries: activeCount,
+        quarantinedEntries: quarantinedCount,
+        controlPlaneCount,
+        tenantOperationalCount,
+        diskSqlFilesChecked,
+    };
+}
+/**
+ * Validates MIGRATION_MANIFEST against actual files in a migrations directory on disk.
+ */
+export function validateMigrationsDirectory(migrationsDir, manifest = MIGRATION_MANIFEST) {
+    if (!fs.existsSync(migrationsDir)) {
+        throw new Error(`Migrations directory not found: ${migrationsDir}`);
+    }
+    const diskEntries = fs.readdirSync(migrationsDir, { withFileTypes: true });
+    const diskFilenames = diskEntries.filter(d => d.isFile()).map(d => d.name);
+    const nonSqlEntries = diskEntries
+        .filter(d => d.isFile() && !d.name.endsWith('.sql'))
+        .map(d => d.name);
+    if (nonSqlEntries.length > 0) {
+        throw new Error(`Unexpected non-SQL file(s) found in migrations directory: ${nonSqlEntries.join(', ')}`);
+    }
+    return validateMigrationCatalog({ manifest, diskFilenames });
+}
+/**
+ * Resolves a migration directory containing supabase/migrations SQL files.
+ */
+export function resolveMigrationsDir(startDir = process.cwd()) {
+    const candidates = [
+        path.resolve(startDir, 'supabase/migrations'),
+        path.resolve(startDir, '../supabase/migrations'),
+        path.resolve(startDir, '../../supabase/migrations'),
+        path.resolve(startDir, '../../../supabase/migrations'),
+    ];
+    for (const dir of candidates) {
+        if (fs.existsSync(dir)) {
+            return dir;
+        }
+    }
+    throw new Error('Could not locate supabase/migrations directory in workspace');
+}
 //# sourceMappingURL=index.js.map

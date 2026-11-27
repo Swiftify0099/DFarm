@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { tenantDbManager, IDatabaseClient, TenantDatabaseMapping } from './TenantDatabaseManager.js';
 import { db as controlDb } from './PostgresPool.js';
-import { MIGRATION_MANIFEST, MigrationTarget } from '@dfarm/database';
+import { TENANT_OPERATIONAL_MIGRATIONS } from '@dfarm/database';
 import { logger } from '../../shared/logger/index.js';
 
 export type TableDataCategory =
@@ -929,11 +929,12 @@ export class TenantDatabaseControlService {
 
     const missingTables = expectedTables.filter((t) => !discoveredNames.has(t));
     const isValid = missingTables.length === 0;
+    const expectedCount = TENANT_OPERATIONAL_MIGRATIONS.length;
 
     return {
       isValid,
-      appliedMigrations: 37 - missingTables.length,
-      totalExpectedMigrations: 37,
+      appliedMigrations: Math.max(0, expectedCount - missingTables.length),
+      totalExpectedMigrations: expectedCount,
       missingTables,
       discoveredTablesCount: tables.length,
     };
@@ -950,9 +951,7 @@ export class TenantDatabaseControlService {
     const tables = await this.listTables(dairyId);
     const hasCore = tables.some((t) => t.tableName === 'customers');
 
-    const manifestEntries = MIGRATION_MANIFEST.filter(
-      (m) => m.target === MigrationTarget.TENANT_OPERATIONAL || m.target === MigrationTarget.SHARED
-    ).map((m) => ({
+    const manifestEntries = TENANT_OPERATIONAL_MIGRATIONS.map((m) => ({
       version: m.version,
       filename: m.filename,
       description: m.description,

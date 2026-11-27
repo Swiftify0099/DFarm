@@ -9,7 +9,7 @@
     "build": "tsc",
     "lint": "eslint src tests --ext .ts,.js",
     "test": "node --test tests/**/*.test.js",
-    "test:validate": "node --test tests/schema-validation.test.js",
+    "test:validate": "node --test tests/schema-validation.test.js tests/migration-catalog.test.js",
     "test:static": "node --test tests/schema-validation.test.js",
     "test:emulation": "node --test tests/database-runtime.test.js",
     "test:runtime": "node --test tests/database-runtime.test.js",
