@@ -11,6 +11,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: dfarm-restart09-pg17-${{ github.ref }}
   cancel-in-progress: true
@@ -37,23 +40,34 @@ jobs:
 
     env:
       NODE_ENV: test
+      DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS: "1"
       REQUIRE_REAL_POSTGRES: "1"
       TEST_POSTGRES_URL: postgresql://postgres:postgres_ci_password@127.0.0.1:5432/dfarm_central
       DATABASE_URL: postgresql://postgres:postgres_ci_password@127.0.0.1:5432/dfarm_central
       CENTRAL_DATABASE_URL: postgresql://postgres:postgres_ci_password@127.0.0.1:5432/dfarm_central
       DATABASE_PROVISIONER_URL: postgresql://postgres:postgres_ci_password@127.0.0.1:5432/dfarm_central
+      DATABASE_TLS_MODE: disable
+      TENANT_POOL_CONNECTION_TIMEOUT_MS: "5000"
       JWT_SECRET: restart09_ci_jwt_secret_minimum_64_chars_long_verified_for_tests_012345
-      TENANT_CREDENTIAL_ENCRYPTION_KEY: restart09_ci_tenant_cred_encryption_key_32_bytes_abcdef0123456789
+      TENANT_DB_ENCRYPTION_KEY: restart09_ci_tenant_cred_encryption_key_32_bytes_abcdef0123456789
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
+
+      - name: Verify Node.js and npm versions
+        run: |
+          node -v
+          npm -v
+          node -e "const major = Number(process.versions.node.split('.')[0]); if (major < 22) throw new Error('Expected Node >= 22, got ' + process.version);"
+          npm_major=$(npm -v | cut -d. -f1)
+          if [ "$npm_major" -lt 10 ]; then echo "Expected npm >= 10, got $(npm -v)"; exit 1; fi
 
       - name: Install workspace dependencies
         run: npm ci

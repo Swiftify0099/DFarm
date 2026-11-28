@@ -16,20 +16,32 @@ function parseTapStats(output) {
   const topPass = [...output.matchAll(/^# pass\s+(\d+)/gm)];
   const topFail = [...output.matchAll(/^# fail\s+(\d+)/gm)];
   const topSkip = [...output.matchAll(/^# skipped\s+(\d+)/gm)];
+  const topCancelled = [...output.matchAll(/^# cancelled\s+(\d+)/gm)];
 
   const tests = topTests.length > 0 ? Number(topTests[topTests.length - 1][1]) : 0;
   const pass = topPass.length > 0 ? Number(topPass[topPass.length - 1][1]) : 0;
   const fail = topFail.length > 0 ? Number(topFail[topFail.length - 1][1]) : 0;
   const skipped = topSkip.length > 0 ? Number(topSkip[topSkip.length - 1][1]) : 0;
+  const cancelled = topCancelled.length > 0 ? Number(topCancelled[topCancelled.length - 1][1]) : 0;
 
-  const hasTapSummary = topTests.length > 0 && topPass.length > 0;
+  const hasTapSummary = topTests.length > 0 && topPass.length > 0 && topFail.length > 0 && topSkip.length > 0;
   const hasNotOk = /^not ok\s+/m.test(output) || /^\s+not ok\s+/m.test(output);
-  const hasSkipDirective = /#\s*SKIP\b/im.test(output);
+  const tapSkipDirectives = (output.match(/^\s*ok\s+\d+\s+-\s+.*#\s*SKIP\b/gim) || []).length;
+  const hasSkipDirective = tapSkipDirectives > 0 || skipped > 0;
   const usedPgMemFallback =
-    /fallback.*pg-mem|using in-memory pg-mem|ISOLATED_TEST_INSTANCE.*ACTIVE/i.test(output) &&
-    !output.includes('PostgreSQL 17 Real-Database');
+    /TEST_ISOLATED_MEM_DB|Using in-memory database fallback|ISOLATED_TEST_INSTANCE.*ACTIVE|fallback.*pg-mem|using in-memory pg-mem/i.test(output);
 
-  return { tests, pass, fail, skipped, hasTapSummary, hasNotOk, hasSkipDirective, usedPgMemFallback };
+  return {
+    tests,
+    pass,
+    fail,
+    skipped: Math.max(skipped, tapSkipDirectives),
+    cancelled,
+    hasTapSummary,
+    hasNotOk,
+    hasSkipDirective,
+    usedPgMemFallback,
+  };
 }
 
 function runSuite(suitePath) {
@@ -39,6 +51,8 @@ function runSuite(suitePath) {
         ...process.env,
         NODE_ENV: 'test',
         REQUIRE_REAL_POSTGRES: '1',
+        TEST_REAL_POSTGRES: '1',
+        DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS: process.env['DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS'] || '',
         TEST_POSTGRES_URL: TEST_PG_URL,
         DATABASE_URL: TEST_PG_URL,
       },
@@ -68,8 +82,12 @@ async function main() {
     process.exit(1);
   }
 
+  let preflight;
   try {
-    await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
+    preflight = await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
+    console.log(
+      `Verified disposable PG17 target for RESTART-09 (version=${preflight.serverVersion}, num=${preflight.serverVersionNum}, db=${preflight.activeDb}, user=${preflight.activeUser}).`
+    );
   } catch (err) {
     console.error(`FATAL: ${err?.message || err}`);
     process.exit(1);
@@ -78,7 +96,7 @@ async function main() {
   const results = [];
   for (const suite of RESTART09_SUITES) {
     console.log(`\n========================================================================`);
-    console.log(`Executing ${suite.name} (${suite.path})`);
+    console.log(`Executing ${suite.name} (${suite.path}) against PostgreSQL ${preflight.serverVersion}`);
     console.log(`========================================================================`);
 
     const run = await runSuite(suite.path);
@@ -87,8 +105,10 @@ async function main() {
       run.exitCode === 0 &&
       stats.hasTapSummary &&
       stats.tests > 0 &&
+      stats.pass === stats.tests &&
       stats.fail === 0 &&
       stats.skipped === 0 &&
+      stats.cancelled === 0 &&
       !stats.hasNotOk &&
       !stats.hasSkipDirective &&
       !stats.usedPgMemFallback;
@@ -98,14 +118,16 @@ async function main() {
 
   const rows = results.map(
     (r) =>
-      `| \`${r.suite.path}\` | ${r.stats.tests} | ${r.stats.pass} | ${r.stats.fail} | ${r.stats.skipped} | ${r.run.exitCode} | ${r.passed ? 'PASS' : 'FAIL'} |`
+      `| \`${preflight.serverVersion} (${preflight.serverVersionNum})\` | \`${r.suite.path}\` | ${r.stats.tests} | ${r.stats.pass} | ${r.stats.fail} | ${r.stats.skipped} | ${r.run.exitCode} | ${r.passed ? 'PASS' : 'FAIL'} |`
   );
 
   const markdown = [
     `## RESTART-09 PostgreSQL 17 Multi-Tenant Realtime Outbox Verification`,
     ``,
-    `| Suite Path | Tests Executed | Pass | Fail | Skip | Exit Code | Status |`,
-    `| :--- | :---: | :---: | :---: | :---: | :---: | :---: |`,
+    `- **PostgreSQL Version:** \`${preflight.serverVersion}\` (\`server_version_num=${preflight.serverVersionNum}\`)`,
+    ``,
+    `| PostgreSQL Version | Suite Path | Tests Executed | Pass | Fail | Skip | Exit Code | Status |`,
+    `| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |`,
     ...rows,
     ``,
   ].join('\n');

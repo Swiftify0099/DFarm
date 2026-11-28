@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import pg from 'pg';
 import { assertDisposablePg17Cluster } from '../../../scripts/pg17-safety-guard.js';
+import { createPoolShutdownManager } from './helpers/pool-lifecycle-helpers.js';
 
 const { Pool } = pg;
 
@@ -40,24 +41,49 @@ async function waitForDbIdle(adminPool, dbName, timeoutMs = 5000) {
     if ((res.rows[0]?.active_count ?? 0) === 0) {
       return;
     }
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  const finalRes = await adminPool.query(
+    `SELECT COUNT(*)::int AS active_count
+     FROM pg_stat_activity
+     WHERE datname = $1 AND pid <> pg_backend_pid();`,
+    [dbName]
+  );
+  const remaining = Number(finalRes.rows[0]?.active_count || 0);
+  if (remaining > 0) {
+    throw new Error(
+      `Disposable database '${dbName}' still had ${remaining} active/idle connection(s) before DROP DATABASE.`
+    );
   }
 }
 
+async function waitForPublisherIdle(publisher, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (publisher.getInFlightBackgroundWorkCount() === 0) {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  throw new Error(
+    `RealtimeEventPublisher still had ${publisher.getInFlightBackgroundWorkCount()} background task(s) in flight after ${timeoutMs}ms.`
+  );
+}
+
 function createFakeSseRes() {
-  const chunks = [];
+  const frames = [];
   const res = {
     writableEnded: false,
     destroyed: false,
     write(chunk) {
-      chunks.push(String(chunk));
+      frames.push(String(chunk));
       return true;
     },
     destroy() {
       res.destroyed = true;
     },
   };
-  return { res, chunks };
+  return { res, frames };
 }
 
 function parseSseFrames(chunks) {
@@ -110,33 +136,41 @@ if (!pgAvailable) {
   let poolA;
   let poolB;
   const poolErrors = [];
+  const guardedPools = new WeakSet();
+  const { closePoolCleanly } = createPoolShutdownManager();
 
   function attachPoolErrorGuard(pool, label) {
+    if (!pool || guardedPools.has(pool)) return pool;
+    guardedPools.add(pool);
     pool.on('error', (err) => {
-      poolErrors.push({ label, err: err?.message || String(err) });
+      poolErrors.push({ label, code: err?.code, message: err?.message || String(err) });
     });
-  }
-
-  async function closePoolCleanly(pool) {
-    if (!pool || pool.ending || pool.ended) return;
-    await pool.end();
+    return pool;
   }
 
   test('RESTART-09 PostgreSQL 17 Real-Database Multi-Tenant Outbox & SSE Gate', async (t) => {
-    adminPool = new Pool({ connectionString: TEST_PG_URL });
-    attachPoolErrorGuard(adminPool, 'adminPool');
+    adminPool = attachPoolErrorGuard(new Pool({ connectionString: TEST_PG_URL }), 'adminPool');
 
     await adminPool.query(`CREATE DATABASE ${dbNameCtrl};`);
     await adminPool.query(`CREATE DATABASE ${dbNameA};`);
     await adminPool.query(`CREATE DATABASE ${dbNameB};`);
 
-    poolCtrl = new Pool({ connectionString: urlCtrl });
-    poolA = new Pool({ connectionString: urlA });
-    poolB = new Pool({ connectionString: urlB });
-    attachPoolErrorGuard(poolCtrl, 'poolCtrl');
-    attachPoolErrorGuard(poolA, 'poolA');
-    attachPoolErrorGuard(poolB, 'poolB');
+    poolCtrl = attachPoolErrorGuard(new Pool({ connectionString: urlCtrl }), 'poolCtrl');
+    poolA = attachPoolErrorGuard(new Pool({ connectionString: urlA }), 'poolA');
+    poolB = attachPoolErrorGuard(new Pool({ connectionString: urlB }), 'poolB');
 
+    // Point backend config/singletons to disposable control-plane DB BEFORE importing dist modules
+    process.env['NODE_ENV'] = 'test';
+    process.env['REQUIRE_REAL_POSTGRES'] = '1';
+    process.env['TEST_REAL_POSTGRES'] = '1';
+    process.env['DATABASE_TLS_MODE'] = 'disable';
+    process.env['CENTRAL_DATABASE_URL'] = urlCtrl;
+    process.env['DATABASE_URL'] = urlCtrl;
+    process.env['DATABASE_PROVISIONER_URL'] = urlCtrl;
+    process.env['TENANT_POOL_CONNECTION_TIMEOUT_MS'] = '5000';
+
+    const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+    attachPoolErrorGuard(db.pool, 'globalDbPool');
     const { MigrationRunner } = await import('../dist/infrastructure/database/MigrationRunner.js');
     const { CredentialEncryption } = await import('../dist/infrastructure/security/CredentialEncryption.js');
     const { tenantDbManager, PLATFORM_FEDERATION_DAIRY_ID } = await import(
@@ -259,8 +293,8 @@ if (!pgAvailable) {
     await poolA.query(
       `INSERT INTO kiosk_shift_sessions (
         id, session_code, organization_id, center_id, business_date, shift, status,
-        opened_at, opening_operator_id, opening_operator_name, device_identifier, device_name
-       ) VALUES ($1, $2, $3, $4, '2026-11-28', 'MORNING', 'OPEN', NOW(), $5, 'Op Alpha', 'KIOSK-A1', 'Kiosk Alpha 1');`,
+        opened_at, opening_operator_id, device_identifier, device_name
+       ) VALUES ($1, $2, $3, $4, '2026-11-28', 'MORNING', 'OPEN', NOW(), $5, 'KIOSK-A1', 'Kiosk Alpha 1');`,
       [kioskSessA, `S-A-${suffix}`, orgA, centerA1, opA]
     );
     await poolA.query(
@@ -285,6 +319,7 @@ if (!pgAvailable) {
       [centerB1, orgB]
     );
 
+    let primaryError = null;
     try {
       await t.test('Test A & B & E: Collection intake persists PENDING event to Tenant A DB, worker delivers cleanly while isolating unhealthy orgDown', async () => {
         const publisher = new RealtimeEventPublisher();
@@ -413,7 +448,7 @@ if (!pgAvailable) {
             res: sseA1.res,
             lastEventId: 'EVT-A-TIE-1',
           });
-          await new Promise((r) => setTimeout(r, 150));
+          await waitForPublisherIdle(publisher);
 
           const frames = parseSseFrames(sseA1.frames).filter((f) => f.event !== 'CONNECTED');
           assert.strictEqual(frames.length, 1);
@@ -427,7 +462,7 @@ if (!pgAvailable) {
             res: sseCross.res,
             lastEventId: 'EVT-B-PG-1',
           });
-          await new Promise((r) => setTimeout(r, 150));
+          await waitForPublisherIdle(publisher);
           const crossFrames = parseSseFrames(sseCross.frames).filter((f) => f.event !== 'CONNECTED');
           assert.strictEqual(crossFrames[0].event, 'RESYNC_REQUIRED');
         } finally {
@@ -488,6 +523,11 @@ if (!pgAvailable) {
              VALUES ('EVT-B-RECENT', 'SESSION_OPENED', $1, 's-rec', 'PUBLISHED', NOW() - INTERVAL '5 seconds', '{}'::jsonb);`,
             [orgB]
           );
+
+          // Advance orgA cursor to NOW()+30m first, then run full batch to prove orgB cursor stays independent
+          await pub2.processTenantOutboxBatch(orgA);
+          const aFrames = parseSseFrames(sseA2.frames);
+          assert.ok(aFrames.some((f) => f.id === 'EVT-A-FAR-FUTURE'));
 
           await pub2.processOutboxBatchDetailed();
           const bFrames = parseSseFrames(sseB2.frames);
@@ -560,6 +600,11 @@ if (!pgAvailable) {
           publisher.dispatchToClients = origDispatch;
           const recoverRun = await publisher.processTenantOutboxBatch(orgA);
           assert.strictEqual(recoverRun.ok, true);
+          const publishedCheck = await poolA.query(
+            `SELECT status, published_at FROM dashboard_events_outbox WHERE event_id = 'EVT-A-CRASH-PG';`
+          );
+          assert.strictEqual(publishedCheck.rows[0].status, 'PUBLISHED');
+          assert.ok(publishedCheck.rows[0].published_at);
 
           // Test F: Retention deletes only expired PUBLISHED (>7d) and keeps recent PUBLISHED / PENDING / FAILED
           await poolA.query(
@@ -632,23 +677,86 @@ if (!pgAvailable) {
           await publisher.destroy();
         }
       });
+    } catch (err) {
+      primaryError = err;
+      throw err;
     } finally {
+      const cleanupErrors = [];
+      const runStep = async (fn) => {
+        try {
+          await fn();
+        } catch (err) {
+          cleanupErrors.push(err instanceof Error ? err : new Error(String(err)));
+        }
+      };
+
       tenantDbManager.setControlPlaneDb(origCtrlDb);
       tenantDbManager.getAllTenantDbs = origGetAllTenantDbs;
-      await tenantDbManager.closeAllPools().catch(() => {});
-      await closePoolCleanly(poolCtrl);
-      await closePoolCleanly(poolA);
-      await closePoolCleanly(poolB);
+
+      for (const dairyId of [orgA, orgB, orgDown]) {
+        await runStep(async () => {
+          const tenantPool = tenantDbManager.getTenantPool?.(dairyId);
+          if (tenantPool) {
+            const label = `tenantPool_${dairyId.slice(0, 8)}`;
+            attachPoolErrorGuard(tenantPool, label);
+            await closePoolCleanly(tenantPool, label, () => tenantDbManager.closeTenantPool(dairyId));
+            assert.strictEqual(tenantPool.ended, true, `Tenant pool '${label}' must reach ended=true`);
+          }
+        });
+      }
+      await runStep(() => tenantDbManager.closeAllPools());
+      await runStep(async () => {
+        await closePoolCleanly(db.pool, 'globalDbPool', () => db.close());
+        assert.strictEqual(db.pool.ended, true, 'globalDbPool must reach ended=true');
+      });
+
+      for (const [pool, label] of [
+        [poolCtrl, 'poolCtrl'],
+        [poolA, 'poolA'],
+        [poolB, 'poolB'],
+      ]) {
+        if (pool) {
+          await runStep(async () => {
+            await closePoolCleanly(pool, label);
+            assert.strictEqual(pool.ended, true, `Pool '${label}' must reach ended=true`);
+          });
+        }
+      }
 
       if (adminPool) {
         for (const dbName of [dbNameA, dbNameB, dbNameCtrl]) {
-          await waitForDbIdle(adminPool, dbName);
-          await adminPool.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE);`);
+          await runStep(async () => {
+            await waitForDbIdle(adminPool, dbName);
+            await adminPool.query(`DROP DATABASE IF EXISTS ${dbName};`);
+          });
         }
-        await closePoolCleanly(adminPool);
+        await runStep(async () => {
+          await adminPool.query(`DROP ROLE IF EXISTS restart09_rls_user;`);
+        });
+        await runStep(async () => {
+          await closePoolCleanly(adminPool, 'adminPool');
+          assert.strictEqual(adminPool.ended, true, 'adminPool must reach ended=true');
+        });
       }
 
-      assert.deepEqual(poolErrors, [], `Unexpected pool errors during cleanup: ${JSON.stringify(poolErrors)}`);
+      await runStep(async () => {
+        assert.deepEqual(poolErrors, [], `Unexpected pool errors during cleanup: ${JSON.stringify(poolErrors)}`);
+      });
+
+      if (cleanupErrors.length > 0) {
+        const cleanErr =
+          cleanupErrors.length === 1
+            ? cleanupErrors[0]
+            : new AggregateError(
+                cleanupErrors,
+                `Cleanup failed with ${cleanupErrors.length} errors: ${cleanupErrors.map((e) => e.message).join('; ')}`
+              );
+        if (primaryError) {
+          const orig = primaryError instanceof Error ? primaryError : new Error(String(primaryError));
+          throw new AggregateError([orig, cleanErr], `${orig.message} (cleanup also failed: ${cleanErr.message})`);
+        }
+        throw cleanErr;
+      }
     }
   });
 }
