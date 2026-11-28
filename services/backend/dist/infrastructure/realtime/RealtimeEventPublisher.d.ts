@@ -13,11 +13,83 @@ export interface DashboardEvent {
     publishedAt: string;
     payload: Record<string, any>;
 }
+export type OutboxErrorCategory = 'INVALID_MAPPING' | 'TRANSIENT_UNAVAILABLE' | 'EXECUTION_ERROR';
+export interface TenantOutboxRunResult {
+    organizationId: string;
+    ok: boolean;
+    pendingProcessed: number;
+    crossInstanceDispatched: number;
+    errorCategory?: OutboxErrorCategory;
+    errorCode?: string;
+    errorStatus?: string;
+    errorMessage?: string;
+}
+export interface OutboxBatchRunSummary {
+    startedAt: string;
+    completedAt: string;
+    tenantsAttempted: number;
+    tenantsSucceeded: number;
+    tenantsFailed: number;
+    pendingProcessed: number;
+    crossInstanceDispatched: number;
+    controlPlaneDiscoveryFailed: boolean;
+    controlPlaneError?: string;
+    failures: TenantOutboxRunResult[];
+}
+export interface TenantOutboxPurgeResult {
+    organizationId: string;
+    ok: boolean;
+    purgedCount: number;
+    errorCategory?: OutboxErrorCategory;
+    errorCode?: string;
+    errorStatus?: string;
+    errorMessage?: string;
+}
+export interface OutboxPurgeRunSummary {
+    startedAt: string;
+    completedAt: string;
+    retentionDays: number;
+    tenantsAttempted: number;
+    tenantsSucceeded: number;
+    tenantsFailed: number;
+    totalPurged: number;
+    controlPlaneDiscoveryFailed: boolean;
+    controlPlaneError?: string;
+    failures: TenantOutboxPurgeResult[];
+}
+export interface OutboxObservabilitySnapshot {
+    totalBatchRuns: number;
+    totalFailedTenantBatches: number;
+    totalPersistenceFailures: number;
+    totalPurgeFailures: number;
+    lastBatchSummary: OutboxBatchRunSummary | null;
+    lastPurgeSummary: OutboxPurgeRunSummary | null;
+    lastFailureByTenant: Record<string, {
+        operation: string;
+        category: OutboxErrorCategory;
+        code?: string;
+        status?: string;
+        message: string;
+        occurredAt: string;
+    }>;
+}
+/**
+ * Tenant-scoped Transactional Outbox & SSE Realtime Event Publisher.
+ *
+ * Delivery guarantee:
+ * - Implements safe **at-least-once delivery** per tenant database (`dashboard_events_outbox`)
+ *   with stable `eventId` values and client-side consumer deduplication (`eventId` set).
+ * - Worker ticks claim `PENDING` rows with `SELECT ... FOR UPDATE SKIP LOCKED` inside an active
+ *   tenant PostgreSQL transaction bound to `app.current_organization_id`, dispatch to SSE clients,
+ *   and mark `status = 'PUBLISHED', published_at = COALESCE(published_at, NOW())` on the same
+ *   session/transaction before advancing memory ring buffers or updating `COMMIT`.
+ * - Crashes or errors before `COMMIT` roll back cleanly, keeping committed rows `PENDING` for retry.
+ */
 export declare class RealtimeEventPublisher {
     private static instance;
     private clients;
-    private eventRingBuffer;
-    private maxRingBufferSize;
+    private readonly tenantRingBuffers;
+    private readonly tenantSyncCursors;
     private heartbeatInterval;
     private outboxWorkerInterval;
     private retentionCleanupInterval;
@@ -25,11 +97,32 @@ export declare class RealtimeEventPublisher {
     private isDestroyed;
     private destroyPromise;
     private readonly inFlightBackgroundWork;
-    private lastCrossInstanceSyncTime;
+    private totalBatchRuns;
+    private totalFailedTenantBatches;
+    private totalPersistenceFailures;
+    private totalPurgeFailures;
+    private lastBatchSummary;
+    private lastPurgeSummary;
+    private readonly lastFailureByTenant;
     private constructor();
     private trackBackgroundWork;
     getInFlightBackgroundWorkCount(): number;
+    getObservabilitySnapshot(): OutboxObservabilitySnapshot;
+    getLastOutboxBatchSummary(): OutboxBatchRunSummary | null;
     static getInstance(): RealtimeEventPublisher;
+    private classifyOutboxError;
+    private recordTenantFailure;
+    private resolveStrictTenantDb;
+    private discoverActiveTenantsBounded;
+    private runWithBoundedConcurrency;
+    private evictOldestTenantStatesIfNeeded;
+    private getOrCreateTenantRingState;
+    private appendToTenantRingBuffer;
+    private getOrInitTenantSyncCursor;
+    private markDispatchedLocally;
+    private hasBeenDispatchedLocally;
+    private hasConnectedClientsForTenant;
+    private mapOutboxRowToEvent;
     /**
      * Registers an active SSE client stream.
      * Handles tenant filtering, optional center filtering, initial watermark, and cleanup on disconnect.
@@ -64,17 +157,27 @@ export declare class RealtimeEventPublisher {
     }): Promise<DashboardEvent>;
     /**
      * Broadcasts an event immediately to connected SSE subscribers.
-     * Also ensures outbox record is persisted and marked PUBLISHED for audit and replay.
+     * Also persists/marks the outbox record PUBLISHED in the event's strict tenant DB for replay & cross-instance sync.
      */
     broadcast(event: DashboardEvent): void;
     /**
      * Internal helper to dispatch an event to local connected SSE subscribers.
      */
-    private dispatchToClients;
+    protected dispatchToClients(event: DashboardEvent): void;
     /**
-     * Transactional Outbox Batch Worker.
-     * Executes periodically to process committed PENDING outbox events using FOR UPDATE SKIP LOCKED.
-     * Multi-instance safe: multiple backend nodes never lock or double-process the same outbox row.
+     * Processes PENDING outbox rows and cross-instance PUBLISHED sync for one specific tenant organization.
+     * Executes strictly inside the resolved tenant PostgreSQL database with transaction-local RLS context.
+     */
+    processTenantOutboxBatch(organizationId: string): Promise<TenantOutboxRunResult>;
+    private syncCrossInstancePublishedEvents;
+    /**
+     * Transactional Outbox Batch Worker with full observability summary.
+     * Discovers active tenants from central mapping table using bounded pagination and processes
+     * each tenant strictly in its own tenant PostgreSQL database with bounded concurrency.
+     */
+    processOutboxBatchDetailed(): Promise<OutboxBatchRunSummary>;
+    /**
+     * Backward-compatible batch worker entrypoint returning total PENDING events published across active tenants.
      */
     processOutboxBatch(): Promise<number>;
     /**
@@ -90,22 +193,32 @@ export declare class RealtimeEventPublisher {
     private sendKeepAlivePing;
     /**
      * Replays missed events since Last-Event-ID for reconnecting clients.
-     * Uses in-memory ring buffer first, then falls back to durable PostgreSQL outbox.
-     * If cursor is expired or missing, notifies client to perform an authoritative REST snapshot refresh.
+     * Uses tenant-isolated in-memory ring buffer first, then falls back strictly to that tenant's
+     * durable PostgreSQL outbox. Missing, invalid, or cross-tenant cursors emit RESYNC_REQUIRED.
      */
     private replayMissedEvents;
-    private persistOutboxEvent;
+    /**
+     * Persists a direct event to the target organization's strict tenant outbox database.
+     * Uses ON CONFLICT (event_id) DO UPDATE preserving existing event identity/payload while transitioning PUBLISHED.
+     * Fails loudly on invalid mapping or database errors so callers/telemetry observe every failure.
+     */
+    persistOutboxEvent(event: DashboardEvent): Promise<void>;
     /**
      * Strips sensitive farmer credentials, raw phone numbers, bank details, and secrets from payloads.
      */
     sanitizePayload(payload: Record<string, any>): Record<string, any>;
     /**
-     * Safe scheduled cleanup for old published outbox events.
-     * - Retains at least the configured recovery window (default 7 days).
-     * - Never deletes PENDING or FAILED events.
-     * - Never deletes events currently claimed by a worker (FOR UPDATE SKIP LOCKED).
-     * - Bounded batch size (500) prevents locking and table contention.
-     * - Fully idempotent.
+     * Tenant-scoped retention cleanup for old published outbox events for a single tenant.
+     */
+    purgeTenantOldOutboxEvents(organizationId: string, retentionDays?: number, batchSize?: number): Promise<TenantOutboxPurgeResult>;
+    /**
+     * Safe scheduled cleanup for old published outbox events across active tenants with full summary.
+     * - Runs strictly per tenant database inside an explicit transaction with FOR UPDATE SKIP LOCKED.
+     * - Never deletes PENDING or FAILED events, and isolates failures per tenant.
+     */
+    purgeOldOutboxEventsDetailed(retentionDays?: number, batchSize?: number): Promise<OutboxPurgeRunSummary>;
+    /**
+     * Backward-compatible cleanup entrypoint returning total purged events across active tenants.
      */
     purgeOldOutboxEvents(retentionDays?: number, batchSize?: number): Promise<number>;
     destroy(): Promise<void>;

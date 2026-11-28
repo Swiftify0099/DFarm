@@ -51,6 +51,25 @@ export interface ProvisionTenantParams {
 }
 
 export const PLATFORM_FEDERATION_DAIRY_ID = '00000000-0000-0000-0000-000000000001';
+const TENANT_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Establishes transaction-local PostgreSQL organization context for tenant RLS policies
+ * (e.g. dashboard_events_outbox rls_dashboard_events_outbox_isolation).
+ * Uses set_config(..., true) so context stays local to the active transaction and resets on COMMIT/ROLLBACK.
+ */
+export async function setTenantTransactionContext(
+  client: pg.PoolClient,
+  organizationId: string
+): Promise<void> {
+  if (!organizationId || !organizationId.trim()) {
+    throw new TenantDatabaseUnavailableError('UNKNOWN', 'UNMAPPED', 'Organization ID is required for tenant context');
+  }
+  if ((client as any).__isPgMem === true) {
+    return;
+  }
+  await client.query("SELECT set_config('app.current_organization_id', $1, true);", [organizationId.trim()]);
+}
 
 export class TenantDatabaseUnavailableError extends Error {
   public readonly statusCode = 503;
@@ -391,33 +410,56 @@ export class TenantDatabaseManager {
    * Resolves the authoritative tenant database mapping from memory or central dairy_database_mappings
    * without fabricating a synthetic test mapping.
    */
-  public async resolveTenantMapping(dairyId: string): Promise<TenantDatabaseMapping | null> {
+  public async resolveTenantMapping(
+    dairyId: string,
+    options?: { bypassCache?: boolean }
+  ): Promise<TenantDatabaseMapping | null> {
     if (!dairyId || !dairyId.trim()) {
       return null;
     }
     if (this.isPlatformFederationDairy(dairyId)) {
       return this.getPlatformFederationMapping();
     }
-    const cached = this.tenantMappings.get(dairyId);
-    if (cached) {
+    const cleanId = dairyId.trim();
+    const bypassCache = options?.bypassCache === true;
+    const cached = this.tenantMappings.get(cleanId);
+    if (cached && !bypassCache) {
+      return cached;
+    }
+    if (bypassCache && cached?.resourceType === 'ISOLATED_TEST_INSTANCE' && this.tenantMemDbs.has(cleanId)) {
       return cached;
     }
     const controlDb = this.getControlPlaneDb();
     try {
       const res = await controlDb.query(
-        'SELECT * FROM dairy_database_mappings WHERE dairy_id = $1;',
-        [dairyId]
+        `SELECT m.*, o.status AS organization_status
+         FROM dairy_database_mappings m
+         LEFT JOIN organizations o ON o.id = m.dairy_id
+         WHERE m.dairy_id = $1;`,
+        [cleanId]
       );
       if (res.rows.length > 0) {
-        const currentCached = this.tenantMappings.get(dairyId);
+        const currentCached = this.tenantMappings.get(cleanId);
         if (
-          this.deprovisioningTenants.has(dairyId) ||
+          this.deprovisioningTenants.has(cleanId) ||
           currentCached?.provisioningStatus === 'DEPROVISIONING' ||
           currentCached?.provisioningStatus === 'DEPROVISION_FAILED'
         ) {
           return currentCached || null;
         }
         const row = res.rows[0];
+        const orgStatus = typeof row.organization_status === 'string'
+          ? row.organization_status.trim().toUpperCase()
+          : 'ACTIVE';
+        const orgInactive = orgStatus !== 'ACTIVE';
+        const effectiveStatus: ProvisioningStatus =
+          orgInactive && row.provisioning_status === 'ACTIVE'
+            ? 'FAILED'
+            : row.provisioning_status;
+        const effectiveError = orgInactive
+          ? `ORGANIZATION_INACTIVE: Organization status is ${orgStatus}`
+          : row.provisioning_error;
+
         const mapping: TenantDatabaseMapping = {
           id: row.id,
           dairyId: row.dairy_id,
@@ -426,17 +468,20 @@ export class TenantDatabaseManager {
           resourceType: row.resource_type === 'ISOLATED_TEST_INSTANCE' ? 'ISOLATED_TEST_INSTANCE' : 'PHYSICAL_DATABASE',
           connectionUriEncrypted: row.connection_uri_encrypted,
           schemaVersion: row.schema_version,
-          provisioningStatus: row.provisioning_status,
-          provisioningError: row.provisioning_error,
+          provisioningStatus: effectiveStatus,
+          provisioningError: effectiveError,
           provisionedAt: row.provisioned_at?.toISOString?.() || row.provisioned_at,
           lastVerifiedAt: row.last_verified_at?.toISOString?.() || row.last_verified_at,
         };
-        this.tenantMappings.set(dairyId, mapping);
+        this.tenantMappings.set(cleanId, mapping);
         return mapping;
+      }
+      if (bypassCache) {
+        this.tenantMappings.delete(cleanId);
       }
     } catch (err: any) {
       throw new TenantDatabaseUnavailableError(
-        dairyId,
+        cleanId,
         'CONTROL_PLANE_UNAVAILABLE',
         err?.message || 'Unable to query tenant database mapping'
       );
@@ -448,75 +493,103 @@ export class TenantDatabaseManager {
    * Strict tenant DB resolver: validates mapping existence and ACTIVE provisioning state,
    * never fabricates a test mapping, and never falls back to central control-plane DB.
    */
-  public async getStrictTenantDb(dairyId: string): Promise<IDatabaseClient> {
+  public async getStrictTenantDb(
+    dairyId: string,
+    options?: { bypassCache?: boolean; strictOperational?: boolean }
+  ): Promise<IDatabaseClient> {
     if (!dairyId || !dairyId.trim()) {
       throw new TenantDatabaseUnavailableError('UNKNOWN', 'UNMAPPED', 'Organization ID is required');
     }
-    if (this.isPlatformFederationDairy(dairyId)) {
+    const cleanId = dairyId.trim();
+    if (this.isPlatformFederationDairy(cleanId)) {
+      if (options?.strictOperational) {
+        throw new TenantDatabaseUnavailableError(
+          cleanId,
+          'CONTROL_PLANE_TARGET_FORBIDDEN',
+          'Operational tenant operations cannot target the central control-plane federation database'
+        );
+      }
       return this.getControlPlaneDb();
     }
 
-    return this.trackAcquisition(dairyId, async () => {
-      await this.awaitPendingTenantClose(dairyId);
+    return this.trackAcquisition(cleanId, async () => {
+      await this.awaitPendingTenantClose(cleanId);
 
-      let mapping = await this.resolveTenantMapping(dairyId);
-      await this.awaitPendingTenantClose(dairyId);
-      mapping = this.tenantMappings.get(dairyId) || mapping;
+      let mapping = await this.resolveTenantMapping(cleanId, { bypassCache: options?.bypassCache });
+      await this.awaitPendingTenantClose(cleanId);
+      mapping = this.tenantMappings.get(cleanId) || mapping;
 
       if (!mapping) {
         throw new TenantDatabaseUnavailableError(
-          dairyId,
+          cleanId,
           'UNMAPPED',
           'No tenant database mapping found for this organization'
         );
       }
 
+      if (mapping.provisioningError?.startsWith('ORGANIZATION_INACTIVE:')) {
+        throw new TenantDatabaseUnavailableError(
+          cleanId,
+          'ORGANIZATION_INACTIVE',
+          mapping.provisioningError
+        );
+      }
+
       if (mapping.provisioningStatus !== 'ACTIVE') {
         throw new TenantDatabaseUnavailableError(
-          dairyId,
+          cleanId,
           mapping.provisioningStatus,
           mapping.provisioningError || `Tenant database provisioning status is ${mapping.provisioningStatus}`
         );
       }
 
-      const usablePool = await this.ensureExistingPoolUsableOrEvict(dairyId);
-      if (usablePool) {
-        return this.wrapPgPool(usablePool, dairyId);
+      if (
+        options?.strictOperational &&
+        mapping.databaseName &&
+        (mapping.databaseName.toLowerCase() === 'postgres' || mapping.databaseName.toLowerCase() === 'dfarm_control_plane')
+      ) {
+        throw new TenantDatabaseUnavailableError(
+          cleanId,
+          'CONTROL_PLANE_TARGET_FORBIDDEN',
+          `Operational tenant database cannot point to control-plane database '${mapping.databaseName}'`
+        );
       }
 
-      const latestMapping = this.tenantMappings.get(dairyId);
+      const usablePool = await this.ensureExistingPoolUsableOrEvict(cleanId);
+      if (usablePool) {
+        return this.wrapPgPool(usablePool, cleanId);
+      }
+
+      const latestMapping = this.tenantMappings.get(cleanId);
       if (!latestMapping || latestMapping.provisioningStatus !== 'ACTIVE') {
         throw new TenantDatabaseUnavailableError(
-          dairyId,
+          cleanId,
           latestMapping?.provisioningStatus || 'UNMAPPED',
           latestMapping?.provisioningError || 'Tenant database is no longer ACTIVE'
         );
       }
       mapping = latestMapping;
 
-      if (this.tenantMemDbs.has(dairyId)) {
-        return this.tenantMemDbs.get(dairyId)!;
+      if (this.tenantMemDbs.has(cleanId)) {
+        return this.tenantMemDbs.get(cleanId)!;
       }
 
       if (mapping.resourceType === 'ISOLATED_TEST_INSTANCE') {
         if (this.isRealPostgresRequired()) {
           throw new TenantDatabaseUnavailableError(
-            dairyId,
+            cleanId,
             'ISOLATED_TEST_INSTANCE_FORBIDDEN',
             'In-memory tenant database is strictly prohibited when REQUIRE_REAL_POSTGRES=1'
           );
         }
-        const memClient = this.createIsolatedMemoryDatabase(dairyId);
-        this.tenantMemDbs.set(dairyId, memClient);
+        const memClient = this.createIsolatedMemoryDatabase(cleanId);
+        this.tenantMemDbs.set(cleanId, memClient);
         return memClient;
       }
 
       if (!mapping.connectionUriEncrypted) {
-        if (mapping.databaseName === 'postgres' || mapping.databaseName === 'dfarm_control_plane') {
-          return this.getControlPlaneDb();
-        }
         throw new TenantDatabaseUnavailableError(
-          dairyId,
+          cleanId,
           'CREDENTIALS_MISSING',
           'Tenant database connection credentials are missing'
         );
@@ -524,32 +597,90 @@ export class TenantDatabaseManager {
 
       try {
         const decryptedUri = CredentialEncryption.decrypt(mapping.connectionUriEncrypted);
-        this.assertTenantLifecycleAvailable(dairyId);
-        const concurrentPool = this.tenantPools.get(dairyId);
+        this.assertTenantLifecycleAvailable(cleanId);
+        const concurrentPool = this.tenantPools.get(cleanId);
         if (concurrentPool) {
           if ((concurrentPool as any).ending || (concurrentPool as any).ended) {
             throw new TenantDatabaseUnavailableError(
-              dairyId,
+              cleanId,
               'POOL_CLOSING',
               'Tenant database pool is currently closing'
             );
           }
-          return this.wrapPgPool(concurrentPool, dairyId);
+          return this.wrapPgPool(concurrentPool, cleanId);
         }
-        const tenantPool = this.createTenantPool(dairyId, decryptedUri);
-        this.tenantPools.set(dairyId, tenantPool);
-        return this.wrapPgPool(tenantPool, dairyId);
+        const tenantPool = this.createTenantPool(cleanId, decryptedUri);
+        this.tenantPools.set(cleanId, tenantPool);
+        return this.wrapPgPool(tenantPool, cleanId);
       } catch (err: any) {
         if (err instanceof TenantDatabaseUnavailableError) {
           throw err;
         }
         throw new TenantDatabaseUnavailableError(
-          dairyId,
+          cleanId,
           'CONNECTION_FAILED',
           err?.message || 'Failed to initialize tenant database pool'
         );
       }
     });
+  }
+
+  /**
+   * Queries authoritative central control-plane mappings for concrete ACTIVE operational dairy org IDs
+   * using bounded keyset pagination, excluding platform federation and control-plane database entries.
+   */
+  public async listActiveTenantOrganizationIds(options?: {
+    afterDairyId?: string | null;
+    limit?: number;
+  }): Promise<string[]> {
+    const controlDb = this.getControlPlaneDb();
+    const safeLimit = Math.min(200, Math.max(1, Math.floor(options?.limit ?? 100)));
+    const afterDairyId =
+      options?.afterDairyId && TENANT_UUID_REGEX.test(options.afterDairyId.trim())
+        ? options.afterDairyId.trim()
+        : null;
+
+    const sql = afterDairyId
+      ? `SELECT m.dairy_id
+         FROM dairy_database_mappings m
+         INNER JOIN organizations o ON o.id = m.dairy_id
+         WHERE m.provisioning_status = 'ACTIVE'
+           AND o.status = 'ACTIVE'
+           AND m.dairy_id <> $1
+           AND LOWER(m.database_name) NOT IN ('postgres', 'dfarm_control_plane')
+           AND m.dairy_id > $2::uuid
+         ORDER BY m.dairy_id ASC
+         LIMIT $3;`
+      : `SELECT m.dairy_id
+         FROM dairy_database_mappings m
+         INNER JOIN organizations o ON o.id = m.dairy_id
+         WHERE m.provisioning_status = 'ACTIVE'
+           AND o.status = 'ACTIVE'
+           AND m.dairy_id <> $1
+           AND LOWER(m.database_name) NOT IN ('postgres', 'dfarm_control_plane')
+         ORDER BY m.dairy_id ASC
+         LIMIT $2;`;
+
+    const params = afterDairyId
+      ? [PLATFORM_FEDERATION_DAIRY_ID, afterDairyId, safeLimit]
+      : [PLATFORM_FEDERATION_DAIRY_ID, safeLimit];
+
+    const res = await controlDb.query<{ dairy_id: string }>(sql, params);
+    const seen = new Set<string>();
+    const ids: string[] = [];
+
+    for (const row of res.rows || []) {
+      const rawId = typeof row?.dairy_id === 'string' ? row.dairy_id.trim() : '';
+      if (!rawId || !TENANT_UUID_REGEX.test(rawId) || this.isPlatformFederationDairy(rawId)) {
+        continue;
+      }
+      if (!seen.has(rawId)) {
+        seen.add(rawId);
+        ids.push(rawId);
+      }
+    }
+
+    return ids;
   }
 
   public getAllMappings(): TenantDatabaseMapping[] {
@@ -1385,6 +1516,9 @@ export class TenantDatabaseManager {
         const client = await pool.connect();
         try {
           await client.query('BEGIN');
+          if (dairyId && !this.isPlatformFederationDairy(dairyId)) {
+            await setTenantTransactionContext(client, dairyId);
+          }
           const result = await callback(client);
           await client.query('COMMIT');
           return result;
@@ -1721,26 +1855,96 @@ export class TenantDatabaseManager {
     const pool = new adapter.Pool();
     let txMutex: Promise<void> = Promise.resolve();
 
+    const acquireMutex = async (): Promise<() => void> => {
+      const previous = txMutex;
+      let releaseMutex!: () => void;
+      txMutex = new Promise<void>((resolve) => {
+        releaseMutex = resolve;
+      });
+      await previous;
+      return releaseMutex;
+    };
+
+    const runPgMemQuery = async (
+      exec: (sql: string, p?: any[]) => Promise<pg.QueryResult<any>>,
+      text: string,
+      params?: any[]
+    ): Promise<pg.QueryResult<any>> => {
+      let sql = String(text || '');
+      const args = Array.isArray(params) ? [...params] : [];
+
+      // Emulate CTE bounded SKIP LOCKED outbox purge on pg-mem
+      if (/WITH\s+candidate_rows\s+AS\s*\(/i.test(sql) && /DELETE\s+FROM\s+dashboard_events_outbox/i.test(sql)) {
+        const innerMatch = sql.match(/WITH\s+candidate_rows\s+AS\s*\(([\s\S]*?)\)\s*DELETE\s+FROM\s+dashboard_events_outbox/i);
+        if (innerMatch && innerMatch[1]) {
+          const selectSql = innerMatch[1].replace(/\s+FOR\s+UPDATE(?:\s+SKIP\s+LOCKED)?/gi, '');
+          const candRes = await exec(selectSql, args);
+          const ids = (candRes.rows || []).map((r: any) => r.id).filter(Boolean);
+          if (ids.length === 0) {
+            return { rows: [], rowCount: 0, command: 'DELETE', oid: 0, fields: [] } as pg.QueryResult<any>;
+          }
+          const placeholders = ids.map((_, idx) => `$${idx + 2}`).join(', ');
+          return exec(
+            `DELETE FROM dashboard_events_outbox WHERE organization_id = $1 AND id IN (${placeholders}) RETURNING id;`,
+            [args[0], ...ids]
+          );
+        }
+      }
+
+      // Strip FOR UPDATE SKIP LOCKED / FOR UPDATE unsupported clauses in pg-mem
+      if (/\bFOR\s+UPDATE\b/i.test(sql)) {
+        sql = sql.replace(/\s+FOR\s+UPDATE(?:\s+SKIP\s+LOCKED)?/gi, '');
+      }
+
+      // Expand `id = ANY($N::uuid[])` when passed an array of IDs on pg-mem
+      const anyMatch = sql.match(/(\bid\s*=\s*ANY\s*\(\s*\$(\d+)(?:::uuid\[\])?\s*\))/i);
+      if (anyMatch && anyMatch[2]) {
+        const paramIdx = Number(anyMatch[2]) - 1;
+        const arr = args[paramIdx];
+        if (Array.isArray(arr)) {
+          if (arr.length === 0) {
+            sql = sql.replace(anyMatch[1], '1 = 0');
+          } else {
+            const extraPlaceholders = arr.map((_, idx) => `$${args.length + idx + 1}`).join(', ');
+            args.push(...arr);
+            sql = sql.replace(anyMatch[1], `id IN (${extraPlaceholders})`);
+          }
+        }
+      }
+
+      return exec(sql, args);
+    };
+
     return {
-      query: (text: string, params?: any[]) => pool.query(text, params),
+      query: async (text: string, params?: any[]) => {
+        const release = await acquireMutex();
+        try {
+          return await runPgMemQuery((s, p) => pool.query(s, p), text, params);
+        } finally {
+          release();
+        }
+      },
       withTransaction: async <T>(callback: (client: pg.PoolClient) => Promise<T>): Promise<T> => {
-        const previous = txMutex;
-        let releaseMutex!: () => void;
-        txMutex = new Promise<void>((resolve) => {
-          releaseMutex = resolve;
-        });
-        await previous;
+        const releaseMutex = await acquireMutex();
 
         const client = await pool.connect();
         (client as any).__isPgMem = true;
+        const rawClientQuery = client.query.bind(client);
+        (client as any).query = (text: any, params?: any[]) => {
+          if (typeof text === 'string') {
+            return runPgMemQuery((s, p) => rawClientQuery(s, p), text, params);
+          }
+          return rawClientQuery(text, params);
+        };
+
         const backup = db.backup();
         try {
-          await client.query('BEGIN');
+          await rawClientQuery('BEGIN');
           const result = await callback(client);
-          await client.query('COMMIT');
+          await rawClientQuery('COMMIT');
           return result;
         } catch (err) {
-          await client.query('ROLLBACK').catch(() => {});
+          await rawClientQuery('ROLLBACK').catch(() => {});
           backup.restore();
           throw err;
         } finally {

@@ -25,6 +25,12 @@ export interface ProvisionTenantParams {
     adminConnectionString?: string;
 }
 export declare const PLATFORM_FEDERATION_DAIRY_ID = "00000000-0000-0000-0000-000000000001";
+/**
+ * Establishes transaction-local PostgreSQL organization context for tenant RLS policies
+ * (e.g. dashboard_events_outbox rls_dashboard_events_outbox_isolation).
+ * Uses set_config(..., true) so context stays local to the active transaction and resets on COMMIT/ROLLBACK.
+ */
+export declare function setTenantTransactionContext(client: pg.PoolClient, organizationId: string): Promise<void>;
 export declare class TenantDatabaseUnavailableError extends Error {
     readonly dairyId: string;
     readonly status: string;
@@ -73,12 +79,25 @@ export declare class TenantDatabaseManager {
      * Resolves the authoritative tenant database mapping from memory or central dairy_database_mappings
      * without fabricating a synthetic test mapping.
      */
-    resolveTenantMapping(dairyId: string): Promise<TenantDatabaseMapping | null>;
+    resolveTenantMapping(dairyId: string, options?: {
+        bypassCache?: boolean;
+    }): Promise<TenantDatabaseMapping | null>;
     /**
      * Strict tenant DB resolver: validates mapping existence and ACTIVE provisioning state,
      * never fabricates a test mapping, and never falls back to central control-plane DB.
      */
-    getStrictTenantDb(dairyId: string): Promise<IDatabaseClient>;
+    getStrictTenantDb(dairyId: string, options?: {
+        bypassCache?: boolean;
+        strictOperational?: boolean;
+    }): Promise<IDatabaseClient>;
+    /**
+     * Queries authoritative central control-plane mappings for concrete ACTIVE operational dairy org IDs
+     * using bounded keyset pagination, excluding platform federation and control-plane database entries.
+     */
+    listActiveTenantOrganizationIds(options?: {
+        afterDairyId?: string | null;
+        limit?: number;
+    }): Promise<string[]>;
     getAllMappings(): TenantDatabaseMapping[];
     getAllTenantDbs(): IDatabaseClient[];
     /**

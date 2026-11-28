@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { MilkCollectionTransaction } from '../../domain/entities/MilkCollectionTransaction.js';
 import { DomainValidationError, ForbiddenError, ForbiddenTenantError, } from '../../domain/errors/index.js';
-import { tenantDbManager, TenantDatabaseUnavailableError, } from '../database/TenantDatabaseManager.js';
+import { setTenantTransactionContext, tenantDbManager, TenantDatabaseUnavailableError, } from '../database/TenantDatabaseManager.js';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export class PostgresCollectionTransactionRepository {
     mapRowToTransaction(row) {
@@ -381,6 +381,7 @@ export class PostgresCollectionTransactionRepository {
         }
         const { tenantDb } = await this.getAuthorizedTenantDb(orgId);
         return await tenantDb.withTransaction(async (client) => {
+            await setTenantTransactionContext(client, orgId);
             // 0. Pre-check: If this idempotency key was already recorded in this organization, return existing canonical record
             const idempotencyKey = t.idempotencyKey || `TXN-${t.id}`;
             const preCheck = await this.queryTenant(client, orgId, `SELECT id FROM milk_collections WHERE idempotency_key = $1 AND organization_id = $2 LIMIT 1;`, [idempotencyKey, orgId]);
@@ -581,22 +582,17 @@ export class PostgresCollectionTransactionRepository {
                 farmerMaskedName: t.customerName ? `${t.customerName.charAt(0)}***` : 'Farmer',
                 status: 'ACCEPTED',
             };
-            try {
-                await client.query(`INSERT INTO dashboard_events_outbox (
-            event_id, event_type, schema_version, organization_id, center_id,
-            entity_id, aggregate_version, occurred_at, status, payload
-          ) VALUES ($1, 'COLLECTION_ACCEPTED', 1, $2, $3, $4, 1, NOW(), 'PENDING', $5)
-          ON CONFLICT (event_id) DO NOTHING;`, [
-                    outboxEventId,
-                    orgId,
-                    t.centerId || null,
-                    t.id,
-                    JSON.stringify(outboxPayload),
-                ]);
-            }
-            catch {
-                // Outbox schema alignment tracked separately under DF-021 (RESTART-09)
-            }
+            await this.queryTenant(client, orgId, `INSERT INTO dashboard_events_outbox (
+          event_id, event_type, schema_version, organization_id, center_id,
+          entity_id, aggregate_version, occurred_at, status, payload
+        ) VALUES ($1, 'COLLECTION_ACCEPTED', 1, $2, $3, $4, 1, NOW(), 'PENDING', $5)
+        ON CONFLICT (event_id) DO NOTHING;`, [
+                outboxEventId,
+                orgId,
+                t.centerId || null,
+                t.id,
+                JSON.stringify(outboxPayload),
+            ]);
             return {
                 transaction: params.transaction,
                 receiptNumber: `RCP-${t.id.substring(0, 8).toUpperCase()}`,

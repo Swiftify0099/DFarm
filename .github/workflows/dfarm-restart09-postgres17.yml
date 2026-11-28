@@ -1,0 +1,74 @@
+name: DFarm RESTART-09 PostgreSQL 17 Realtime Outbox Verification
+
+on:
+  push:
+    branches:
+      - fix/cloudflare-pages-production-deploy
+      - main
+  pull_request:
+    branches:
+      - fix/cloudflare-pages-production-deploy
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: dfarm-restart09-pg17-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  restart09-postgres17-outbox-gate:
+    name: Real PostgreSQL 17 Multi-Tenant Realtime Outbox & SSE Gate
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci_password
+          POSTGRES_DB: dfarm_central
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d dfarm_central"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=15
+
+    env:
+      NODE_ENV: test
+      REQUIRE_REAL_POSTGRES: "1"
+      TEST_POSTGRES_URL: postgresql://postgres:postgres_ci_password@127.0.0.1:5432/dfarm_central
+      DATABASE_URL: postgresql://postgres:postgres_ci_password@127.0.0.1:5432/dfarm_central
+      CENTRAL_DATABASE_URL: postgresql://postgres:postgres_ci_password@127.0.0.1:5432/dfarm_central
+      DATABASE_PROVISIONER_URL: postgresql://postgres:postgres_ci_password@127.0.0.1:5432/dfarm_central
+      JWT_SECRET: restart09_ci_jwt_secret_minimum_64_chars_long_verified_for_tests_012345
+      TENANT_CREDENTIAL_ENCRYPTION_KEY: restart09_ci_tenant_cred_encryption_key_32_bytes_abcdef0123456789
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build shared packages and backend
+        run: npm run build:backend
+
+      - name: Run database catalog & static migration gates
+        run: npm run db:validate && npm run db:test
+
+      - name: Bootstrap disposable PostgreSQL 17 cluster auth role
+        run: node scripts/ci-pg17-bootstrap.js
+
+      - name: Run RESTART-09 Outbox Isolation Unit Suite
+        run: node --test services/backend/tests/restart09-outbox-isolation-unit.test.js
+
+      - name: Execute RESTART-09 PostgreSQL 17 Outbox & SSE Gate (zero skips, fail-closed)
+        run: node scripts/ci-run-restart09-pg17.js
