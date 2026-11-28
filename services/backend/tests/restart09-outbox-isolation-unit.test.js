@@ -473,7 +473,7 @@ test('RESTART-09 Unit Suite: Tenant-Scoped Realtime Outbox, Cursors, Failure Pro
     await t.test('2. Last-Event-ID durable DB replay tie-breaks equal created_at timestamps, filters center, and rejects foreign tenant cursors', async () => {
       const publisher = new RealtimeEventPublisher();
       try {
-        const sameTs = new Date('2026-11-28T03:00:00.000Z');
+        const sameTs = new Date(Date.now() + 60_000);
         const id1 = '00000000-0000-0000-0000-000000000010';
         const id2 = '00000000-0000-0000-0000-000000000020';
         const id3 = '00000000-0000-0000-0000-000000000030';

@@ -1898,16 +1898,17 @@ export class TenantDatabaseManager {
 
       // Expand `id = ANY($N::uuid[])` when passed an array of IDs on pg-mem
       const anyMatch = sql.match(/(\bid\s*=\s*ANY\s*\(\s*\$(\d+)(?:::uuid\[\])?\s*\))/i);
-      if (anyMatch && anyMatch[2]) {
+      if (anyMatch && anyMatch[1] && anyMatch[2]) {
+        const matchedExpr = anyMatch[1];
         const paramIdx = Number(anyMatch[2]) - 1;
         const arr = args[paramIdx];
         if (Array.isArray(arr)) {
           if (arr.length === 0) {
-            sql = sql.replace(anyMatch[1], '1 = 0');
+            sql = sql.replace(matchedExpr, '1 = 0');
           } else {
             const extraPlaceholders = arr.map((_, idx) => `$${args.length + idx + 1}`).join(', ');
             args.push(...arr);
-            sql = sql.replace(anyMatch[1], `id IN (${extraPlaceholders})`);
+            sql = sql.replace(matchedExpr, `id IN (${extraPlaceholders})`);
           }
         }
       }

@@ -395,7 +395,7 @@ if (!pgAvailable) {
       await t.test('Test C: Durable Last-Event-ID replay tie-breaks identical created_at timestamps and enforces tenant/center isolation', async () => {
         const publisher = new RealtimeEventPublisher();
         try {
-          const sameTs = '2026-11-28T04:00:00.000Z';
+          const sameTs = new Date(Date.now() + 60_000).toISOString();
           await poolA.query(
             `INSERT INTO dashboard_events_outbox
               (id, event_id, event_type, organization_id, center_id, entity_id, status, published_at, created_at, payload)
