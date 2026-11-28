@@ -4,9 +4,10 @@
 // ==============================================================================
 
 import crypto from 'node:crypto';
-import { query } from '../../config/db.js';
+import type pg from 'pg';
 import { BadRequestError, ForbiddenError } from '../../shared/errors/app-error.js';
 import type { AuthContext } from '../../middleware/authenticate.js';
+import { getStrictPaymentTenantDb } from './tenant-payment-context.js';
 
 export interface CalculationPeriodParams {
   organizationId: string;
@@ -98,7 +99,21 @@ export class SettlementCalculationService {
    */
   public static async calculateSettlement(
     params: CalculationPeriodParams,
-    _auth?: AuthContext
+    _auth?: AuthContext,
+    existingClient?: pg.PoolClient
+  ): Promise<SettlementCalculationResult> {
+    if (existingClient) {
+      return this.calculateSettlementWithClient(existingClient, params);
+    }
+    const tenantDb = await getStrictPaymentTenantDb(params.organizationId);
+    return tenantDb.withTransaction(async (client) =>
+      this.calculateSettlementWithClient(client, params)
+    );
+  }
+
+  private static async calculateSettlementWithClient(
+    client: pg.PoolClient,
+    params: CalculationPeriodParams
   ): Promise<SettlementCalculationResult> {
     const { organizationId, centerId, periodStart, periodEnd, customerIds } = params;
 
@@ -124,7 +139,7 @@ export class SettlementCalculationService {
     const custArgs: any[] = [organizationId];
 
     if (centerId) {
-      const centerCheck = await query(
+      const centerCheck = await client.query(
         'SELECT id FROM dairy_centers WHERE id = $1 AND organization_id = $2;',
         [centerId, organizationId]
       );
@@ -152,7 +167,7 @@ export class SettlementCalculationService {
 
     custSql += ` ORDER BY dc.name ASC, c.farmer_code ASC;`;
 
-    const customersRes = await query(custSql, custArgs);
+    const customersRes = await client.query(custSql, custArgs);
     const customers = customersRes.rows;
 
     if (customers.length === 0) {
@@ -267,7 +282,7 @@ export class SettlementCalculationService {
       WHERE c.organization_id = $1
     `;
 
-    const calcRes = await query(calcQuery, [organizationId, periodStart, periodEnd]);
+    const calcRes = await client.query(calcQuery, [organizationId, periodStart, periodEnd]);
     const calcMap = new Map<string, any>();
     for (const row of calcRes.rows) {
       calcMap.set(row.customer_id, row);

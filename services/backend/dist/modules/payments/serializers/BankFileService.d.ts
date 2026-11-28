@@ -3,7 +3,10 @@ import type { SerializedBankFile } from './IBankFileSerializer.js';
 export declare class BankFileService {
     private static serializers;
     private static exportCache;
-    static exportBatch(batchId: string, format: string, auth: AuthContext): Promise<{
+    static exportBatch(batchId: string, format: string, auth: AuthContext, options?: {
+        debitAccountNumber?: string;
+        targetOrganizationId?: string;
+    }): Promise<{
         batchId: string;
         batchNumber: string;
         format: string;

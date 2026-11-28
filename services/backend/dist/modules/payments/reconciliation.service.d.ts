@@ -9,9 +9,10 @@ export interface BankStatementRowInput {
 export interface BankStatementImportParams {
     fileName: string;
     rows: BankStatementRowInput[];
+    targetOrganizationId?: string;
 }
 export declare class ReconciliationService {
-    importBankStatementCsv(params: BankStatementImportParams, auth: AuthContext): Promise<{
+    importBankStatementCsv(params: BankStatementImportParams, auth: AuthContext, targetOrganizationId?: string | null): Promise<{
         statementImportId: `${string}-${string}-${string}-${string}-${string}`;
         fileName: string;
         totalImportedRows: number;
@@ -20,26 +21,22 @@ export declare class ReconciliationService {
             unmatchedCount: number;
             mismatchCount: number;
             duplicateCount: number;
+            reviewRequiredCount: number;
         };
         records: any[];
     }>;
-    processWebhook(payload: string | Buffer, signature: string, timestampHeader?: string, authContext?: AuthContext): Promise<{
-        reconciliationId: any;
-        status: any;
-        matchedPayoutId: any;
-        isIdempotentReplay: boolean;
-        eventId?: undefined;
-    } | {
-        reconciliationId: `${string}-${string}-${string}-${string}-${string}`;
+    processWebhook(payload: string | Buffer, signature: string, timestampHeader?: string, authContext?: AuthContext, targetOrganizationId?: string | null): Promise<{
+        reconciliationId: string;
         eventId: string;
         status: string;
         matchedPayoutId: string | null;
         isIdempotentReplay: boolean;
     }>;
-    resolveRecord(recordId: string, action: 'CONFIRMED_SETTLED' | 'FLAGGED_MISMATCH' | 'REJECTED_DUPLICATE' | 'MANUALLY_MATCHED' | 'DISMISSED', notes: string, auth: AuthContext, matchedPayoutId?: string | null): Promise<{
+    resolveRecord(recordId: string, action: 'CONFIRMED_SETTLED' | 'FLAGGED_MISMATCH' | 'REJECTED_DUPLICATE' | 'MANUALLY_MATCHED' | 'DISMISSED', notes: string, auth: AuthContext, matchedPayoutId?: string | null, targetOrganizationId?: string | null): Promise<{
         recordId: string;
         action: "CONFIRMED_SETTLED" | "FLAGGED_MISMATCH" | "REJECTED_DUPLICATE" | "MANUALLY_MATCHED" | "DISMISSED";
         notes: string;
+        matchedPayoutId: any;
         resolvedBy: string;
         resolvedAt: string;
     }>;
@@ -47,8 +44,7 @@ export declare class ReconciliationService {
         status?: string;
         limit?: number;
         offset?: number;
-    }): Promise<any[]>;
-    private resolveDefaultOrgId;
+    }, targetOrganizationId?: string | null): Promise<any[]>;
 }
 export declare const reconciliationService: ReconciliationService;
 //# sourceMappingURL=reconciliation.service.d.ts.map

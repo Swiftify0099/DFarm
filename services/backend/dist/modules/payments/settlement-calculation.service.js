@@ -3,14 +3,21 @@
 // FARMER MILK SETTLEMENT & PAYABLE CALCULATION SERVICE (PROMPT 7)
 // ==============================================================================
 import crypto from 'node:crypto';
-import { query } from '../../config/db.js';
 import { BadRequestError, ForbiddenError } from '../../shared/errors/app-error.js';
+import { getStrictPaymentTenantDb } from './tenant-payment-context.js';
 export class SettlementCalculationService {
     /**
      * Calculates farmer milk settlement payables using authoritative posted PostgreSQL ledger entries.
      * Enforces exact DECIMAL/NUMERIC arithmetic and multi-center / multi-tenant isolation.
      */
-    static async calculateSettlement(params, _auth) {
+    static async calculateSettlement(params, _auth, existingClient) {
+        if (existingClient) {
+            return this.calculateSettlementWithClient(existingClient, params);
+        }
+        const tenantDb = await getStrictPaymentTenantDb(params.organizationId);
+        return tenantDb.withTransaction(async (client) => this.calculateSettlementWithClient(client, params));
+    }
+    static async calculateSettlementWithClient(client, params) {
         const { organizationId, centerId, periodStart, periodEnd, customerIds } = params;
         if (!periodStart || !periodEnd) {
             throw new BadRequestError('Both periodStart and periodEnd dates are required (YYYY-MM-DD)', 'INVALID_SETTLEMENT_PERIOD');
@@ -32,7 +39,7 @@ export class SettlementCalculationService {
     `;
         const custArgs = [organizationId];
         if (centerId) {
-            const centerCheck = await query('SELECT id FROM dairy_centers WHERE id = $1 AND organization_id = $2;', [centerId, organizationId]);
+            const centerCheck = await client.query('SELECT id FROM dairy_centers WHERE id = $1 AND organization_id = $2;', [centerId, organizationId]);
             if (centerCheck.rows.length === 0) {
                 throw new ForbiddenError(`Center '${centerId}' does not belong to organization '${organizationId}'`, 'CROSS_CENTER_ACCESS_DENIED');
             }
@@ -50,7 +57,7 @@ export class SettlementCalculationService {
             custSql += ` AND c.id IN (${placeholders})`;
         }
         custSql += ` ORDER BY dc.name ASC, c.farmer_code ASC;`;
-        const customersRes = await query(custSql, custArgs);
+        const customersRes = await client.query(custSql, custArgs);
         const customers = customersRes.rows;
         if (customers.length === 0) {
             return {
@@ -162,7 +169,7 @@ export class SettlementCalculationService {
       LEFT JOIN active_batch_reservations abr ON abr.customer_id = c.id
       WHERE c.organization_id = $1
     `;
-        const calcRes = await query(calcQuery, [organizationId, periodStart, periodEnd]);
+        const calcRes = await client.query(calcQuery, [organizationId, periodStart, periodEnd]);
         const calcMap = new Map();
         for (const row of calcRes.rows) {
             calcMap.set(row.customer_id, row);

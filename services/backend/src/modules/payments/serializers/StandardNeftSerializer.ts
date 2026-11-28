@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type { IBankFileSerializer, PaymentBatchExportDetail, SerializedBankFile } from './IBankFileSerializer.js';
 import { BadRequestError } from '../../../shared/errors/app-error.js';
+import { UnionBankValidator } from '../../../integrations/banking/union-bank/UnionBankValidator.js';
 
 export class StandardNeftSerializer implements IBankFileSerializer {
   public readonly formatIdentifier = 'NEFT_STANDARD';
@@ -9,6 +10,15 @@ export class StandardNeftSerializer implements IBankFileSerializer {
     if (!batch.items || batch.items.length === 0) {
       throw new BadRequestError('Cannot export an empty payout batch', 'EMPTY_BATCH_EXPORT');
     }
+
+    const rawDebitAccount = (batch.debitAccountNumber || '').trim();
+    if (!rawDebitAccount) {
+      throw new BadRequestError(
+        'Authorized dairy debit account is not configured. Bank file export rejected.',
+        'DAIRY_DEBIT_ACCOUNT_NOT_CONFIGURED'
+      );
+    }
+    const debitAccount = UnionBankValidator.validateAccountNumber(rawDebitAccount, 'Dairy Debit Account');
 
     const headers = [
       'Transaction Type',
@@ -23,8 +33,6 @@ export class StandardNeftSerializer implements IBankFileSerializer {
 
     const lines: string[] = [headers.join(',')];
     let runningTotal = 0.00;
-
-    const debitAccount = batch.debitAccountNumber || '000000000000';
 
     for (const item of batch.items) {
       // 1. Validate IFSC Format

@@ -3,15 +3,25 @@
 // UNION BANK OF INDIA BULK FILE SERIALIZERS (PROMPT 7)
 // ==============================================================================
 import { UnionBankFileGenerator } from '../../../integrations/banking/union-bank/UnionBankFileGenerator.js';
+import { UnionBankValidator } from '../../../integrations/banking/union-bank/UnionBankValidator.js';
+import { BadRequestError } from '../../../shared/errors/app-error.js';
+function resolveValidatedDebitAccount(batch) {
+    const raw = (batch.debitAccountNumber || '').trim();
+    if (!raw) {
+        throw new BadRequestError('Authorized dairy Union Bank debit account is not configured. Bank export rejected.', 'DAIRY_DEBIT_ACCOUNT_NOT_CONFIGURED');
+    }
+    return UnionBankValidator.validateAccountNumber(raw, 'Dairy Union Bank Debit Account');
+}
 export class UnionBankBulkNeftSerializer {
     formatIdentifier = 'UNION_BANK_BULK_NEFT_CSV';
     async serialize(batch) {
+        const debitAccountNumber = resolveValidatedDebitAccount(batch);
         const payload = {
             batchId: batch.batchId,
             batchNumber: batch.batchNumber,
             organizationId: batch.organizationId,
             organizationName: batch.organizationName,
-            debitAccountNumber: batch.debitAccountNumber || process.env['UNION_BANK_DEBIT_ACCOUNT'] || '00000000000000',
+            debitAccountNumber,
             valueDate: new Date().toISOString().slice(0, 10),
             items: (batch.items || []).map(i => ({
                 itemId: i.itemId,
@@ -40,12 +50,13 @@ export class UnionBankBulkNeftSerializer {
 export class UnionBankCapsSerializer {
     formatIdentifier = 'UNION_BANK_CAPS_TXT';
     async serialize(batch) {
+        const debitAccountNumber = resolveValidatedDebitAccount(batch);
         const payload = {
             batchId: batch.batchId,
             batchNumber: batch.batchNumber,
             organizationId: batch.organizationId,
             organizationName: batch.organizationName,
-            debitAccountNumber: batch.debitAccountNumber || process.env['UNION_BANK_DEBIT_ACCOUNT'] || '00000000000000',
+            debitAccountNumber,
             valueDate: new Date().toISOString().slice(0, 10),
             items: (batch.items || []).map(i => ({
                 itemId: i.itemId,

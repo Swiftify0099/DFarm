@@ -1,426 +1,886 @@
 // ==============================================================================
 // DFARM - SMART DAIRY MANAGEMENT SYSTEM
-// UNION BANK OF INDIA INTEGRATION: RECONCILIATION SERVICE (PROMPT 7)
+// UNION BANK OF INDIA INTEGRATION: RECONCILIATION SERVICE (DF-022 FIX)
+// ==============================================================================
+//
+// DF-022 TRANSACTION BOUNDARY DESIGN:
+//   - ONE authoritative operational tenant database per dairy resolved exclusively via
+//     tenantDbManager.getStrictTenantDb(organizationId, { bypassCache: true, strictOperational: true }).
+//   - ONE single batch-level transaction (`tenantDb.withTransaction`) wraps every operational
+//     read and write for a reconciliation run:
+//       1. Lock payment batch (`SELECT ... FROM payment_batches WHERE id = $1 FOR UPDATE`)
+//       2. Verify batch organization ownership inside tenant DB
+//       3. Load & lock batch items + linked payouts (`FOR UPDATE OF bi, cp`)
+//       4. Parse & match bank items (detecting missing & ambiguous references)
+//       5. Execute payout settle/fail/reverse + ledger mutations via caller's `client`
+//       6. Update payment batch items (`PAID`/`FAILED`/`REVERSED`/`UNKNOWN`)
+//       7. Insert payment reconciliation audit records
+//       8. Recompute canonical batch aggregates inside the same transaction
+//   - Per-item domain/business errors use PostgreSQL SAVEPOINT / ROLLBACK TO SAVEPOINT
+//     so one business rejection does not abort sibling items.
+//   - Unexpected / infrastructure / database failures propagate out of `withTransaction`
+//     so the entire batch transaction rolls back atomically (never swallowed).
+//   - Zero imports from `config/db.js`, zero permissive `getTenantDb()`, zero tenant scans.
+//   - Notifications are deferred during the transaction and flushed via `Promise.allSettled`
+//     ONLY after the outer COMMIT succeeds.
+//
 // ==============================================================================
 
-import crypto from 'node:crypto';
-import { query, pool } from '../../../config/db.js';
-import { NotFoundError, ForbiddenError } from '../../../shared/errors/app-error.js';
+import type pg from 'pg';
+import {
+  AppError,
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from '../../../shared/errors/app-error.js';
+import { logger } from '../../../shared/logger/index.js';
 import type { AuthContext } from '../../../middleware/authenticate.js';
+import {
+  flushDeferredNotifications,
+  getStrictPaymentTenantDb,
+  recomputeBatchAggregatesInTransaction,
+  resolveOperationalOrganizationId,
+  type DeferredNotification,
+} from '../../../modules/payments/tenant-payment-context.js';
 import { payoutService } from '../../../modules/payments/payout.service.js';
 import { UnionBankResponseParser } from './UnionBankResponseParser.js';
-import type {
-  UnionBankReconciliationItemResult,
-  UnionBankReconciliationSummary,
-} from './types.js';
+import { NotificationEventType } from '@dfarm/shared-types';
+import type { UnionBankReconciliationItemResult } from './types.js';
+
+export interface ReconciliationItemResult {
+  itemId: string;
+  customerReference: string;
+  farmerCode: string;
+  expectedAmount: number;
+  bankAmount: number;
+  bankUtr?: string;
+  status: string;
+  message: string;
+  isIdempotentReplay: boolean;
+}
+
+export interface ReconciliationException {
+  reference: string;
+  reason: string;
+}
+
+export interface ReconciliationResult {
+  batchId: string;
+  batchStatus: string;
+  reconciliationStatus: string;
+  totalBeneficiaries: number;
+  paidCount: number;
+  successfulCount: number;
+  failedCount: number;
+  reversedCount: number;
+  unknownCount: number;
+  processedItems: ReconciliationItemResult[];
+  exceptions: ReconciliationException[];
+}
+
+interface LockedBatchItemRow {
+  item_id: string;
+  batch_id: string;
+  payout_id: string;
+  customer_id: string;
+  amount: string | number;
+  item_status: string;
+  beneficiary_reference: string | null;
+  bank_utr: string | null;
+  bank_reference_number: string | null;
+  farmer_code: string;
+  customer_name: string | null;
+  bank_account_mask: string | null;
+  center_id: string;
+  payout_status: string;
+  payout_reference_number: string | null;
+  payout_currency: string | null;
+  payout_payment_method: string | null;
+}
+
+function normalizeRef(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (value !== undefined && value !== null) {
+    return String(value).trim();
+  }
+  return '';
+}
+
+function parseSettledDate(rawDate?: string): Date {
+  if (!rawDate || !rawDate.trim()) {
+    return new Date();
+  }
+  const parsed = new Date(rawDate.trim());
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function toIsoDateOnly(rawDate?: string): string {
+  const parsed = parseSettledDate(rawDate);
+  return parsed.toISOString().slice(0, 10);
+}
+
+/**
+ * Classifies errors into expected per-item business/domain rejections vs unexpected
+ * infrastructure/database failures. Only expected domain errors are safe to isolate
+ * via SAVEPOINT; infrastructure failures must abort and roll back the outer transaction.
+ */
+function isExpectedItemBusinessError(err: any): boolean {
+  if (
+    err instanceof BadRequestError ||
+    err instanceof ConflictError ||
+    err instanceof NotFoundError ||
+    err instanceof ForbiddenError
+  ) {
+    return true;
+  }
+
+  // Known PL/pgSQL domain validation SQLSTATE / message guards from payout RPCs
+  const pgCode = typeof err?.code === 'string' ? err.code : '';
+  const msg = typeof err?.message === 'string' ? err.message : '';
+  if (pgCode === 'P0002') {
+    return true;
+  }
+  if (
+    pgCode === '22000' &&
+    (msg.includes('CANNOT_FAIL_SETTLED_PAYOUT') ||
+      msg.includes('CANNOT_FAIL_REVERSED_PAYOUT') ||
+      msg.includes('CONFLICTING_REVERSAL_REFERENCE') ||
+      msg.includes('Only SETTLED payouts can be reversed') ||
+      msg.includes('cannot be settled from status'))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Resolves the authoritative target organization for Union Bank reconciliation.
+ *
+ * - Regular dairy staff always reconcile within `auth.organizationId` and reject
+ *   any contradicting body/query/header target organization identifier.
+ * - Platform `SUPER_ADMIN` must provide an explicit non-platform `targetOrganizationId`
+ *   (no scanning across tenant pools and no control-plane financial fallback).
+ */
+export function resolveReconciliationTargetOrganization(
+  auth: AuthContext,
+  targetOrganizationId?: string | null
+): string {
+  return resolveOperationalOrganizationId(
+    auth,
+    targetOrganizationId,
+    'CROSS_ORG_RECONCILIATION_DENIED'
+  );
+}
 
 export class UnionBankReconciliationService {
   /**
-   * Reconciles a payment batch against Union Bank response data (raw string content, Reverse MIS, or parsed items).
-   * Fully idempotent: duplicate reconciliation calls for the same item return the existing result without double-debiting.
+   * Reconciles a payment batch against Union Bank Reverse MIS response data inside
+   * one authoritative physical tenant PostgreSQL database and one shared batch-level
+   * transaction.
    */
   public static async reconcileBatchWithBankData(
     batchId: string,
     bankResponseContentOrItems: string | UnionBankReconciliationItemResult[],
-    auth: AuthContext
-  ): Promise<{
-    batchId: string;
-    batchStatus: string;
-    reconciliationStatus: string;
-    totalBeneficiaries: number;
-    paidCount: number;
-    successfulCount: number;
-    failedCount: number;
-    reversedCount: number;
-    unknownCount: number;
-    processedItems: Array<{
-      itemId: string;
-      customerReference: string;
-      farmerCode: string;
-      expectedAmount: number;
-      bankAmount: number;
-      bankUtr?: string;
-      status: string;
-      message: string;
-      isIdempotentReplay: boolean;
-    }>;
-    exceptions: Array<{
-      reference: string;
-      reason: string;
-    }>;
-  }> {
-    // 1. Fetch Batch
-    const batchRes = await query('SELECT * FROM payment_batches WHERE id = $1;', [batchId]);
-    if (batchRes.rows.length === 0) {
-      throw new NotFoundError(`Payment batch '${batchId}' not found`, 'BATCH_NOT_FOUND');
-    }
-    const batch = batchRes.rows[0];
-
-    // Multi-tenant check
-    if (auth.role !== 'SUPER_ADMIN' && auth.organizationId !== batch.organization_id) {
-      throw new ForbiddenError('Cross-organization batch reconciliation is prohibited', 'CROSS_ORG_ACCESS_DENIED');
+    auth: AuthContext,
+    targetOrganizationId?: string | null
+  ): Promise<ReconciliationResult> {
+    if (!batchId || !batchId.trim()) {
+      throw new BadRequestError('Payment batch ID is required', 'MISSING_BATCH_ID');
     }
 
-    // 2. Parse items if string passed
-    let parsedSummary: UnionBankReconciliationSummary;
-    if (typeof bankResponseContentOrItems === 'string') {
-      parsedSummary = UnionBankResponseParser.parseResponse(bankResponseContentOrItems, batch.bank_batch_reference);
-    } else {
-      parsedSummary = {
-        submissionReference: batch.bank_batch_reference,
-        totalProcessed: bankResponseContentOrItems.length,
-        paidCount: bankResponseContentOrItems.filter(i => i.status === 'PAID').length,
-        paidAmount: bankResponseContentOrItems.filter(i => i.status === 'PAID').reduce((s, i) => s + i.amount, 0),
-        failedCount: bankResponseContentOrItems.filter(i => i.status === 'FAILED').length,
-        failedAmount: bankResponseContentOrItems.filter(i => i.status === 'FAILED').reduce((s, i) => s + i.amount, 0),
-        reversedCount: bankResponseContentOrItems.filter(i => i.status === 'REVERSED').length,
-        unknownCount: bankResponseContentOrItems.filter(i => i.status === 'UNKNOWN').length,
-        items: bankResponseContentOrItems,
-      };
-    }
+    const organizationId = resolveReconciliationTargetOrganization(auth, targetOrganizationId);
 
-    // 3. Load all batch items for matching
-    const itemsRes = await query(
-      `SELECT bi.*, c.farmer_code, c.full_name, c.bank_account_number, cp.amount as payout_amount, cp.status as payout_status
-       FROM payment_batch_items bi
-       JOIN customers c ON c.id = bi.customer_id
-       JOIN customer_payouts cp ON cp.id = bi.payout_id
-       WHERE bi.batch_id = $1;`,
-      [batchId]
-    );
+    // Strictly resolve operational tenant DB — never falls back to central or pooled scan
+    const tenantDb = await getStrictPaymentTenantDb(organizationId);
 
-    // Build lookup maps: by itemId, by beneficiary_reference, by farmer_code
-    const itemsById = new Map<string, any>();
-    const itemsByRef = new Map<string, any>();
-    const itemsByFarmerCode = new Map<string, any>();
+    const deferredNotifications: DeferredNotification[] = [];
 
-    for (const it of itemsRes.rows) {
-      itemsById.set(it.id, it);
-      if (it.beneficiary_reference) itemsByRef.set(it.beneficiary_reference.trim(), it);
-      if (it.farmer_code) itemsByFarmerCode.set(it.farmer_code.trim(), it);
-    }
+    const txResult = await tenantDb.withTransaction<ReconciliationResult>(async (client: pg.PoolClient) => {
+      // 1. Lock the payment batch first inside the tenant transaction
+      const batchRes = await client.query<{
+        id: string;
+        organization_id: string;
+        center_id: string | null;
+        batch_number: string;
+        bank_batch_reference: string | null;
+        status: string;
+      }>(
+        `SELECT id, organization_id, center_id, batch_number, bank_batch_reference, status
+         FROM payment_batches
+         WHERE id = $1
+         FOR UPDATE;`,
+        [batchId]
+      );
 
-    const processedResults: any[] = [];
-    const exceptions: any[] = [];
-
-    // 4. Process each bank item transactionally
-    for (const bankItem of parsedSummary.items) {
-      const cleanRef = (bankItem.customerReference || '').trim();
-      const matchedItem = itemsById.get(cleanRef) || itemsByRef.get(cleanRef) || itemsByFarmerCode.get(cleanRef);
-
-      if (!matchedItem) {
-        exceptions.push({
-          reference: cleanRef,
-          reason: `No matching batch item found for reference '${cleanRef}' in batch ${batch.batch_number}`,
-        });
-        continue;
+      const batch = batchRes.rows[0];
+      if (!batch) {
+        throw new NotFoundError('Payment batch not found', 'BATCH_NOT_FOUND');
       }
 
-      const expectedAmount = Number(matchedItem.amount);
-      const bankAmount = bankItem.amount || expectedAmount;
-
-      // Amount Discrepancy Check
-      if (bankItem.status === 'PAID' && Math.abs(expectedAmount - bankAmount) > 0.01) {
-        exceptions.push({
-          reference: cleanRef,
-          reason: `Amount mismatch: expected ₹${expectedAmount.toFixed(2)}, bank reported ₹${bankAmount.toFixed(2)}`,
-        });
-
-        // Record reconciliation mismatch record
-        await query(
-          `INSERT INTO payment_reconciliation_records (
-            organization_id, source, external_reference, transaction_date, amount,
-            direction, matched_payout_id, matched_batch_id, reconciliation_status,
-            resolution_action, resolution_notes, created_by
-          ) VALUES (
-            $1, 'BANK_STATEMENT_CSV', $2, $3, $4,
-            'DEBIT', $5, $6, 'AMOUNT_MISMATCH',
-            'MANUAL_REVIEW_REQUIRED', $7, $8
-          );`,
-          [
-            batch.organization_id,
-            bankItem.bankUtr || cleanRef,
-            bankItem.transactionDate || new Date().toISOString().slice(0, 10),
-            bankAmount,
-            matchedItem.payout_id,
-            batchId,
-            `Expected ₹${expectedAmount.toFixed(2)}, got ₹${bankAmount.toFixed(2)}`,
-            auth.userId,
-          ]
+      // 2. Verify organization ownership inside the locked batch row (fail closed, no foreign leak)
+      if (batch.organization_id !== organizationId) {
+        throw new ForbiddenError(
+          'Cross-organization batch reconciliation is prohibited',
+          'CROSS_ORG_ACCESS_DENIED'
         );
-        continue;
       }
 
-      // Check for Idempotent Replay: Item already SETTLED or PAID
-      if (matchedItem.status === 'SETTLED' || matchedItem.status === 'PAID') {
-        processedResults.push({
-          itemId: matchedItem.id,
-          customerReference: cleanRef,
-          farmerCode: matchedItem.farmer_code,
-          expectedAmount,
-          bankAmount,
-          bankUtr: matchedItem.bank_utr || bankItem.bankUtr,
-          status: 'PAID',
-          message: 'Item already settled in ledger (idempotent replay)',
-          isIdempotentReplay: true,
-        });
-        continue;
+      // 3. Load and lock all batch items and linked payouts deterministically
+      const itemsRes = await client.query<LockedBatchItemRow>(
+        `SELECT
+           bi.id AS item_id,
+           bi.batch_id,
+           bi.payout_id,
+           bi.customer_id,
+           bi.amount,
+           bi.status AS item_status,
+           bi.beneficiary_reference,
+           bi.bank_utr,
+           bi.bank_reference_number,
+           c.farmer_code,
+           c.full_name AS customer_name,
+           c.bank_account_mask,
+           cp.center_id,
+           cp.status AS payout_status,
+           cp.reference_number AS payout_reference_number,
+           cp.currency AS payout_currency,
+           cp.payment_method AS payout_payment_method
+         FROM payment_batch_items bi
+         JOIN customers c
+           ON c.id = bi.customer_id
+          AND c.organization_id = $2
+         JOIN customer_payouts cp
+           ON cp.id = bi.payout_id
+          AND cp.organization_id = $2
+         WHERE bi.batch_id = $1
+         ORDER BY bi.created_at ASC, bi.id ASC
+         FOR UPDATE OF bi, cp;`,
+        [batchId, organizationId]
+      );
+
+      const batchItems = itemsRes.rows;
+
+      // 4. Parse bank response items
+      let bankItems: UnionBankReconciliationItemResult[];
+      if (typeof bankResponseContentOrItems === 'string') {
+        const summary = UnionBankResponseParser.parseResponse(
+          bankResponseContentOrItems,
+          batch.bank_batch_reference || batch.batch_number
+        );
+        bankItems = summary.items;
+      } else if (Array.isArray(bankResponseContentOrItems)) {
+        bankItems = bankResponseContentOrItems;
+      } else {
+        throw new BadRequestError('Invalid Union Bank response payload', 'INVALID_BANK_RESPONSE');
       }
 
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
+      const processedResults: ReconciliationItemResult[] = [];
+      const exceptions: ReconciliationException[] = [];
 
-        if (bankItem.status === 'PAID') {
-          // Authoritatively settled by Union Bank
-          // Post double-entry ledger debit atomically via payoutService
-          const utr = bankItem.bankUtr || `UBI-UTR-${batch.batch_number}-${matchedItem.farmer_code}`;
-          await payoutService.confirmPayout(matchedItem.payout_id, auth, utr);
+      // 5. Process each bank response line inside the shared batch transaction
+      for (let idx = 0; idx < bankItems.length; idx++) {
+        const bankItem = bankItems[idx]!;
+        const cleanRef = normalizeRef(bankItem.customerReference);
+        const rawBankAmt = typeof bankItem.amount === 'number' ? bankItem.amount : Number(bankItem.amount);
+        const hasFiniteAmount = Number.isFinite(rawBankAmt);
+        const safeBankAmtForAudit = hasFiniteAmount ? rawBankAmt : 0;
 
-          await client.query(
-            `UPDATE payment_batch_items
-             SET status = 'PAID', bank_utr = $1, settled_at = NOW(), updated_at = NOW()
-             WHERE id = $2;`,
-            [utr, matchedItem.id]
-          );
+        // Find all distinct matching batch items so ambiguous references fail cleanly
+        const matchingItems = cleanRef.length === 0
+          ? []
+          : batchItems.filter((item) => {
+              const candidates = [
+                normalizeRef(item.item_id),
+                normalizeRef(item.beneficiary_reference),
+                normalizeRef(item.farmer_code),
+                normalizeRef(item.bank_utr),
+                normalizeRef(item.bank_reference_number),
+                normalizeRef(item.payout_reference_number),
+                normalizeRef(`REF-${batch.batch_number}-${item.farmer_code}`),
+              ];
+              return candidates.some((candidate) => candidate.length > 0 && candidate === cleanRef);
+            });
 
-          // Record clean match in payment_reconciliation_records
+        if (matchingItems.length === 0) {
+          const auditRef = cleanRef || normalizeRef(bankItem.bankUtr) || `UNMATCHED-${idx}`;
+          exceptions.push({
+            reference: auditRef,
+            reason: 'NO_MATCHING_BATCH_ITEM: Reference not found in payment batch',
+          });
           await client.query(
             `INSERT INTO payment_reconciliation_records (
-              organization_id, source, external_reference, transaction_date, amount,
-              direction, matched_payout_id, matched_batch_id, reconciliation_status, created_by
-            ) VALUES (
-              $1, 'BANK_STATEMENT_CSV', $2, $3, $4,
-              'DEBIT', $5, $6, 'MATCHED', $7
-            );`,
+               organization_id, source, external_reference, transaction_date, amount,
+               direction, matched_batch_id, reconciliation_status, resolution_notes, raw_details, created_by
+             ) VALUES (
+               $1, 'BANK_STATEMENT_CSV', $2, $3, $4,
+               $5, $6, 'UNMATCHED', $7, $8, $9
+             );`,
             [
-              batch.organization_id,
-              utr,
-              bankItem.transactionDate || new Date().toISOString().slice(0, 10),
-              bankAmount,
-              matchedItem.payout_id,
+              organizationId,
+              auditRef,
+              toIsoDateOnly(bankItem.transactionDate),
+              safeBankAmtForAudit,
+              bankItem.status === 'REVERSED' ? 'CREDIT' : 'DEBIT',
               batchId,
+              `Unmatched Union Bank reference '${auditRef}'`,
+              JSON.stringify(bankItem),
               auth.userId,
             ]
           );
-
-          processedResults.push({
-            itemId: matchedItem.id,
-            customerReference: cleanRef,
-            farmerCode: matchedItem.farmer_code,
-            expectedAmount,
-            bankAmount,
-            bankUtr: utr,
-            status: 'PAID',
-            message: 'Successfully settled and posted to ledger',
-            isIdempotentReplay: false,
-          });
-        } else if (bankItem.status === 'FAILED') {
-          // Bank rejected payout item -> Does NOT deduct farmer balance
-          await payoutService.failPayout(
-            matchedItem.payout_id,
-            auth,
-            bankItem.failureReason || 'Rejected by Union Bank clearing house'
-          );
-
-          await client.query(
-            `UPDATE payment_batch_items
-             SET status = 'FAILED', failure_reason = $1, updated_at = NOW()
-             WHERE id = $2;`,
-            [bankItem.failureReason || 'Bank transfer rejected', matchedItem.id]
-          );
-
-          processedResults.push({
-            itemId: matchedItem.id,
-            customerReference: cleanRef,
-            farmerCode: matchedItem.farmer_code,
-            expectedAmount,
-            bankAmount,
-            status: 'FAILED',
-            message: `Bank transfer failed: ${bankItem.failureReason || 'Rejected'}`,
-            isIdempotentReplay: false,
-          });
-        } else if (bankItem.status === 'REVERSED') {
-          // Bank reversed a previously cleared payout -> Post compensating reversal credit
-          await client.query(
-            `UPDATE payment_batch_items
-             SET status = 'REVERSED', failure_reason = 'Payment returned by clearing house', updated_at = NOW()
-             WHERE id = $1;`,
-            [matchedItem.id]
-          );
-
-          // Create Compensating Reversal in payment_adjustments & ledger
-          const reversalId = crypto.randomUUID();
-          await client.query(
-            `INSERT INTO payment_adjustments (
-              id, organization_id, center_id, customer_id, payout_id,
-              adjustment_type, amount, reason, approved_by, created_at
-            ) VALUES (
-              $1, $2, $3, $4, $5,
-              'REVERSAL_CREDIT', $6, $7, $8, NOW()
-            );`,
-            [
-              reversalId,
-              batch.organization_id,
-              matchedItem.center_id,
-              matchedItem.customer_id,
-              matchedItem.payout_id,
-              expectedAmount,
-              `Compensating reversal for returned payout ${matchedItem.payout_id}. UTR: ${bankItem.bankUtr || 'N/A'}`,
-              auth.userId,
-            ]
-          );
-
-          // Credit back the farmer's ledger account
-          await client.query(
-            `UPDATE customer_ledger_accounts
-             SET current_balance = current_balance + $1, last_transaction_at = NOW(), updated_at = NOW()
-             WHERE customer_id = $2;`,
-            [expectedAmount, matchedItem.customer_id]
-          );
-
-          await client.query(
-            `INSERT INTO ledger_transactions (
-              id, organization_id, center_id, customer_id, transaction_type,
-              direction, amount, balance_after, reference_entity, reference_id,
-              description, idempotency_key, created_by
-            ) SELECT 
-              $1, $2, $3, $4, 'PAYOUT_REVERSAL_CREDIT',
-              'CREDIT', $5, cla.current_balance, 'CUSTOMER_PAYOUT', $6,
-              $7, $8, $9
-            FROM customer_ledger_accounts cla WHERE cla.customer_id = $4;`,
-            [
-              reversalId,
-              batch.organization_id,
-              matchedItem.center_id,
-              matchedItem.customer_id,
-              expectedAmount,
-              matchedItem.payout_id,
-              `Compensating reversal credit for returned payout ${matchedItem.payout_id}`,
-              `REV-${reversalId}-${Date.now()}`,
-              auth.userId,
-            ]
-          );
-
-          processedResults.push({
-            itemId: matchedItem.id,
-            customerReference: cleanRef,
-            farmerCode: matchedItem.farmer_code,
-            expectedAmount,
-            bankAmount,
-            bankUtr: bankItem.bankUtr,
-            status: 'REVERSED',
-            message: 'Compensating ledger reversal credit applied successfully',
-            isIdempotentReplay: false,
-          });
-        } else {
-          // UNKNOWN status
-          await client.query(
-            `UPDATE payment_batch_items
-             SET status = 'UNKNOWN', bank_status_description = $1, updated_at = NOW()
-             WHERE id = $2;`,
-            [bankItem.failureReason || 'Awaiting bank clearance', matchedItem.id]
-          );
-
-          processedResults.push({
-            itemId: matchedItem.id,
-            customerReference: cleanRef,
-            farmerCode: matchedItem.farmer_code,
-            expectedAmount,
-            bankAmount,
-            status: 'UNKNOWN',
-            message: 'Status remains unknown, manual inquiry or statement check required',
-            isIdempotentReplay: false,
-          });
+          continue;
         }
 
-        await client.query('COMMIT');
-      } catch (err: any) {
-        await client.query('ROLLBACK');
-        exceptions.push({
-          reference: cleanRef,
-          reason: `Reconciliation transaction failed: ${err.message}`,
-        });
-      } finally {
-        client.release();
+        if (matchingItems.length > 1) {
+          exceptions.push({
+            reference: cleanRef,
+            reason: `AMBIGUOUS_REFERENCE: Reference '${cleanRef}' matched ${matchingItems.length} distinct batch items`,
+          });
+          await client.query(
+            `INSERT INTO payment_reconciliation_records (
+               organization_id, source, external_reference, transaction_date, amount,
+               direction, matched_batch_id, reconciliation_status, resolution_action, resolution_notes, raw_details, created_by
+             ) VALUES (
+               $1, 'BANK_STATEMENT_CSV', $2, $3, $4,
+               $5, $6, 'MANUAL_REVIEW_REQUIRED', 'AMBIGUOUS_REFERENCE', $7, $8, $9
+             );`,
+            [
+              organizationId,
+              cleanRef,
+              toIsoDateOnly(bankItem.transactionDate),
+              safeBankAmtForAudit,
+              bankItem.status === 'REVERSED' ? 'CREDIT' : 'DEBIT',
+              batchId,
+              `Reference '${cleanRef}' matched ${matchingItems.length} items — manual review required`,
+              JSON.stringify(bankItem),
+              auth.userId,
+            ]
+          );
+          continue;
+        }
+
+        const matchedItem = matchingItems[0]!;
+        const expectedAmount = Number(matchedItem.amount);
+        const expectedPaise = Math.round(expectedAmount * 100);
+        const bankPaise = hasFiniteAmount ? Math.round(rawBankAmt * 100) : NaN;
+
+        // Explicit zero-safe paise amount validation:
+        // - PAID & REVERSED require exact positive match against expected amount
+        // - FAILED rejects negative/NaN or non-zero mismatched amounts
+        const amountMismatch =
+          bankItem.status === 'PAID' || bankItem.status === 'REVERSED'
+            ? !hasFiniteAmount || bankPaise <= 0 || bankPaise !== expectedPaise
+            : bankItem.status === 'FAILED'
+              ? !hasFiniteAmount || bankPaise < 0 || (bankPaise > 0 && bankPaise !== expectedPaise)
+              : false;
+
+        if (amountMismatch) {
+          const auditRef = normalizeRef(bankItem.bankUtr) || cleanRef;
+          const displayBankAmt = hasFiniteAmount ? rawBankAmt.toFixed(2) : 'NaN';
+          exceptions.push({
+            reference: cleanRef,
+            reason: `AMOUNT_MISMATCH: Expected ₹${expectedAmount.toFixed(2)}, bank reported ₹${displayBankAmt}`,
+          });
+          await client.query(
+            `INSERT INTO payment_reconciliation_records (
+               organization_id, source, external_reference, transaction_date, amount,
+               direction, matched_payout_id, matched_batch_id, reconciliation_status,
+               resolution_action, resolution_notes, raw_details, created_by
+             ) VALUES (
+               $1, 'BANK_STATEMENT_CSV', $2, $3, $4,
+               $5, $6, $7, 'AMOUNT_MISMATCH',
+               'HOLD_FOR_TREASURY_REVIEW', $8, $9, $10
+             );`,
+            [
+              organizationId,
+              auditRef,
+              toIsoDateOnly(bankItem.transactionDate),
+              safeBankAmtForAudit,
+              bankItem.status === 'REVERSED' ? 'CREDIT' : 'DEBIT',
+              matchedItem.payout_id,
+              batchId,
+              `Amount mismatch for ${cleanRef}: expected ₹${expectedAmount.toFixed(2)}, bank reported ₹${displayBankAmt}`,
+              JSON.stringify(bankItem),
+              auth.userId,
+            ]
+          );
+          continue;
+        }
+
+        // Isolate per-item database mutations inside a SAVEPOINT so expected domain errors
+        // roll back cleanly without aborting sibling items, while infrastructure failures
+        // bubble up and roll back the entire batch transaction.
+        const spName = `sp_ub_item_${idx}`;
+        const pendingNotificationsForItem: DeferredNotification[] = [];
+
+        await client.query(`SAVEPOINT ${spName}`);
+        try {
+          if (bankItem.status === 'PAID') {
+            const utr =
+              normalizeRef(bankItem.bankUtr) ||
+              normalizeRef(bankItem.bankReference) ||
+              `UBI-UTR-${batch.batch_number}-${matchedItem.farmer_code}`;
+            const settledDate = parseSettledDate(bankItem.transactionDate);
+
+            const settlement = await payoutService.confirmPayoutInTransaction(
+              client,
+              matchedItem.payout_id,
+              auth,
+              organizationId,
+              utr,
+              settledDate
+            );
+
+            const isReplay = Boolean(settlement?.isIdempotentReplay);
+
+            // Preserve original beneficiary_reference while marking batch item PAID and storing bank_utr
+            await client.query(
+              `UPDATE payment_batch_items
+               SET status = 'PAID',
+                   beneficiary_reference = COALESCE($1, beneficiary_reference),
+                   bank_utr = COALESCE(bank_utr, $2),
+                   bank_reference_number = COALESCE($3, bank_reference_number, $2),
+                   bank_status_code = 'PAID',
+                   bank_status_description = COALESCE($4, bank_status_description, 'Settled by Union Bank'),
+                   settled_at = COALESCE(settled_at, $5),
+                   updated_at = NOW()
+               WHERE id = $6
+                 AND batch_id = $7;`,
+              [
+                matchedItem.beneficiary_reference,
+                settlement?.referenceNumber || utr,
+                normalizeRef(bankItem.bankReference) || utr,
+                normalizeRef(bankItem.failureReason) || null,
+                settledDate,
+                matchedItem.item_id,
+                batchId,
+              ]
+            );
+
+            if (!isReplay) {
+              await client.query(
+                `INSERT INTO payment_reconciliation_records (
+                   organization_id, source, external_reference, transaction_date, amount,
+                   direction, matched_payout_id, matched_batch_id, reconciliation_status,
+                   resolution_action, resolution_notes, raw_details, created_by
+                 ) VALUES (
+                   $1, 'BANK_STATEMENT_CSV', $2, $3, $4,
+                   'DEBIT', $5, $6, 'MATCHED',
+                   'UNION_BANK_PAID', $7, $8, $9
+                 )
+                 ON CONFLICT (organization_id, matched_payout_id, resolution_action, external_reference)
+                 WHERE reconciliation_status = 'MATCHED'
+                   AND matched_payout_id IS NOT NULL
+                   AND resolution_action IS NOT NULL
+                   AND external_reference IS NOT NULL
+                 DO NOTHING;`,
+                [
+                  organizationId,
+                  settlement?.referenceNumber || utr,
+                  toIsoDateOnly(bankItem.transactionDate),
+                  expectedAmount,
+                  matchedItem.payout_id,
+                  batchId,
+                  `Settled Union Bank payout ${matchedItem.payout_id} with UTR ${settlement?.referenceNumber || utr}`,
+                  JSON.stringify(bankItem),
+                  auth.userId,
+                ]
+              );
+
+              pendingNotificationsForItem.push({
+                organizationId,
+                centerId: matchedItem.center_id,
+                customerId: matchedItem.customer_id,
+                eventType: NotificationEventType.PAYMENT_SETTLED,
+                eventId: `evt_payout_settled_${matchedItem.payout_id}`,
+                idempotencyKey: `notif_payout_${matchedItem.payout_id}`,
+                metadata: {
+                  payoutId: matchedItem.payout_id,
+                  amount: expectedAmount,
+                  currency: matchedItem.payout_currency || 'INR',
+                  paymentMethod: matchedItem.payout_payment_method || 'BANK_TRANSFER',
+                  referenceNumber: settlement?.referenceNumber || utr,
+                  bankAccountMask: matchedItem.bank_account_mask || 'XXXX-XXXX-XXXX',
+                  settledDate: settledDate.toLocaleDateString('en-GB'),
+                },
+              });
+            }
+
+            matchedItem.item_status = 'PAID';
+            matchedItem.payout_status = 'SETTLED';
+            matchedItem.payout_reference_number = settlement?.referenceNumber || utr;
+            matchedItem.bank_utr = matchedItem.bank_utr || settlement?.referenceNumber || utr;
+
+            processedResults.push({
+              itemId: matchedItem.item_id,
+              customerReference: cleanRef,
+              farmerCode: matchedItem.farmer_code,
+              expectedAmount,
+              bankAmount: rawBankAmt,
+              bankUtr: matchedItem.bank_utr || utr,
+              status: 'PAID',
+              message: isReplay
+                ? 'Item already settled in ledger (idempotent replay)'
+                : 'Successfully settled and posted to ledger',
+              isIdempotentReplay: isReplay,
+            });
+          } else if (bankItem.status === 'FAILED') {
+            const failureReason =
+              normalizeRef(bankItem.failureReason) || 'Rejected by Union Bank clearing house';
+            const bankRef =
+              normalizeRef(bankItem.bankUtr) || normalizeRef(bankItem.bankReference) || cleanRef;
+
+            const failResult = await payoutService.failPayoutInTransaction(
+              client,
+              matchedItem.payout_id,
+              auth,
+              organizationId,
+              failureReason
+            );
+            const isReplay = Boolean(failResult?.isIdempotentReplay);
+
+            await client.query(
+              `UPDATE payment_batch_items
+               SET status = 'FAILED',
+                   bank_utr = COALESCE(bank_utr, $1),
+                   bank_status_code = 'FAILED',
+                   bank_status_description = $2,
+                   failure_reason = $2,
+                   updated_at = NOW()
+               WHERE id = $3
+                 AND batch_id = $4;`,
+              [normalizeRef(bankItem.bankUtr) || null, failureReason, matchedItem.item_id, batchId]
+            );
+
+            if (!isReplay) {
+              await client.query(
+                `INSERT INTO payment_reconciliation_records (
+                   organization_id, source, external_reference, transaction_date, amount,
+                   direction, matched_payout_id, matched_batch_id, reconciliation_status,
+                   resolution_action, resolution_notes, raw_details, created_by
+                 ) VALUES (
+                   $1, 'BANK_STATEMENT_CSV', $2, $3, $4,
+                   'DEBIT', $5, $6, 'MATCHED',
+                   'UNION_BANK_FAILED', $7, $8, $9
+                 )
+                 ON CONFLICT (organization_id, matched_payout_id, resolution_action, external_reference)
+                 WHERE reconciliation_status = 'MATCHED'
+                   AND matched_payout_id IS NOT NULL
+                   AND resolution_action IS NOT NULL
+                   AND external_reference IS NOT NULL
+                 DO NOTHING;`,
+                [
+                  organizationId,
+                  bankRef,
+                  toIsoDateOnly(bankItem.transactionDate),
+                  hasFiniteAmount ? rawBankAmt : expectedAmount,
+                  matchedItem.payout_id,
+                  batchId,
+                  `Union Bank transfer failed: ${failureReason}`,
+                  JSON.stringify(bankItem),
+                  auth.userId,
+                ]
+              );
+
+              pendingNotificationsForItem.push({
+                organizationId,
+                centerId: matchedItem.center_id,
+                customerId: matchedItem.customer_id,
+                eventType: NotificationEventType.PAYMENT_FAILED,
+                eventId: `evt_payout_failed_${matchedItem.payout_id}`,
+                idempotencyKey: `notif_payout_failed_${matchedItem.payout_id}`,
+                metadata: {
+                  payoutId: matchedItem.payout_id,
+                  amount: expectedAmount,
+                  currency: matchedItem.payout_currency || 'INR',
+                  failureReason,
+                },
+              });
+            }
+
+            matchedItem.item_status = 'FAILED';
+            matchedItem.payout_status = 'FAILED';
+
+            processedResults.push({
+              itemId: matchedItem.item_id,
+              customerReference: cleanRef,
+              farmerCode: matchedItem.farmer_code,
+              expectedAmount,
+              bankAmount: safeBankAmtForAudit,
+              bankUtr: normalizeRef(bankItem.bankUtr) || undefined,
+              status: 'FAILED',
+              message: isReplay
+                ? 'Item already marked FAILED (idempotent replay)'
+                : `Bank transfer failed: ${failureReason}`,
+              isIdempotentReplay: isReplay,
+            });
+          } else if (bankItem.status === 'REVERSED') {
+            const reversalUtr =
+              normalizeRef(bankItem.bankUtr) ||
+              normalizeRef(bankItem.bankReference) ||
+              cleanRef ||
+              'NOUTR';
+            const reversalIdempotencyKey = `REV-${organizationId}-${matchedItem.payout_id}-${reversalUtr}`;
+            const reversalReason =
+              normalizeRef(bankItem.failureReason) ||
+              `Payment returned by clearing house (UTR: ${reversalUtr})`;
+
+            const reversalResult = await payoutService.reversePayoutInTransaction(
+              client,
+              matchedItem.payout_id,
+              auth,
+              organizationId,
+              reversalReason,
+              reversalIdempotencyKey
+            );
+            const isReplay = Boolean(reversalResult?.isIdempotentReplay);
+
+            await client.query(
+              `UPDATE payment_batch_items
+               SET status = 'REVERSED',
+                   bank_utr = COALESCE(bank_utr, $1),
+                   bank_status_code = 'REVERSED',
+                   bank_status_description = $2,
+                   failure_reason = $2,
+                   updated_at = NOW()
+               WHERE id = $3
+                 AND batch_id = $4;`,
+              [normalizeRef(bankItem.bankUtr) || null, reversalReason, matchedItem.item_id, batchId]
+            );
+
+            if (!isReplay) {
+              await client.query(
+                `INSERT INTO payment_reconciliation_records (
+                   organization_id, source, external_reference, transaction_date, amount,
+                   direction, matched_payout_id, matched_batch_id, reconciliation_status,
+                   resolution_action, resolution_notes, raw_details, created_by
+                 ) VALUES (
+                   $1, 'BANK_STATEMENT_CSV', $2, $3, $4,
+                   'CREDIT', $5, $6, 'MATCHED',
+                   'UNION_BANK_REVERSED', $7, $8, $9
+                 )
+                 ON CONFLICT (organization_id, matched_payout_id, resolution_action, external_reference)
+                 WHERE reconciliation_status = 'MATCHED'
+                   AND matched_payout_id IS NOT NULL
+                   AND resolution_action IS NOT NULL
+                   AND external_reference IS NOT NULL
+                 DO NOTHING;`,
+                [
+                  organizationId,
+                  reversalUtr,
+                  toIsoDateOnly(bankItem.transactionDate),
+                  expectedAmount,
+                  matchedItem.payout_id,
+                  batchId,
+                  reversalReason,
+                  JSON.stringify(bankItem),
+                  auth.userId,
+                ]
+              );
+
+              pendingNotificationsForItem.push({
+                organizationId,
+                centerId: matchedItem.center_id,
+                customerId: matchedItem.customer_id,
+                eventType: NotificationEventType.PAYMENT_FAILED,
+                eventId: `evt_payout_reversed_${matchedItem.payout_id}`,
+                idempotencyKey: `notif_payout_reversed_${matchedItem.payout_id}`,
+                metadata: {
+                  payoutId: matchedItem.payout_id,
+                  amount: expectedAmount,
+                  currency: matchedItem.payout_currency || 'INR',
+                  failureReason: reversalReason,
+                  reversalReference: reversalUtr,
+                },
+              });
+            }
+
+            matchedItem.item_status = 'REVERSED';
+            matchedItem.payout_status = 'REVERSED';
+
+            processedResults.push({
+              itemId: matchedItem.item_id,
+              customerReference: cleanRef,
+              farmerCode: matchedItem.farmer_code,
+              expectedAmount,
+              bankAmount: rawBankAmt,
+              bankUtr: reversalUtr,
+              status: 'REVERSED',
+              message: isReplay
+                ? 'Compensating ledger reversal already applied (idempotent replay)'
+                : 'Compensating ledger reversal credit applied successfully',
+              isIdempotentReplay: isReplay,
+            });
+          } else if (bankItem.status === 'PENDING') {
+            if (!['PAID', 'SETTLED', 'FAILED', 'REVERSED'].includes(matchedItem.item_status)) {
+              await client.query(
+                `UPDATE payment_batch_items
+                 SET status = 'PROCESSING',
+                     bank_status_code = 'PENDING',
+                     bank_status_description = $1,
+                     updated_at = NOW()
+                 WHERE id = $2
+                   AND batch_id = $3;`,
+                [normalizeRef(bankItem.failureReason) || 'In clearing at Union Bank', matchedItem.item_id, batchId]
+              );
+              matchedItem.item_status = 'PROCESSING';
+            }
+
+            processedResults.push({
+              itemId: matchedItem.item_id,
+              customerReference: cleanRef,
+              farmerCode: matchedItem.farmer_code,
+              expectedAmount,
+              bankAmount: safeBankAmtForAudit,
+              status: 'PENDING',
+              message: 'Transfer in processing at Union Bank; awaiting final status',
+              isIdempotentReplay: false,
+            });
+          } else {
+            // UNKNOWN status: non-financial audit record only — never debit or credit ledger
+            const unknownDesc = normalizeRef(bankItem.failureReason) || 'Awaiting bank clearance';
+            if (!['PAID', 'SETTLED', 'FAILED', 'REVERSED'].includes(matchedItem.item_status)) {
+              await client.query(
+                `UPDATE payment_batch_items
+                 SET status = 'UNKNOWN',
+                     bank_status_code = 'UNKNOWN',
+                     bank_status_description = $1,
+                     updated_at = NOW()
+                 WHERE id = $2
+                   AND batch_id = $3;`,
+                [unknownDesc, matchedItem.item_id, batchId]
+              );
+              matchedItem.item_status = 'UNKNOWN';
+            }
+
+            await client.query(
+              `INSERT INTO payment_reconciliation_records (
+                 organization_id, source, external_reference, transaction_date, amount,
+                 direction, matched_payout_id, matched_batch_id, reconciliation_status,
+                 resolution_action, resolution_notes, raw_details, created_by
+               ) VALUES (
+                 $1, 'BANK_STATEMENT_CSV', $2, $3, $4,
+                 'DEBIT', $5, $6, 'MANUAL_REVIEW_REQUIRED',
+                 'AWAIT_BANK_STATUS_INQUIRY', $7, $8, $9
+               );`,
+              [
+                organizationId,
+                normalizeRef(bankItem.bankUtr) || cleanRef,
+                toIsoDateOnly(bankItem.transactionDate),
+                safeBankAmtForAudit,
+                matchedItem.payout_id,
+                batchId,
+                unknownDesc,
+                JSON.stringify(bankItem),
+                auth.userId,
+              ]
+            );
+
+            processedResults.push({
+              itemId: matchedItem.item_id,
+              customerReference: cleanRef,
+              farmerCode: matchedItem.farmer_code,
+              expectedAmount,
+              bankAmount: safeBankAmtForAudit,
+              status: 'UNKNOWN',
+              message: 'Status remains unknown, manual inquiry or statement check required',
+              isIdempotentReplay: false,
+            });
+          }
+
+          await client.query(`RELEASE SAVEPOINT ${spName}`);
+          deferredNotifications.push(...pendingNotificationsForItem);
+        } catch (itemErr: any) {
+          try {
+            await client.query(`ROLLBACK TO SAVEPOINT ${spName}`);
+            await client.query(`RELEASE SAVEPOINT ${spName}`);
+          } catch (rollbackErr: any) {
+            logger.error(
+              { error: rollbackErr?.message, originalError: itemErr?.message, batchId, ref: cleanRef },
+              'Failed to rollback reconciliation item savepoint; aborting batch transaction'
+            );
+            throw itemErr;
+          }
+
+          if (isExpectedItemBusinessError(itemErr)) {
+            logger.warn(
+              { error: itemErr.message, code: (itemErr as AppError).code, payoutId: matchedItem.payout_id, batchId, ref: cleanRef },
+              'Reconciliation item rejected and rolled back to savepoint'
+            );
+
+            const isConflict =
+              (itemErr as AppError)?.code === 'CONFLICTING_UTR_REFERENCE' ||
+              (itemErr as AppError)?.code === 'CONFLICTING_REVERSAL_REFERENCE' ||
+              (typeof itemErr?.message === 'string' &&
+                (itemErr.message.includes('CONFLICTING_UTR_REFERENCE') ||
+                  itemErr.message.includes('CONFLICTING_REVERSAL_REFERENCE')));
+
+            if (isConflict) {
+              await client.query(
+                `INSERT INTO payment_reconciliation_records (
+                   organization_id, source, external_reference, transaction_date, amount,
+                   direction, matched_payout_id, matched_batch_id, reconciliation_status,
+                   resolution_action, resolution_notes, raw_details, created_by
+                 ) VALUES (
+                   $1, 'BANK_STATEMENT_CSV', $2, $3, $4,
+                   $5, $6, $7, 'MANUAL_REVIEW_REQUIRED',
+                   'CONFLICT_REQUIRES_MANUAL_REVIEW', $8, $9, $10
+                 );`,
+                [
+                  organizationId,
+                  normalizeRef(bankItem.bankUtr) || normalizeRef(bankItem.bankReference) || cleanRef,
+                  toIsoDateOnly(bankItem.transactionDate),
+                  safeBankAmtForAudit,
+                  bankItem.status === 'REVERSED' ? 'CREDIT' : 'DEBIT',
+                  matchedItem.payout_id,
+                  batchId,
+                  itemErr.message,
+                  JSON.stringify(bankItem),
+                  auth.userId,
+                ]
+              );
+            }
+
+            exceptions.push({
+              reference: cleanRef,
+              reason: itemErr.message,
+            });
+            continue;
+          }
+
+          // Unexpected / infrastructure / database error: roll back the entire batch atomically
+          logger.error(
+            { error: itemErr?.message, code: itemErr?.code, payoutId: matchedItem.payout_id, batchId, ref: cleanRef },
+            'Unexpected DB/infrastructure error in reconciliation; rolling back entire batch transaction'
+          );
+          throw itemErr;
+        }
       }
-    }
 
-    // 5. Update Payment Batch Aggregates
-    const statsRes = await query(
-      `SELECT 
-        COUNT(id)::int as total,
-        COUNT(CASE WHEN status IN ('PAID', 'SETTLED') THEN 1 END)::int as successful_count,
-        COALESCE(SUM(CASE WHEN status IN ('PAID', 'SETTLED') THEN amount ELSE 0 END), 0)::numeric(12,2) as successful_amount,
-        COUNT(CASE WHEN status = 'FAILED' THEN 1 END)::int as failed_count,
-        COALESCE(SUM(CASE WHEN status = 'FAILED' THEN amount ELSE 0 END), 0)::numeric(12,2) as failed_amount,
-        COUNT(CASE WHEN status = 'REVERSED' THEN 1 END)::int as reversed_count,
-        COUNT(CASE WHEN status = 'UNKNOWN' THEN 1 END)::int as unknown_count,
-        COUNT(CASE WHEN status IN ('PENDING', 'SUBMITTED', 'SUBMITTED_TO_BANK', 'PROCESSING') THEN 1 END)::int as pending_count
-       FROM payment_batch_items
-       WHERE batch_id = $1;`,
-      [batchId]
-    );
+      // 6. Recompute final batch aggregates from canonical item rows INSIDE the same transaction
+      const agg = await recomputeBatchAggregatesInTransaction(client, batchId, organizationId);
 
-    const stats = statsRes.rows[0];
-    const total = Number(stats.total);
-    const success = Number(stats.successful_count);
-    const failed = Number(stats.failed_count);
-    const reversed = Number(stats.reversed_count);
-    const unknown = Number(stats.unknown_count);
-    const pending = Number(stats.pending_count);
-
-    let batchStatus = 'PROCESSING';
-    let reconStatus = 'PARTIALLY_RECONCILED';
-
-    if (success === total) {
-      batchStatus = 'PAID';
-      reconStatus = 'FULLY_RECONCILED';
-    } else if (failed === total) {
-      batchStatus = 'FAILED';
-      reconStatus = 'FULLY_RECONCILED';
-    } else if (success > 0 && pending === 0 && unknown === 0) {
-      batchStatus = 'PARTIALLY_PAID';
-      reconStatus = 'FULLY_RECONCILED';
-    } else if (unknown > 0) {
-      batchStatus = 'UNKNOWN';
-    }
-
-    await query(
-      `UPDATE payment_batches
-       SET status = $1,
-           reconciliation_status = $2,
-           successful_count = $3,
-           successful_amount = $4,
-           failed_count = $5,
-           failed_amount = $6,
-           completed_at = CASE WHEN $7 = 0 THEN NOW() ELSE completed_at END,
-           updated_at = NOW()
-       WHERE id = $8;`,
-      [
-        batchStatus,
-        reconStatus,
-        success,
-        stats.successful_amount,
-        failed,
-        stats.failed_amount,
-        pending,
+      return {
         batchId,
-      ]
-    );
+        batchStatus: agg.batchStatus,
+        reconciliationStatus: agg.reconciliationStatus,
+        totalBeneficiaries: agg.total,
+        paidCount: agg.successfulCount,
+        successfulCount: agg.successfulCount,
+        failedCount: agg.failedCount,
+        reversedCount: agg.reversedCount,
+        unknownCount: agg.unknownCount,
+        processedItems: processedResults,
+        exceptions,
+      };
+    });
 
-    return {
-      batchId,
-      batchStatus,
-      reconciliationStatus: reconStatus,
-      totalBeneficiaries: total,
-      paidCount: success,
-      successfulCount: success,
-      failedCount: failed,
-      reversedCount: reversed,
-      unknownCount: unknown,
-      processedItems: processedResults,
-      exceptions,
-    };
+    // 7. Only flush notifications AFTER outer PostgreSQL transaction commits
+    await flushDeferredNotifications(deferredNotifications);
+
+    return txResult;
   }
 }

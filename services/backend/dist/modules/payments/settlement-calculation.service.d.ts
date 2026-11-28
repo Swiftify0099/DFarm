@@ -1,3 +1,4 @@
+import type pg from 'pg';
 import type { AuthContext } from '../../middleware/authenticate.js';
 export interface CalculationPeriodParams {
     organizationId: string;
@@ -73,7 +74,8 @@ export declare class SettlementCalculationService {
      * Calculates farmer milk settlement payables using authoritative posted PostgreSQL ledger entries.
      * Enforces exact DECIMAL/NUMERIC arithmetic and multi-center / multi-tenant isolation.
      */
-    static calculateSettlement(params: CalculationPeriodParams, _auth?: AuthContext): Promise<SettlementCalculationResult>;
+    static calculateSettlement(params: CalculationPeriodParams, _auth?: AuthContext, existingClient?: pg.PoolClient): Promise<SettlementCalculationResult>;
+    private static calculateSettlementWithClient;
     /**
      * Persists an immutable calculation snapshot for an approved payment batch.
      */

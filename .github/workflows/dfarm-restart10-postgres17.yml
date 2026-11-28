@@ -1,0 +1,98 @@
+name: DFarm RESTART-10 PostgreSQL 17 Union Bank & Payment Isolation Gate
+
+on:
+  push:
+    branches:
+      - main
+      - fix/cloudflare-pages-production-deploy
+  pull_request:
+    branches:
+      - main
+      - fix/cloudflare-pages-production-deploy
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dfarm-restart10-pg17-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  restart10-postgres17-reconciliation-gate:
+    name: Real PostgreSQL 17 Union Bank Two-Tenant Financial Isolation Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres_ci_password
+          POSTGRES_DB: dfarm_central
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d dfarm_central"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    env:
+      NODE_ENV: test
+      DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS: "1"
+      REQUIRE_REAL_POSTGRES: "1"
+      TEST_REAL_POSTGRES: "1"
+      TEST_POSTGRES_URL: postgresql://postgres:postgres_ci_password@127.0.0.1:5432/dfarm_central
+      DATABASE_URL: postgresql://postgres:postgres_ci_password@127.0.0.1:5432/dfarm_central
+      CENTRAL_DATABASE_URL: postgresql://postgres:postgres_ci_password@127.0.0.1:5432/dfarm_central
+      DATABASE_PROVISIONER_URL: postgresql://postgres:postgres_ci_password@127.0.0.1:5432/dfarm_central
+      DATABASE_TLS_MODE: disable
+      TENANT_POOL_CONNECTION_TIMEOUT_MS: "5000"
+      JWT_SECRET: restart10_ci_jwt_secret_minimum_64_chars_long_verified_for_tests_012345
+      PAYMENT_WEBHOOK_SECRET: restart10_ci_webhook_secret_minimum_64_chars_verified_for_tests_01234
+      TENANT_DB_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      CREDENTIAL_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Verify Node.js and npm versions
+        run: |
+          node -v
+          npm -v
+          node -e "const major = Number(process.versions.node.split('.')[0]); if (major < 22) throw new Error('Expected Node >= 22, got ' + process.version);"
+          npm_major=$(npm -v | cut -d. -f1)
+          if [ "$npm_major" -lt 10 ]; then echo "Expected npm >= 10, got $(npm -v)"; exit 1; fi
+
+      - name: Verify PostgreSQL 17 connectivity & server version
+        run: |
+          set -euo pipefail
+          PGPASSWORD=postgres_ci_password psql -h 127.0.0.1 -U postgres -d dfarm_central -c "SELECT version();"
+          node -e "import('pg').then(async ({default:pg})=>{const c=new pg.Client({connectionString:process.env.TEST_POSTGRES_URL});await c.connect();const r=await c.query('SHOW server_version');console.log('PG version:',r.rows[0].server_version);await c.end();})"
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build database package & backend workspace
+        run: |
+          set -euo pipefail
+          npm run build -w @dfarm/database
+          npm run build:backend
+
+      - name: Validate migration catalog & database package tests
+        run: npm run db:validate && npm run db:test
+
+      - name: Bootstrap disposable PostgreSQL 17 cluster auth roles
+        run: node scripts/ci-pg17-bootstrap.js
+
+      - name: Execute RESTART-10 Union Bank PostgreSQL 17 Isolation Gate (zero skips, fail-closed)
+        run: node scripts/ci-run-restart10-pg17.js

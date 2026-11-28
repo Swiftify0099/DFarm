@@ -5,6 +5,8 @@
 
 import { BadRequestError, AppError } from '../../../shared/errors/app-error.js';
 import { logger } from '../../../shared/logger/index.js';
+import { UnionBankValidator } from './UnionBankValidator.js';
+import { maskAccountNumber } from '../../../modules/payments/tenant-payment-context.js';
 import type {
   UnionBankConfig,
   UnionBankEnvironment,
@@ -28,7 +30,8 @@ export class UnionBankApiClient {
       clientId: process.env['UNION_BANK_CLIENT_ID'] || customConfig?.clientId,
       clientSecret: process.env['UNION_BANK_CLIENT_SECRET'] || customConfig?.clientSecret,
       baseUrl: process.env['UNION_BANK_BASE_URL'] || customConfig?.baseUrl,
-      debitAccountNumber: process.env['UNION_BANK_DEBIT_ACCOUNT'] || customConfig?.debitAccountNumber,
+      // DF-024: Never bind a global platform debit account across tenant dairies
+      debitAccountNumber: customConfig?.debitAccountNumber,
       encryptionPublicKey: process.env['UNION_BANK_PUBLIC_KEY'] || customConfig?.encryptionPublicKey,
       sftpHost: process.env['UNION_BANK_SFTP_HOST'] || customConfig?.sftpHost,
       ...customConfig,
@@ -39,27 +42,36 @@ export class UnionBankApiClient {
     return this.config.environment;
   }
 
-  public getDebitAccountNumber(): string {
-    return this.config.debitAccountNumber || '00000000000000';
+  public getDebitAccountNumber(overrideDebitAccount?: string): string {
+    const candidate = (overrideDebitAccount || this.config.debitAccountNumber || '').trim();
+    if (!candidate) {
+      throw new BadRequestError(
+        'Dairy Union Bank debit account is not configured. Bank file generation and API submission cannot proceed.',
+        'DAIRY_DEBIT_ACCOUNT_NOT_CONFIGURED'
+      );
+    }
+    return UnionBankValidator.validateAccountNumber(candidate, 'Dairy Union Bank Debit Account');
   }
 
   /**
    * Checks whether the current environment has valid Union Bank production credentials.
    */
-  public isProductionReady(): boolean {
+  public isProductionReady(overrideDebitAccount?: string): boolean {
+    const rawDebit = (overrideDebitAccount || this.config.debitAccountNumber || '').trim();
     return Boolean(
       this.config.environment === 'PRODUCTION' &&
       this.config.corporateId &&
       this.config.clientId &&
       this.config.clientSecret &&
-      this.config.debitAccountNumber
+      rawDebit &&
+      UnionBankValidator.isValidAccountNumber(rawDebit)
     );
   }
 
   /**
    * Submits a payment batch directly to Union Bank API or Host-to-Host connector.
-   * In Production: Enforces real bank credentials. If unconfigured, throws an informative error.
-   * In UAT: Operates in test simulation/sandbox mode.
+   * In Production: Enforces real bank credentials & configured dairy debit account.
+   * In UAT: Operates in test simulation/sandbox mode while still enforcing DF-024 debit validation.
    */
   public async submitBatch(
     payload: UnionBankBatchPayload
@@ -70,8 +82,10 @@ export class UnionBankApiClient {
     submissionTimestamp: string;
     environment: UnionBankEnvironment;
   }> {
+    const validatedDebit = this.getDebitAccountNumber(payload.debitAccountNumber);
+
     if (this.config.environment === 'PRODUCTION') {
-      if (!this.isProductionReady()) {
+      if (!this.isProductionReady(validatedDebit)) {
         throw new BadRequestError(
           'Union Bank of India Production API submission is blocked: Official Union Bank Corporate Banking credentials (Corporate ID, Client ID, Client Secret, Debit Account) are not configured for this dairy cooperative on Render backend secrets. Corporate bank onboarding must be completed before live dispatches can be executed.',
           'UNION_BANK_CREDENTIALS_MISSING'
@@ -88,7 +102,12 @@ export class UnionBankApiClient {
 
       // Production live HTTP request would proceed here via mutual TLS / digital signature
       logger.info(
-        { batchId: payload.batchId, totalAmount: payload.items.reduce((s, i) => s + i.amount, 0) },
+        {
+          batchId: payload.batchId,
+          organizationId: payload.organizationId,
+          debitAccountMask: maskAccountNumber(validatedDebit),
+          totalAmount: payload.items.reduce((s, i) => s + i.amount, 0),
+        },
         'Union Bank live Host-to-Host API transmission initiated'
       );
 

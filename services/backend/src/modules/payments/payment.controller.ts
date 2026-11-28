@@ -1,10 +1,14 @@
 import type { Request, Response, NextFunction } from 'express';
-import { pool } from '../../config/db.js';
 import { payoutService } from './payout.service.js';
 import { receiptService } from './receipt.service.js';
 import { batchService } from './batch.service.js';
 import { ApiResponse } from '../../shared/response/api-response.js';
 import { UnauthorizedError } from '../../shared/errors/app-error.js';
+import {
+  extractTargetOrganizationId,
+  getStrictPaymentTenantDb,
+  resolveOperationalOrganizationId,
+} from './tenant-payment-context.js';
 
 export class PaymentController {
   // Payout Endpoints
@@ -226,7 +230,12 @@ export class PaymentController {
     try {
       if (!req.auth) throw new UnauthorizedError();
       const { batchId } = req.params as { batchId: string };
-      const result = await batchService.submitBatchToUnionBank(batchId, req.body, req.auth);
+      const targetOrganizationId = extractTargetOrganizationId(req);
+      const result = await batchService.submitBatchToUnionBank(
+        batchId,
+        { ...req.body, targetOrganizationId: targetOrganizationId || req.body?.targetOrganizationId },
+        req.auth
+      );
       return ApiResponse.success(res, result, 200);
     } catch (err) {
       next(err);
@@ -237,7 +246,15 @@ export class PaymentController {
     try {
       if (!req.auth) throw new UnauthorizedError();
       const { batchId } = req.params as { batchId: string };
-      const result = await batchService.reconcileBatchWithUnionBank(batchId, req.body?.data || req.body?.items || req.body?.fileContent || req.body, req.auth);
+      const targetOrganizationId = extractTargetOrganizationId(req, 'CROSS_ORG_RECONCILIATION_DENIED');
+      const responsePayload =
+        req.body?.data || req.body?.items || req.body?.fileContent || req.body;
+      const result = await batchService.reconcileBatchWithUnionBank(
+        batchId,
+        responsePayload,
+        req.auth,
+        targetOrganizationId
+      );
       return ApiResponse.success(res, result, 200);
     } catch (err) {
       next(err);
@@ -248,7 +265,8 @@ export class PaymentController {
     try {
       if (!req.auth) throw new UnauthorizedError();
       const { itemId } = req.params as { itemId: string };
-      const result = await batchService.queryBatchItemStatus(itemId, req.auth);
+      const targetOrganizationId = extractTargetOrganizationId(req);
+      const result = await batchService.queryBatchItemStatus(itemId, req.auth, targetOrganizationId);
       return ApiResponse.success(res, result, 200);
     } catch (err) {
       next(err);
@@ -260,7 +278,8 @@ export class PaymentController {
       if (!req.auth) throw new UnauthorizedError();
       const { batchId } = req.params as { batchId: string };
       const { reason } = req.body || {};
-      const result = await batchService.markBatchTimeout(batchId, reason, req.auth);
+      const targetOrganizationId = extractTargetOrganizationId(req);
+      const result = await batchService.markBatchTimeout(batchId, reason, req.auth, targetOrganizationId);
       return ApiResponse.success(res, result, 200);
     } catch (err) {
       next(err);
@@ -292,11 +311,12 @@ export class PaymentController {
   public static async getFarmerPaymentOverview(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
     try {
       if (!req.auth) throw new UnauthorizedError();
-      const orgId = req.auth.organizationId;
+      const targetOrganizationId = extractTargetOrganizationId(req);
+      const orgId = resolveOperationalOrganizationId(req.auth, targetOrganizationId);
+      const tenantDb = await getStrictPaymentTenantDb(orgId);
       const centerId = req.query['centerId'] as string | undefined;
 
-      const client = await pool.connect();
-      try {
+      const data = await tenantDb.withTransaction(async (client) => {
         let payableQuery = `
           SELECT COALESCE(SUM(current_balance), 0.00)::numeric(12,2) as total_payable
           FROM customer_ledger_accounts cla
@@ -340,15 +360,14 @@ export class PaymentController {
           unreconciledQuery += `;`;
         }
 
-        const [payableRes, paidRes, pendingRes, failedRes, unreconciledRes] = await Promise.all([
-          client.query(payableQuery, queryParams),
-          client.query(paidQuery, queryParams),
-          client.query(pendingQuery, queryParams),
-          client.query(failedQuery, queryParams),
-          client.query(unreconciledQuery, queryParams),
-        ]);
+        // Execute sequentially on the shared transaction client
+        const payableRes = await client.query(payableQuery, queryParams);
+        const paidRes = await client.query(paidQuery, queryParams);
+        const pendingRes = await client.query(pendingQuery, queryParams);
+        const failedRes = await client.query(failedQuery, queryParams);
+        const unreconciledRes = await client.query(unreconciledQuery, queryParams);
 
-        const data = {
+        return {
           totalPayableAmount: Number(payableRes.rows[0].total_payable),
           totalPaidAmount: Number(paidRes.rows[0].total_paid),
           paidCount: Number(paidRes.rows[0].paid_count),
@@ -359,11 +378,9 @@ export class PaymentController {
           unreconciledAmount: Number(unreconciledRes.rows[0].unreconciled_amount),
           unreconciledCount: Number(unreconciledRes.rows[0].unreconciled_count),
         };
+      });
 
-        return ApiResponse.success(res, data, 200);
-      } finally {
-        client.release();
-      }
+      return ApiResponse.success(res, data, 200);
     } catch (err) {
       next(err);
     }
@@ -419,7 +436,15 @@ export class PaymentController {
       if (!req.auth) throw new UnauthorizedError();
       const { batchId } = req.params as { batchId: string };
       const format = (req.query['format'] as string) || 'NEFT_STANDARD';
-      const result = await batchService.exportBatch(batchId, format, req.auth);
+      const targetOrganizationId = extractTargetOrganizationId(req);
+      const debitAccountNumber =
+        typeof req.query['debitAccountNumber'] === 'string' && req.query['debitAccountNumber'].trim().length > 0
+          ? req.query['debitAccountNumber'].trim()
+          : undefined;
+      const result = await batchService.exportBatch(batchId, format, req.auth, {
+        debitAccountNumber,
+        targetOrganizationId,
+      });
       return ApiResponse.success(res, result, 200);
     } catch (err) {
       next(err);

@@ -555,7 +555,6 @@ export const PaymentRegister: React.FC = () => {
                         paymentMethod: 'BANK_TRANSFER',
                         idempotencyKey: idemp,
                         excludeUnverifiedBankDetails: excludeUnverified,
-                        debitAccountNumber: process.env['UNION_BANK_DEBIT_ACCOUNT'] || '00000000000000',
                       })
                     }}
                     isLoading={createBatchMutation.isPending}

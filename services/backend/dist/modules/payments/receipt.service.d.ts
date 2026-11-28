@@ -10,11 +10,12 @@ export interface CreateReceiptParams {
     sourceTransactionId?: string | null;
     idempotencyKey: string;
     notes?: string | null;
+    targetOrganizationId?: string;
 }
 export declare class ReceiptService {
-    createReceipt(params: CreateReceiptParams, auth: AuthContext): Promise<any>;
-    confirmReceipt(receiptId: string, auth: AuthContext, referenceNumber?: string): Promise<any>;
-    getReceiptById(receiptId: string, auth: AuthContext): Promise<{
+    createReceipt(params: CreateReceiptParams, auth: AuthContext, targetOrganizationId?: string | null): Promise<any>;
+    confirmReceipt(receiptId: string, auth: AuthContext, referenceNumber?: string, targetOrganizationId?: string | null): Promise<any>;
+    getReceiptById(receiptId: string, auth: AuthContext, targetOrganizationId?: string | null): Promise<{
         id: any;
         receiptNumber: any;
         organizationId: any;

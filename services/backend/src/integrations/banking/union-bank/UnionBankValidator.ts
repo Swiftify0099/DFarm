@@ -5,17 +5,20 @@
 
 import { BadRequestError } from '../../../shared/errors/app-error.js';
 import type { UnionBankPayoutItem } from './types.js';
+import { maskAccountNumber } from '../../../modules/payments/tenant-payment-context.js';
 
 export class UnionBankValidator {
   private static readonly IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
   private static readonly ACCOUNT_REGEX = /^[0-9]{9,18}$/;
+  private static readonly ALL_ZERO_REGEX = /^0+$/;
 
   public static isValidIfsc(ifsc: string): boolean {
     return this.IFSC_REGEX.test((ifsc || '').trim().toUpperCase());
   }
 
   public static isValidAccountNumber(account: string): boolean {
-    return this.ACCOUNT_REGEX.test((account || '').trim().replace(/[^0-9]/g, ''));
+    const clean = (account || '').trim().replace(/[^0-9]/g, '');
+    return this.ACCOUNT_REGEX.test(clean) && !this.ALL_ZERO_REGEX.test(clean);
   }
 
   /**
@@ -33,13 +36,26 @@ export class UnionBankValidator {
   }
 
   /**
-   * Validates Indian bank account number (9 to 18 numeric digits).
+   * Validates Indian bank account number (9 to 18 numeric digits, never all-zero).
+   * Account digits are masked in any thrown error message.
    */
   public static validateAccountNumber(account: string, contextName?: string): string {
     const clean = (account || '').trim().replace(/[^0-9]/g, '');
+    if (!clean) {
+      throw new BadRequestError(
+        `Bank account number is not configured${contextName ? ` for ${contextName}` : ''}.`,
+        contextName?.toLowerCase().includes('debit') ? 'DAIRY_DEBIT_ACCOUNT_NOT_CONFIGURED' : 'INVALID_BANK_ACCOUNT'
+      );
+    }
+    if (this.ALL_ZERO_REGEX.test(clean)) {
+      throw new BadRequestError(
+        `Invalid all-zero bank account number${contextName ? ` for ${contextName}` : ''}. Placeholder accounts are strictly prohibited.`,
+        'INVALID_BANK_ACCOUNT'
+      );
+    }
     if (!this.ACCOUNT_REGEX.test(clean)) {
       throw new BadRequestError(
-        `Invalid bank account number '${account}'${contextName ? ` for ${contextName}` : ''}. Must contain between 9 and 18 numeric digits.`,
+        `Invalid bank account number (${maskAccountNumber(account)})${contextName ? ` for ${contextName}` : ''}. Must contain between 9 and 18 numeric digits.`,
         'INVALID_BANK_ACCOUNT'
       );
     }

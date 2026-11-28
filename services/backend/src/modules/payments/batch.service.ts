@@ -1,10 +1,10 @@
 // ==============================================================================
 // DFARM - SMART DAIRY MANAGEMENT SYSTEM
-// PAYMENT BATCH & SETTLEMENT MANAGEMENT SERVICE (PROMPT 7)
+// PAYMENT BATCH & SETTLEMENT MANAGEMENT SERVICE (DF-022 TENANT ISOLATION)
 // ==============================================================================
 
 import crypto from 'node:crypto';
-import { query, pool } from '../../config/db.js';
+import type pg from 'pg';
 import {
   BadRequestError,
   NotFoundError,
@@ -13,7 +13,7 @@ import {
   AppError,
 } from '../../shared/errors/app-error.js';
 import type { AuthContext } from '../../middleware/authenticate.js';
-import { UserRole } from '@dfarm/shared-types';
+import { UserRole, NotificationEventType } from '@dfarm/shared-types';
 import { payoutService } from './payout.service.js';
 import { BankFileService } from './serializers/BankFileService.js';
 import { SettlementCalculationService, CalculationPeriodParams } from './settlement-calculation.service.js';
@@ -21,6 +21,15 @@ import { UnionBankSubmissionService, SubmitBatchToUnionBankParams } from '../../
 import { UnionBankReconciliationService } from '../../integrations/banking/union-bank/UnionBankReconciliationService.js';
 import { UnionBankStatusInquiryService } from '../../integrations/banking/union-bank/UnionBankStatusInquiryService.js';
 import { UnionBankValidator } from '../../integrations/banking/union-bank/UnionBankValidator.js';
+import { CredentialEncryption } from '../../infrastructure/security/CredentialEncryption.js';
+import {
+  flushDeferredNotifications,
+  getStrictPaymentTenantDb,
+  maskAccountNumber,
+  recomputeBatchAggregatesInTransaction,
+  resolveOperationalOrganizationId,
+  type DeferredNotification,
+} from './tenant-payment-context.js';
 
 export interface CreateBatchParams {
   centerId?: string | null;
@@ -33,6 +42,7 @@ export interface CreateBatchParams {
   idempotencyKey: string;
   excludeUnverifiedBankDetails?: boolean;
   debitAccountNumber?: string;
+  targetOrganizationId?: string;
   initialStatus?: 'DRAFT' | 'CALCULATED';
 }
 
@@ -62,378 +72,382 @@ export class BatchService {
    * Does not persist any records.
    */
   async calculateSettlementPreview(params: CalculationPeriodParams, auth: AuthContext) {
-    if (auth.role !== UserRole.SUPER_ADMIN && auth.organizationId !== params.organizationId) {
-      throw new ForbiddenError('Cross-organization settlement calculation is prohibited', 'CROSS_ORG_ACCESS_DENIED');
-    }
-    return SettlementCalculationService.calculateSettlement(params, auth);
+    const organizationId = resolveOperationalOrganizationId(auth, params.organizationId);
+    return SettlementCalculationService.calculateSettlement(
+      { ...params, organizationId },
+      auth
+    );
   }
 
   /**
-   * Creates a settlement batch with authoritative ledger calculation, duplicate checks,
-   * bank validation warnings, and immutable calculation snapshots.
+   * Creates a settlement batch inside the strict dairy tenant DB transaction.
    */
   async createBatch(params: CreateBatchParams, auth: AuthContext) {
-    // 1. Idempotency Check
-    const existing = await query('SELECT * FROM payment_batches WHERE idempotency_key = $1;', [params.idempotencyKey]);
-    if (existing.rows.length > 0) {
-      const b = existing.rows[0];
-      return {
-        batchId: b.id,
-        batchNumber: b.batch_number,
-        status: b.status,
-        totalBeneficiaries: b.total_beneficiaries,
-        totalAmount: Number(b.total_amount),
-        isIdempotentReplay: true,
-      };
-    }
+    const organizationId = resolveOperationalOrganizationId(auth, params.targetOrganizationId);
+    const tenantDb = await getStrictPaymentTenantDb(organizationId);
 
-    const client = await pool.connect();
     try {
-      await client.query('BEGIN');
-
-      // Duplicate Billing Cycle Batch Protection
-      if (params.billingCycleId) {
-        const activeCycleBatch = await client.query(
-          `SELECT id, batch_number, status FROM payment_batches 
-           WHERE billing_cycle_id = $1 AND status NOT IN ('FAILED', 'CANCELLED') LIMIT 1;`,
-          [params.billingCycleId]
+      return await tenantDb.withTransaction(async (client: pg.PoolClient) => {
+        // 1. Idempotency Check inside tenant DB
+        const existing = await client.query<any>(
+          `SELECT * FROM payment_batches WHERE idempotency_key = $1 AND organization_id = $2;`,
+          [params.idempotencyKey, organizationId]
         );
-        if (activeCycleBatch.rows.length > 0) {
-          throw new ConflictError(
-            `An active payout batch (${activeCycleBatch.rows[0].batch_number}, status: ${activeCycleBatch.rows[0].status}) already exists for billing cycle '${params.billingCycleId}'. Duplicate settlement batches are prohibited.`,
-            'DUPLICATE_CYCLE_BATCH_PROHIBITED'
+        if (existing.rows.length > 0) {
+          const b = existing.rows[0];
+          return {
+            batchId: b.id,
+            batchNumber: b.batch_number,
+            status: b.status,
+            totalBeneficiaries: b.total_beneficiaries,
+            totalAmount: Number(b.total_amount),
+            isIdempotentReplay: true,
+          };
+        }
+
+        // 2. Duplicate Billing Cycle Batch Protection
+        if (params.billingCycleId) {
+          const activeCycleBatch = await client.query<any>(
+            `SELECT id, batch_number, status
+             FROM payment_batches
+             WHERE billing_cycle_id = $1
+               AND organization_id = $2
+               AND status NOT IN ('FAILED', 'CANCELLED')
+             LIMIT 1;`,
+            [params.billingCycleId, organizationId]
           );
+          if (activeCycleBatch.rows.length > 0) {
+            throw new ConflictError(
+              `An active payout batch (${activeCycleBatch.rows[0].batch_number}, status: ${activeCycleBatch.rows[0].status}) already exists for billing cycle '${params.billingCycleId}'. Duplicate settlement batches are prohibited.`,
+              'DUPLICATE_CYCLE_BATCH_PROHIBITED'
+            );
+          }
         }
-      }
 
-      const batchId = crypto.randomUUID();
-      const batchNumber = 'BATCH-' + Date.now().toString(36).toUpperCase() + '-' + crypto.randomBytes(3).toString('hex').toUpperCase();
+        const batchId = crypto.randomUUID();
+        const batchNumber =
+          'BATCH-' +
+          Date.now().toString(36).toUpperCase() +
+          '-' +
+          crypto.randomBytes(3).toString('hex').toUpperCase();
 
-      const periodStart = params.billingPeriodStart || undefined;
-      const periodEnd = params.billingPeriodEnd || undefined;
+        const periodStart = params.billingPeriodStart || undefined;
+        const periodEnd = params.billingPeriodEnd || undefined;
 
-      let calculationResult: any = null;
-      let eligibleBeneficiaries: any[] = [];
-      let totalBatchAmount = 0.00;
-      let initialStatus = params.initialStatus || (periodStart && periodEnd ? 'CALCULATED' : 'DRAFT');
+        let calculationResult: any = null;
+        let eligibleBeneficiaries: any[] = [];
+        let totalBatchAmount = 0.0;
+        const initialStatus = params.initialStatus || (periodStart && periodEnd ? 'CALCULATED' : 'DRAFT');
 
-      // If settlement period provided, run authoritative calculation engine
-      if (periodStart && periodEnd) {
-        calculationResult = await SettlementCalculationService.calculateSettlement(
-          {
-            organizationId: auth.organizationId,
-            centerId: params.centerId || null,
-            periodStart,
-            periodEnd,
-            customerIds: params.customerIds,
-            excludeUnverifiedBankDetails: params.excludeUnverifiedBankDetails,
-          },
-          auth
-        );
-
-        // Filter eligible farmers with net payable > 0
-        eligibleBeneficiaries = calculationResult.farmers.filter((f: any) => {
-          if (f.netPayableAmount <= 0) return false;
-          if (params.excludeUnverifiedBankDetails && !f.isBankValid) return false;
-          return true;
-        });
-
-        if (eligibleBeneficiaries.length === 0) {
-          throw new BadRequestError(
-            'No eligible farmers with net payable balance found for selected settlement period',
-            'NO_ELIGIBLE_CUSTOMERS'
+        if (periodStart && periodEnd) {
+          calculationResult = await SettlementCalculationService.calculateSettlement(
+            {
+              organizationId,
+              centerId: params.centerId || null,
+              periodStart,
+              periodEnd,
+              customerIds: params.customerIds,
+              excludeUnverifiedBankDetails: params.excludeUnverifiedBankDetails,
+            },
+            auth,
+            client
           );
+
+          eligibleBeneficiaries = calculationResult.farmers.filter((f: any) => {
+            if (f.netPayableAmount <= 0) return false;
+            if (params.excludeUnverifiedBankDetails && !f.isBankValid) return false;
+            return true;
+          });
+
+          if (eligibleBeneficiaries.length === 0) {
+            throw new BadRequestError(
+              'No eligible farmers with net payable balance found for selected settlement period',
+              'NO_ELIGIBLE_CUSTOMERS'
+            );
+          }
+
+          totalBatchAmount = eligibleBeneficiaries.reduce((sum, f) => sum + f.netPayableAmount, 0);
+          totalBatchAmount = Math.round((totalBatchAmount + Number.EPSILON) * 100) / 100;
+        } else {
+          let customersQuery = `
+            SELECT c.id, c.primary_center_id, c.full_name, c.farmer_code, c.bank_name,
+                   c.bank_account_number, c.bank_ifsc_code, cla.current_balance
+            FROM customers c
+            JOIN customer_ledger_accounts cla ON cla.customer_id = c.id
+            WHERE c.organization_id = $1 AND c.is_deleted = FALSE AND cla.current_balance > 0.00
+          `;
+          const queryArgs: any[] = [organizationId];
+
+          if (params.centerId) {
+            queryArgs.push(params.centerId);
+            customersQuery += ` AND c.primary_center_id = $${queryArgs.length}`;
+          }
+
+          if (params.customerIds && params.customerIds.length > 0) {
+            const placeholders = params.customerIds
+              .map((id) => {
+                queryArgs.push(id);
+                return `$${queryArgs.length}`;
+              })
+              .join(', ');
+            customersQuery += ` AND c.id IN (${placeholders})`;
+          }
+
+          customersQuery += ` ORDER BY c.farmer_code ASC`;
+
+          const eligibleRes = await client.query<any>(customersQuery, queryArgs);
+
+          if (eligibleRes.rows.length === 0) {
+            throw new BadRequestError(
+              'No eligible customers with payable balance found for batch creation',
+              'NO_ELIGIBLE_CUSTOMERS'
+            );
+          }
+
+          eligibleBeneficiaries = eligibleRes.rows.map((r: any) => ({
+            customerId: r.id,
+            farmerCode: r.farmer_code,
+            fullName: r.full_name,
+            centerId: r.primary_center_id,
+            bankName: r.bank_name,
+            bankAccountNumberMask: r.bank_account_number ? maskAccountNumber(r.bank_account_number) : null,
+            bankIfsc: r.bank_ifsc_code,
+            netPayableAmount: Number(r.current_balance),
+            grossMilkAmount: Number(r.current_balance),
+            openingBalance: 0,
+            deductionsAmount: 0,
+            adjustmentsCredit: 0,
+            adjustmentsDebit: 0,
+            alreadyPaidAmount: 0,
+            remainingBalance: 0,
+            sourceLedgerTransactionIds: [],
+            sourceCollectionIds: [],
+          }));
+
+          totalBatchAmount = eligibleBeneficiaries.reduce((sum, f) => sum + f.netPayableAmount, 0);
+          totalBatchAmount = Math.round((totalBatchAmount + Number.EPSILON) * 100) / 100;
         }
 
-        totalBatchAmount = eligibleBeneficiaries.reduce((sum, f) => sum + f.netPayableAmount, 0);
-        totalBatchAmount = Math.round((totalBatchAmount + Number.EPSILON) * 100) / 100;
-      } else {
-        // Fallback: Query ledger accounts directly (backward-compatible mode)
-        let customersQuery = `
-          SELECT c.id, c.primary_center_id, c.full_name, c.farmer_code, c.bank_name,
-                 c.bank_account_number, c.bank_ifsc_code, cla.current_balance
-          FROM customers c
-          JOIN customer_ledger_accounts cla ON cla.customer_id = c.id
-          WHERE c.organization_id = $1 AND c.is_deleted = FALSE AND cla.current_balance > 0.00
-        `;
-        const queryArgs: any[] = [auth.organizationId];
+        const snapshotHash =
+          calculationResult?.calculationSnapshotHash ||
+          crypto
+            .createHash('sha256')
+            .update(JSON.stringify({ batchId, totalBatchAmount, count: eligibleBeneficiaries.length }))
+            .digest('hex');
 
-        if (params.centerId) {
-          queryArgs.push(params.centerId);
-          customersQuery += ` AND c.primary_center_id = $${queryArgs.length}`;
-        }
-
-        if (params.customerIds && params.customerIds.length > 0) {
-          const placeholders = params.customerIds
-            .map((id) => {
-              queryArgs.push(id);
-              return `$${queryArgs.length}`;
-            })
-            .join(', ');
-          customersQuery += ` AND c.id IN (${placeholders})`;
-        }
-
-        customersQuery += ` ORDER BY c.farmer_code ASC`;
-
-        const eligibleRes = await client.query(customersQuery, queryArgs);
-
-        if (eligibleRes.rows.length === 0) {
-          throw new BadRequestError('No eligible customers with payable balance found for batch creation', 'NO_ELIGIBLE_CUSTOMERS');
-        }
-
-        eligibleBeneficiaries = eligibleRes.rows.map((r: any) => ({
-          customerId: r.id,
-          farmerCode: r.farmer_code,
-          fullName: r.full_name,
-          centerId: r.primary_center_id,
-          bankName: r.bank_name,
-          bankAccountNumberMask: r.bank_account_number && r.bank_account_number.length >= 4 ? 'XXXX-' + r.bank_account_number.slice(-4) : null,
-          bankIfsc: r.bank_ifsc_code,
-          netPayableAmount: Number(r.current_balance),
-          grossMilkAmount: Number(r.current_balance),
-          openingBalance: 0,
-          deductionsAmount: 0,
-          adjustmentsCredit: 0,
-          adjustmentsDebit: 0,
-          alreadyPaidAmount: 0,
-          remainingBalance: 0,
-          sourceLedgerTransactionIds: [],
-          sourceCollectionIds: [],
-        }));
-
-        totalBatchAmount = eligibleBeneficiaries.reduce((sum, f) => sum + f.netPayableAmount, 0);
-        totalBatchAmount = Math.round((totalBatchAmount + Number.EPSILON) * 100) / 100;
-      }
-
-      // Compute calculation snapshot hash
-      const snapshotHash = calculationResult?.calculationSnapshotHash ||
-        crypto.createHash('sha256').update(JSON.stringify({ batchId, totalBatchAmount, count: eligibleBeneficiaries.length })).digest('hex');
-
-      // Create Payment Batch Header
-      await client.query(
-        `INSERT INTO payment_batches (
-          id, organization_id, center_id, batch_number, billing_cycle_id,
-          billing_period_start, billing_period_end, payment_method, status,
-          total_beneficiaries, total_amount, pending_count, pending_amount,
-          calculation_snapshot_hash, calculation_snapshot_json,
-          bank_name, bank_channel, idempotency_key, created_by, created_at, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5,
-          $6, $7, $8, $9,
-          $10, $11, $10, $11,
-          $12, $13,
-          'Union Bank of India', 'UNION_BANK_BULK_NEFT', $14, $15, NOW(), NOW()
-        );`,
-        [
-          batchId,
-          auth.organizationId,
-          params.centerId || null,
-          batchNumber,
-          params.billingCycleId || null,
-          params.billingPeriodStart || null,
-          params.billingPeriodEnd || null,
-          params.paymentMethod || 'BANK_TRANSFER',
-          initialStatus,
-          eligibleBeneficiaries.length,
-          totalBatchAmount,
-          snapshotHash,
-          calculationResult ? JSON.stringify(calculationResult) : null,
-          params.idempotencyKey,
-          auth.userId,
-        ]
-      );
-
-      const batchItems: any[] = [];
-      const snapshotItems: any[] = [];
-
-      for (const cust of eligibleBeneficiaries) {
-        const payableAmount = cust.netPayableAmount;
-        const payoutId = crypto.randomUUID();
-        const mask = cust.bankAccountNumberMask;
-        const payoutIdempotency = `BATCH-ITEM-${batchId}-${cust.customerId}`;
-        const refNumber = `REF-${batchNumber}-${cust.farmerCode}`;
-
-        // Insert Payout in initial status linked to batch
         await client.query(
-          `INSERT INTO customer_payouts (
-            id, organization_id, center_id, customer_id, batch_id, direction,
-            amount, currency, payment_method, status, reference_number,
-            source_transaction_type, source_transaction_id, idempotency_key,
-            bank_account_mask, bank_ifsc, recipient_name, created_by,
-            created_at, updated_at
+          `INSERT INTO payment_batches (
+            id, organization_id, center_id, batch_number, billing_cycle_id,
+            billing_period_start, billing_period_end, payment_method, status,
+            total_beneficiaries, total_amount, pending_count, pending_amount,
+            calculation_snapshot_hash, calculation_snapshot_json,
+            bank_name, bank_channel, idempotency_key, created_by, created_at, updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, 'DAIRY_PAYS_CUSTOMER',
-            $6, 'INR', $7, $8, $9,
-            'BATCH_DISBURSEMENT', $10, $11,
-            $12, $13, $14, $15,
-            NOW(), NOW()
+            $1, $2, $3, $4, $5,
+            $6, $7, $8, $9,
+            $10, $11, $10, $11,
+            $12, $13,
+            'Union Bank of India', 'UNION_BANK_BULK_NEFT', $14, $15, NOW(), NOW()
           );`,
           [
-            payoutId,
-            auth.organizationId,
-            cust.centerId,
-            cust.customerId,
             batchId,
-            payableAmount,
+            organizationId,
+            params.centerId || null,
+            batchNumber,
+            params.billingCycleId || null,
+            params.billingPeriodStart || null,
+            params.billingPeriodEnd || null,
             params.paymentMethod || 'BANK_TRANSFER',
-            initialStatus === 'CALCULATED' ? 'DRAFT' : 'DRAFT',
-            refNumber,
-            batchId,
-            payoutIdempotency,
-            mask,
-            cust.bankIfsc,
-            cust.fullName,
+            initialStatus,
+            eligibleBeneficiaries.length,
+            totalBatchAmount,
+            snapshotHash,
+            calculationResult ? JSON.stringify(calculationResult) : null,
+            params.idempotencyKey,
             auth.userId,
           ]
         );
 
-        const itemId = crypto.randomUUID();
-        await client.query(
-          `INSERT INTO payment_batch_items (
-            id, batch_id, payout_id, customer_id, amount, currency,
-            bank_account_mask, bank_ifsc, status, beneficiary_reference,
-            settlement_period_start, settlement_period_end,
-            gross_payable, total_deductions, net_payable, remaining_balance,
-            calculation_details, created_at, updated_at
-          ) VALUES (
-            $1, $2, $3, $4, $5, 'INR',
-            $6, $7, $8, $9,
-            $10, $11,
-            $12, $13, $14, $15,
-            $16, NOW(), NOW()
-          );`,
-          [
+        const batchItems: any[] = [];
+        const snapshotItems: any[] = [];
+
+        for (const cust of eligibleBeneficiaries) {
+          const payableAmount = cust.netPayableAmount;
+          const payoutId = crypto.randomUUID();
+          const mask = cust.bankAccountNumberMask;
+          const payoutIdempotency = `BATCH-ITEM-${batchId}-${cust.customerId}`;
+          const refNumber = `REF-${batchNumber}-${cust.farmerCode}`;
+
+          await client.query(
+            `INSERT INTO customer_payouts (
+              id, organization_id, center_id, customer_id, batch_id, direction,
+              amount, currency, payment_method, status, reference_number,
+              source_transaction_type, source_transaction_id, idempotency_key,
+              bank_account_mask, bank_ifsc, recipient_name, created_by,
+              created_at, updated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, 'DAIRY_PAYS_CUSTOMER',
+              $6, 'INR', $7, 'DRAFT', $8,
+              'BATCH_DISBURSEMENT', $9, $10,
+              $11, $12, $13, $14,
+              NOW(), NOW()
+            );`,
+            [
+              payoutId,
+              organizationId,
+              cust.centerId,
+              cust.customerId,
+              batchId,
+              payableAmount,
+              params.paymentMethod || 'BANK_TRANSFER',
+              refNumber,
+              batchId,
+              payoutIdempotency,
+              mask,
+              cust.bankIfsc,
+              cust.fullName,
+              auth.userId,
+            ]
+          );
+
+          const itemId = crypto.randomUUID();
+          await client.query(
+            `INSERT INTO payment_batch_items (
+              id, batch_id, payout_id, customer_id, amount, currency,
+              bank_account_mask, bank_ifsc, status, beneficiary_reference,
+              settlement_period_start, settlement_period_end,
+              gross_payable, total_deductions, net_payable, remaining_balance,
+              calculation_details, created_at, updated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, 'INR',
+              $6, $7, $8, $9,
+              $10, $11,
+              $12, $13, $14, $15,
+              $16, NOW(), NOW()
+            );`,
+            [
+              itemId,
+              batchId,
+              payoutId,
+              cust.customerId,
+              payableAmount,
+              mask,
+              cust.bankIfsc,
+              initialStatus === 'CALCULATED' ? 'CALCULATED' : 'PENDING',
+              refNumber,
+              params.billingPeriodStart || null,
+              params.billingPeriodEnd || null,
+              cust.grossMilkAmount,
+              cust.deductionsAmount,
+              payableAmount,
+              cust.remainingBalance,
+              JSON.stringify(cust),
+            ]
+          );
+
+          batchItems.push({
             itemId,
-            batchId,
             payoutId,
-            cust.customerId,
-            payableAmount,
-            mask,
-            cust.bankIfsc,
-            initialStatus === 'CALCULATED' ? 'CALCULATED' : 'PENDING',
-            refNumber,
-            params.billingPeriodStart || null,
-            params.billingPeriodEnd || null,
-            cust.grossMilkAmount,
-            cust.deductionsAmount,
-            payableAmount,
-            cust.remainingBalance,
-            JSON.stringify(cust),
-          ]
-        );
+            customerId: cust.customerId,
+            customerName: cust.fullName,
+            farmerCode: cust.farmerCode,
+            amount: payableAmount,
+            bankAccountMask: mask,
+            bankIfsc: cust.bankIfsc,
+            status: initialStatus === 'CALCULATED' ? 'CALCULATED' : 'PENDING',
+            grossPayable: cust.grossMilkAmount,
+            deductions: cust.deductionsAmount,
+            remainingBalance: cust.remainingBalance,
+          });
 
-        batchItems.push({
-          itemId,
-          payoutId,
-          customerId: cust.customerId,
-          customerName: cust.fullName,
-          farmerCode: cust.farmerCode,
-          amount: payableAmount,
-          bankAccountMask: mask,
-          bankIfsc: cust.bankIfsc,
-          status: initialStatus === 'CALCULATED' ? 'CALCULATED' : 'PENDING',
-          grossPayable: cust.grossMilkAmount,
-          deductions: cust.deductionsAmount,
-          remainingBalance: cust.remainingBalance,
-        });
+          snapshotItems.push({
+            batchItemId: itemId,
+            item: cust,
+          });
+        }
 
-        snapshotItems.push({
-          batchItemId: itemId,
-          item: cust,
-        });
-      }
+        if (periodStart && periodEnd) {
+          await SettlementCalculationService.persistSettlementSnapshot(
+            client,
+            batchId,
+            organizationId,
+            periodStart,
+            periodEnd,
+            snapshotItems
+          );
+        }
 
-      // Persist immutable snapshots if settlement period provided
-      if (periodStart && periodEnd) {
-        await SettlementCalculationService.persistSettlementSnapshot(
-          client,
+        return {
           batchId,
-          auth.organizationId,
-          periodStart,
-          periodEnd,
-          snapshotItems
-        );
-      }
-
-      await client.query('COMMIT');
-
-      return {
-        batchId,
-        batchNumber,
-        status: initialStatus,
-        totalBeneficiaries: batchItems.length,
-        totalAmount: totalBatchAmount,
-        currency: 'INR',
-        calculationSnapshotHash: snapshotHash,
-        beneficiaries: batchItems,
-        isIdempotentReplay: false,
-        createdAt: new Date().toISOString(),
-      };
+          batchNumber,
+          status: initialStatus,
+          totalBeneficiaries: batchItems.length,
+          totalAmount: totalBatchAmount,
+          currency: 'INR',
+          calculationSnapshotHash: snapshotHash,
+          beneficiaries: batchItems,
+          isIdempotentReplay: false,
+          createdAt: new Date().toISOString(),
+        };
+      });
     } catch (err: any) {
-      await client.query('ROLLBACK');
       if (err instanceof AppError) throw err;
       if (err.code === '23505') {
         throw new ConflictError('A batch with this idempotency key already exists', 'BATCH_CONFLICT');
       }
       throw new AppError(err.message, 500, 'BATCH_CREATION_FAILED');
-    } finally {
-      client.release();
     }
   }
 
   /**
    * Submits a calculated batch for independent review (Maker -> Checker).
    */
-  async submitForReview(batchId: string, auth: AuthContext) {
-    const res = await query('SELECT * FROM payment_batches WHERE id = $1;', [batchId]);
-    if (res.rows.length === 0) throw new NotFoundError('Batch not found', 'BATCH_NOT_FOUND');
-    const b = res.rows[0];
+  async submitForReview(batchId: string, auth: AuthContext, targetOrganizationId?: string | null) {
+    const organizationId = resolveOperationalOrganizationId(auth, targetOrganizationId);
+    const tenantDb = await getStrictPaymentTenantDb(organizationId);
 
-    if (auth.role !== UserRole.SUPER_ADMIN && b.organization_id !== auth.organizationId) {
-      throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
-    }
+    return tenantDb.withTransaction(async (client: pg.PoolClient) => {
+      const res = await client.query<any>(
+        'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE;',
+        [batchId]
+      );
+      if (res.rows.length === 0) throw new NotFoundError('Batch not found', 'BATCH_NOT_FOUND');
+      const b = res.rows[0];
 
-    if (b.status !== 'DRAFT' && b.status !== 'CALCULATED') {
-      throw new BadRequestError(`Batch cannot be submitted for review from status '${b.status}'`, 'INVALID_BATCH_STATUS');
-    }
+      if (b.organization_id !== organizationId) {
+        throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
+      }
 
-    await query(
-      `UPDATE payment_batches
-       SET status = 'UNDER_REVIEW', updated_at = NOW()
-       WHERE id = $1;`,
-      [batchId]
-    );
+      if (b.status !== 'DRAFT' && b.status !== 'CALCULATED') {
+        throw new BadRequestError(`Batch cannot be submitted for review from status '${b.status}'`, 'INVALID_BATCH_STATUS');
+      }
 
-    await query(
-      `UPDATE payment_batch_items
-       SET status = 'PENDING', updated_at = NOW()
-       WHERE batch_id = $1;`,
-      [batchId]
-    );
+      await client.query(
+        `UPDATE payment_batches
+         SET status = 'UNDER_REVIEW', updated_at = NOW()
+         WHERE id = $1 AND organization_id = $2;`,
+        [batchId, organizationId]
+      );
 
-    return {
-      batchId,
-      status: 'UNDER_REVIEW',
-      submittedForReviewAt: new Date().toISOString(),
-    };
+      await client.query(
+        `UPDATE payment_batch_items
+         SET status = 'PENDING', updated_at = NOW()
+         WHERE batch_id = $1;`,
+        [batchId]
+      );
+
+      return {
+        batchId,
+        status: 'UNDER_REVIEW',
+        submittedForReviewAt: new Date().toISOString(),
+      };
+    });
   }
 
   /**
    * Approves a settlement batch (Checker action). Enforces Maker-Checker segregation of duties.
    */
-  async approveBatch(batchId: string, auth: AuthContext) {
-    const res = await query('SELECT * FROM payment_batches WHERE id = $1;', [batchId]);
-    if (res.rows.length === 0) {
-      throw new NotFoundError(`Batch '${batchId}' not found`, 'BATCH_NOT_FOUND');
-    }
-    const batch = res.rows[0];
-
-    // Multi-tenant isolation
-    if (auth.role !== UserRole.SUPER_ADMIN && batch.organization_id !== auth.organizationId) {
-      throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
-    }
-
-    // Role check: Only authorized Checker roles can approve
+  async approveBatch(batchId: string, auth: AuthContext, targetOrganizationId?: string | null) {
     const allowedCheckerRoles = [
       UserRole.SUPER_ADMIN,
       UserRole.DAIRY_OWNER,
@@ -442,26 +456,40 @@ export class BatchService {
       'PRIMARY_DAIRY_ADMIN',
     ];
     if (!allowedCheckerRoles.includes(auth.role as any)) {
-      throw new ForbiddenError('Only an authorized Dairy Admin, Owner, or Supervisor can approve payment batches', 'UNAUTHORIZED_CHECKER_ROLE');
-    }
-
-    // Workflow status check: DRAFT, CALCULATED, UNDER_REVIEW, PENDING_APPROVAL
-    const approvableStatuses = ['DRAFT', 'CALCULATED', 'UNDER_REVIEW', 'PENDING_APPROVAL'];
-    if (!approvableStatuses.includes(batch.status)) {
-      throw new BadRequestError(`Batch cannot be approved from status '${batch.status}'`, 'INVALID_BATCH_STATUS');
-    }
-
-    // Enforce Maker-Checker Segregation of Duties: Creator cannot approve their own batch
-    if (batch.created_by === auth.userId) {
       throw new ForbiddenError(
-        'Maker-Checker segregation of duties violation: The batch creator cannot approve their own batch. An independent supervisor or primary admin must approve it.',
-        'MAKER_CHECKER_SELF_APPROVAL_PROHIBITED'
+        'Only an authorized Dairy Admin, Owner, or Supervisor can approve payment batches',
+        'UNAUTHORIZED_CHECKER_ROLE'
       );
     }
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+    const organizationId = resolveOperationalOrganizationId(auth, targetOrganizationId);
+    const tenantDb = await getStrictPaymentTenantDb(organizationId);
+
+    return tenantDb.withTransaction(async (client: pg.PoolClient) => {
+      const res = await client.query<any>(
+        'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE;',
+        [batchId]
+      );
+      if (res.rows.length === 0) {
+        throw new NotFoundError(`Batch '${batchId}' not found`, 'BATCH_NOT_FOUND');
+      }
+      const batch = res.rows[0];
+
+      if (batch.organization_id !== organizationId) {
+        throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
+      }
+
+      const approvableStatuses = ['DRAFT', 'CALCULATED', 'UNDER_REVIEW', 'PENDING_APPROVAL'];
+      if (!approvableStatuses.includes(batch.status)) {
+        throw new BadRequestError(`Batch cannot be approved from status '${batch.status}'`, 'INVALID_BATCH_STATUS');
+      }
+
+      if (batch.created_by === auth.userId) {
+        throw new ForbiddenError(
+          'Maker-Checker segregation of duties violation: The batch creator cannot approve their own batch. An independent supervisor or primary admin must approve it.',
+          'MAKER_CHECKER_SELF_APPROVAL_PROHIBITED'
+        );
+      }
 
       await client.query(
         `UPDATE payment_batches
@@ -471,15 +499,15 @@ export class BatchService {
              calculation_approved_at = NOW(),
              calculation_approved_by = $1,
              updated_at = NOW()
-         WHERE id = $2;`,
-        [auth.userId, batchId]
+         WHERE id = $2 AND organization_id = $3;`,
+        [auth.userId, batchId, organizationId]
       );
 
       await client.query(
         `UPDATE customer_payouts
          SET status = 'APPROVED', approved_by = $1, approved_at = NOW(), updated_at = NOW()
-         WHERE batch_id = $2;`,
-        [auth.userId, batchId]
+         WHERE batch_id = $2 AND organization_id = $3;`,
+        [auth.userId, batchId, organizationId]
       );
 
       await client.query(
@@ -493,10 +521,8 @@ export class BatchService {
         `INSERT INTO payment_approvals (
           organization_id, entity_type, entity_id, approver_id, action, comments
         ) VALUES ($1, 'BATCH', $2, $3, 'APPROVED', 'Batch approved for Union Bank payout submission');`,
-        [batch.organization_id, batchId, auth.userId]
+        [organizationId, batchId, auth.userId]
       );
-
-      await client.query('COMMIT');
 
       return {
         batchId,
@@ -504,46 +530,57 @@ export class BatchService {
         approvedBy: auth.userId,
         approvedAt: new Date().toISOString(),
       };
-    } catch (err: any) {
-      await client.query('ROLLBACK');
-      throw new AppError(err.message, 500, 'BATCH_APPROVAL_FAILED');
-    } finally {
-      client.release();
-    }
+    });
   }
 
   /**
    * Rejects a settlement batch with a reason. Releases reservations.
    */
-  async rejectBatch(batchId: string, reason: string, auth: AuthContext) {
-    const res = await query('SELECT * FROM payment_batches WHERE id = $1;', [batchId]);
-    if (res.rows.length === 0) throw new NotFoundError('Batch not found', 'BATCH_NOT_FOUND');
-    const batch = res.rows[0];
+  async rejectBatch(
+    batchId: string,
+    reason: string,
+    auth: AuthContext,
+    targetOrganizationId?: string | null
+  ) {
+    const organizationId = resolveOperationalOrganizationId(auth, targetOrganizationId);
+    const tenantDb = await getStrictPaymentTenantDb(organizationId);
 
-    if (auth.role !== UserRole.SUPER_ADMIN && batch.organization_id !== auth.organizationId) {
-      throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
-    }
+    return tenantDb.withTransaction(async (client: pg.PoolClient) => {
+      const res = await client.query<any>(
+        'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE;',
+        [batchId]
+      );
+      if (res.rows.length === 0) throw new NotFoundError('Batch not found', 'BATCH_NOT_FOUND');
+      const batch = res.rows[0];
 
-    if (batch.status === 'SUBMITTED' || batch.status === 'SUBMITTED_TO_BANK' || batch.status === 'SETTLED' || batch.status === 'PAID') {
-      throw new BadRequestError(`Cannot reject batch in status '${batch.status}' once submitted to bank`, 'CANNOT_REJECT_SUBMITTED_BATCH');
-    }
+      if (batch.organization_id !== organizationId) {
+        throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
+      }
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+      if (
+        batch.status === 'SUBMITTED' ||
+        batch.status === 'SUBMITTED_TO_BANK' ||
+        batch.status === 'SETTLED' ||
+        batch.status === 'PAID'
+      ) {
+        throw new BadRequestError(
+          `Cannot reject batch in status '${batch.status}' once submitted to bank`,
+          'CANNOT_REJECT_SUBMITTED_BATCH'
+        );
+      }
 
       await client.query(
         `UPDATE payment_batches
          SET status = 'CANCELLED', updated_at = NOW()
-         WHERE id = $1;`,
-        [batchId]
+         WHERE id = $1 AND organization_id = $2;`,
+        [batchId, organizationId]
       );
 
       await client.query(
         `UPDATE customer_payouts
          SET status = 'CANCELLED', failure_reason = $1, updated_at = NOW()
-         WHERE batch_id = $2;`,
-        [reason || 'Rejected by checker', batchId]
+         WHERE batch_id = $2 AND organization_id = $3;`,
+        [reason || 'Rejected by checker', batchId, organizationId]
       );
 
       await client.query(
@@ -557,10 +594,8 @@ export class BatchService {
         `INSERT INTO payment_approvals (
           organization_id, entity_type, entity_id, approver_id, action, comments
         ) VALUES ($1, 'BATCH', $2, $3, 'REJECTED', $4);`,
-        [batch.organization_id, batchId, auth.userId, reason || 'Batch rejected during review']
+        [organizationId, batchId, auth.userId, reason || 'Batch rejected during review']
       );
-
-      await client.query('COMMIT');
 
       return {
         batchId,
@@ -568,12 +603,7 @@ export class BatchService {
         reason,
         rejectedBy: auth.userId,
       };
-    } catch (err: any) {
-      await client.query('ROLLBACK');
-      throw new AppError(err.message, 500, 'BATCH_REJECTION_FAILED');
-    } finally {
-      client.release();
-    }
+    });
   }
 
   /**
@@ -586,48 +616,70 @@ export class BatchService {
   /**
    * Reconciles batch items using bank response data / settlement report.
    */
-  async reconcileBatchWithUnionBank(batchId: string, responseData: any, auth: AuthContext) {
-    return UnionBankReconciliationService.reconcileBatchWithBankData(batchId, responseData, auth);
+  async reconcileBatchWithUnionBank(
+    batchId: string,
+    responseData: any,
+    auth: AuthContext,
+    targetOrganizationId?: string
+  ) {
+    return UnionBankReconciliationService.reconcileBatchWithBankData(
+      batchId,
+      responseData,
+      auth,
+      targetOrganizationId
+    );
   }
 
   /**
    * Queries status of an in-flight or timed-out batch item from Union Bank.
    */
-  async queryBatchItemStatus(itemId: string, auth: AuthContext) {
-    return UnionBankStatusInquiryService.queryItemStatus(itemId, auth);
+  async queryBatchItemStatus(itemId: string, auth: AuthContext, targetOrganizationId?: string) {
+    return UnionBankStatusInquiryService.queryItemStatus(itemId, auth, targetOrganizationId);
   }
 
   /**
    * Marks batch items whose network transmission timed out as UNKNOWN.
    */
-  async markBatchTimeout(batchId: string, reason: string, auth: AuthContext) {
-    return UnionBankStatusInquiryService.markTimeoutUnknown(batchId, auth, reason);
+  async markBatchTimeout(batchId: string, reason: string, auth: AuthContext, targetOrganizationId?: string) {
+    return UnionBankStatusInquiryService.markTimeoutUnknown(batchId, auth, reason, targetOrganizationId);
   }
 
   /**
    * Retrieves beneficiary bank detail revision history.
    */
-  async getBeneficiaryAuditHistory(customerId: string, auth: AuthContext) {
-    const custRes = await query('SELECT organization_id FROM customers WHERE id = $1;', [customerId]);
-    if (custRes.rows.length === 0) throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
+  async getBeneficiaryAuditHistory(
+    customerId: string,
+    auth: AuthContext,
+    targetOrganizationId?: string | null
+  ) {
+    const organizationId = resolveOperationalOrganizationId(auth, targetOrganizationId);
+    const tenantDb = await getStrictPaymentTenantDb(organizationId);
 
-    if (auth.role !== UserRole.SUPER_ADMIN && custRes.rows[0].organization_id !== auth.organizationId) {
-      throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
-    }
+    return tenantDb.withTransaction(async (client: pg.PoolClient) => {
+      const custRes = await client.query<{ organization_id: string }>(
+        'SELECT organization_id FROM customers WHERE id = $1;',
+        [customerId]
+      );
+      if (custRes.rows.length === 0) throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
 
-    const res = await query(
-      `SELECT bal.*, u.full_name as changed_by_name
-       FROM beneficiary_audit_logs bal
-       JOIN users u ON u.id = bal.changed_by
-       WHERE bal.customer_id = $1
-       ORDER BY bal.created_at DESC;`,
-      [customerId]
-    );
-    return res.rows;
+      if (custRes.rows[0]!.organization_id !== organizationId) {
+        throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
+      }
+
+      const res = await client.query(
+        `SELECT bal.*, u.full_name as changed_by_name
+         FROM beneficiary_audit_logs bal
+         JOIN users u ON u.id = bal.changed_by
+         WHERE bal.customer_id = $1 AND bal.organization_id = $2
+         ORDER BY bal.created_at DESC;`,
+        [customerId, organizationId]
+      );
+      return res.rows;
+    });
   }
 
   /**
-   * Updates beneficiary bank details with format validation and audit logging.
+   * Updates beneficiary bank details with format validation, encryption, and audit logging.
    */
   async updateBeneficiaryBankDetails(
     customerId: string,
@@ -639,48 +691,57 @@ export class BatchService {
       verificationStatus?: 'VERIFIED' | 'UNVERIFIED' | 'PENDING_VERIFICATION' | 'REJECTED';
       reason?: string;
     },
-    auth: AuthContext
+    auth: AuthContext,
+    targetOrganizationId?: string | null
   ) {
-    const custRes = await query('SELECT * FROM customers WHERE id = $1;', [customerId]);
-    if (custRes.rows.length === 0) throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
-    const cust = custRes.rows[0];
+    const organizationId = resolveOperationalOrganizationId(auth, targetOrganizationId);
+    const tenantDb = await getStrictPaymentTenantDb(organizationId);
 
-    if (auth.role !== UserRole.SUPER_ADMIN && cust.organization_id !== auth.organizationId) {
-      throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
-    }
+    return tenantDb.withTransaction(async (client: pg.PoolClient) => {
+      const custRes = await client.query<any>(
+        'SELECT * FROM customers WHERE id = $1 FOR UPDATE;',
+        [customerId]
+      );
+      if (custRes.rows.length === 0) throw new NotFoundError('Customer not found', 'CUSTOMER_NOT_FOUND');
+      const cust = custRes.rows[0];
 
-    // Format Validations
-    const cleanAccount = UnionBankValidator.validateAccountNumber(bankData.bankAccountNumber, cust.full_name);
-    const cleanIfsc = UnionBankValidator.validateIfsc(bankData.bankIfscCode, cust.full_name);
-    const cleanName = (bankData.bankAccountHolderName || cust.full_name).trim();
-    const cleanBank = (bankData.bankName || 'Union Bank of India').trim();
-    const newStatus = bankData.verificationStatus || 'VERIFIED';
+      if (cust.organization_id !== organizationId) {
+        throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
+      }
 
-    const prevMask = cust.bank_account_number && cust.bank_account_number.length >= 4
-      ? 'XXXX-XXXX-' + cust.bank_account_number.slice(-4)
-      : null;
-    const newMask = cleanAccount.length >= 4 ? 'XXXX-XXXX-' + cleanAccount.slice(-4) : 'XXXX-' + cleanAccount;
+      const cleanAccount = UnionBankValidator.validateAccountNumber(bankData.bankAccountNumber, cust.full_name);
+      const cleanIfsc = UnionBankValidator.validateIfsc(bankData.bankIfscCode, cust.full_name);
+      const cleanName = (bankData.bankAccountHolderName || cust.full_name).trim();
+      const cleanBank = (bankData.bankName || 'Union Bank of India').trim();
+      const newStatus = bankData.verificationStatus || 'VERIFIED';
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+      const prevMask = cust.bank_account_mask || (cust.bank_account_number ? maskAccountNumber(cust.bank_account_number) : null);
+      const newMask = maskAccountNumber(cleanAccount);
 
-      // Update customer
+      let storedAccount = cleanAccount;
+      if (process.env['TENANT_DB_ENCRYPTION_KEY'] || process.env['CREDENTIAL_ENCRYPTION_KEY']) {
+        try {
+          storedAccount = CredentialEncryption.encrypt(cleanAccount);
+        } catch {
+          storedAccount = cleanAccount;
+        }
+      }
+
       await client.query(
         `UPDATE customers
          SET bank_name = $1,
              bank_account_number = $2,
-             bank_ifsc_code = $3,
-             bank_account_holder_name = $4,
-             bank_verification_status = $5,
+             bank_account_mask = $3,
+             bank_ifsc_code = $4,
+             bank_account_holder_name = $5,
+             bank_verification_status = $6,
              bank_verified_at = NOW(),
-             bank_verified_by = $6,
+             bank_verified_by = $7,
              updated_at = NOW()
-         WHERE id = $7;`,
-        [cleanBank, cleanAccount, cleanIfsc, cleanName, newStatus, auth.userId, customerId]
+         WHERE id = $8 AND organization_id = $9;`,
+        [cleanBank, storedAccount, newMask, cleanIfsc, cleanName, newStatus, auth.userId, customerId, organizationId]
       );
 
-      // Audit Log
       await client.query(
         `INSERT INTO beneficiary_audit_logs (
           organization_id, customer_id, previous_bank_name, new_bank_name,
@@ -694,7 +755,7 @@ export class BatchService {
           $13, $14, NOW()
         );`,
         [
-          cust.organization_id,
+          organizationId,
           customerId,
           cust.bank_name,
           cleanBank,
@@ -711,8 +772,6 @@ export class BatchService {
         ]
       );
 
-      await client.query('COMMIT');
-
       return {
         customerId,
         bankName: cleanBank,
@@ -722,41 +781,46 @@ export class BatchService {
         bankVerificationStatus: newStatus,
         updatedAt: new Date().toISOString(),
       };
-    } catch (err: any) {
-      await client.query('ROLLBACK');
-      throw new AppError(err.message, 500, 'BENEFICIARY_UPDATE_FAILED');
-    } finally {
-      client.release();
-    }
+    });
   }
 
-  async submitBatch(batchId: string, _auth: AuthContext) {
-    const res = await query('SELECT * FROM payment_batches WHERE id = $1;', [batchId]);
-    if (res.rows.length === 0) {
-      throw new NotFoundError(`Batch '${batchId}' not found`, 'BATCH_NOT_FOUND');
-    }
-    const batch = res.rows[0];
+  async submitBatch(batchId: string, auth: AuthContext, targetOrganizationId?: string | null) {
+    const organizationId = resolveOperationalOrganizationId(auth, targetOrganizationId);
+    const tenantDb = await getStrictPaymentTenantDb(organizationId);
 
-    if (batch.status !== 'APPROVED') {
-      throw new BadRequestError(`Batch must be APPROVED before submission (current: '${batch.status}')`, 'INVALID_BATCH_STATUS');
-    }
+    return tenantDb.withTransaction(async (client: pg.PoolClient) => {
+      const res = await client.query<any>(
+        'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE;',
+        [batchId]
+      );
+      if (res.rows.length === 0) {
+        throw new NotFoundError(`Batch '${batchId}' not found`, 'BATCH_NOT_FOUND');
+      }
+      const batch = res.rows[0];
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+      if (batch.organization_id !== organizationId) {
+        throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
+      }
+
+      if (batch.status !== 'APPROVED') {
+        throw new BadRequestError(
+          `Batch must be APPROVED before submission (current: '${batch.status}')`,
+          'INVALID_BATCH_STATUS'
+        );
+      }
 
       await client.query(
         `UPDATE payment_batches
          SET status = 'SUBMITTED', submitted_at = NOW(), updated_at = NOW()
-         WHERE id = $1;`,
-        [batchId]
+         WHERE id = $1 AND organization_id = $2;`,
+        [batchId, organizationId]
       );
 
       await client.query(
         `UPDATE customer_payouts
          SET status = 'SUBMITTED', submitted_at = NOW(), updated_at = NOW()
-         WHERE batch_id = $1;`,
-        [batchId]
+         WHERE batch_id = $1 AND organization_id = $2;`,
+        [batchId, organizationId]
       );
 
       await client.query(
@@ -766,194 +830,326 @@ export class BatchService {
         [batchId]
       );
 
-      await client.query('COMMIT');
-
       return {
         batchId,
         status: 'SUBMITTED',
         submittedAt: new Date().toISOString(),
         ledgerEffectApplied: false,
       };
-    } catch (err: any) {
-      await client.query('ROLLBACK');
-      throw new AppError(err.message, 500, 'BATCH_SUBMISSION_FAILED');
-    } finally {
-      client.release();
-    }
+    });
   }
 
-  async reconcileBatch(batchId: string, results: ReconcileBatchItemInput[], auth: AuthContext) {
-    const res = await query('SELECT * FROM payment_batches WHERE id = $1;', [batchId]);
-    if (res.rows.length === 0) {
-      throw new NotFoundError(`Batch '${batchId}' not found`, 'BATCH_NOT_FOUND');
-    }
-    const batch = res.rows[0];
+  async reconcileBatch(
+    batchId: string,
+    results: ReconcileBatchItemInput[],
+    auth: AuthContext,
+    targetOrganizationId?: string | null
+  ) {
+    const organizationId = resolveOperationalOrganizationId(auth, targetOrganizationId);
+    const tenantDb = await getStrictPaymentTenantDb(organizationId);
+    const deferredNotifications: DeferredNotification[] = [];
 
-    let settledCount = 0;
-    let failedCount = 0;
-    const processedItems: any[] = [];
-
-    for (const itemResult of results) {
-      const itemRes = await query('SELECT * FROM payment_batch_items WHERE id = $1 AND batch_id = $2;', [itemResult.itemId, batchId]);
-      if (itemRes.rows.length === 0) {
-        continue;
-      }
-      const item = itemRes.rows[0];
-
-      if (itemResult.status === 'SETTLED') {
-        try {
-          const settlement = await payoutService.confirmPayout(
-            item.payout_id,
-            auth,
-            itemResult.beneficiaryReference || item.beneficiary_reference || `BATCH-UTR-${batch.batch_number}`
-          );
-          settledCount++;
-          processedItems.push({
-            itemId: item.id,
-            payoutId: item.payout_id,
-            status: 'SETTLED',
-            amount: Number(item.amount),
-            settledAt: settlement.settledAt,
-          });
-        } catch (err: any) {
-          processedItems.push({
-            itemId: item.id,
-            payoutId: item.payout_id,
-            status: 'FAILED',
-            amount: Number(item.amount),
-            error: err.message,
-          });
-          failedCount++;
-        }
-      } else {
-        await payoutService.failPayout(
-          item.payout_id,
-          auth,
-          itemResult.failureReason || 'Bank account invalid or rejected by beneficiary clearing house'
-        );
-        failedCount++;
-        processedItems.push({
-          itemId: item.id,
-          payoutId: item.payout_id,
-          status: 'FAILED',
-          amount: Number(item.amount),
-          failureReason: itemResult.failureReason,
-        });
-      }
-    }
-
-    const updatedStatsRes = await query(
-      `SELECT successful_count, failed_count, total_beneficiaries
-       FROM payment_batches WHERE id = $1;`,
-      [batchId]
-    );
-    const updatedStats = updatedStatsRes.rows[0];
-    const total = updatedStats.total_beneficiaries;
-    const success = updatedStats.successful_count;
-    const failed = updatedStats.failed_count;
-
-    let finalBatchStatus = 'PARTIALLY_SETTLED';
-    if (success === total) {
-      finalBatchStatus = 'SETTLED';
-    } else if (failed === total) {
-      finalBatchStatus = 'FAILED';
-    }
-
-    const reconStatus = (success + failed === total) ? 'FULLY_RECONCILED' : 'PARTIALLY_RECONCILED';
-
-    await query(
-      `UPDATE payment_batches
-       SET status = $1, reconciliation_status = $2, completed_at = NOW(), updated_at = NOW()
-       WHERE id = $3;`,
-      [finalBatchStatus, reconStatus, batchId]
-    );
-
-    return {
-      batchId,
-      batchStatus: finalBatchStatus,
-      reconciliationStatus: reconStatus,
-      totalBeneficiaries: total,
-      successfulCount: success,
-      failedCount: failed,
-      processedInCall: processedItems.length,
-      items: processedItems,
-    };
-  }
-
-  async getBatchById(batchId: string, auth: AuthContext) {
-    const res = await query('SELECT * FROM payment_batches WHERE id = $1;', [batchId]);
-    if (res.rows.length === 0) {
-      throw new NotFoundError(`Batch '${batchId}' not found`, 'BATCH_NOT_FOUND');
-    }
-    const b = res.rows[0];
-
-    // Enforce strict multi-tenant isolation
-    if (auth.role !== UserRole.SUPER_ADMIN && b.organization_id !== auth.organizationId) {
-      throw new ForbiddenError(
-        'Cross-organization batch access is strictly prohibited',
-        'CROSS_ORG_ACCESS_DENIED'
+    const outcome = await tenantDb.withTransaction(async (client: pg.PoolClient) => {
+      const batchRes = await client.query<any>(
+        'SELECT * FROM payment_batches WHERE id = $1 FOR UPDATE;',
+        [batchId]
       );
-    }
+      if (batchRes.rows.length === 0) {
+        throw new NotFoundError(`Batch '${batchId}' not found`, 'BATCH_NOT_FOUND');
+      }
+      const batch = batchRes.rows[0];
 
-    const itemsRes = await query(
-      `SELECT bi.*, c.full_name as customer_name, c.farmer_code
-       FROM payment_batch_items bi
-       JOIN customers c ON c.id = bi.customer_id
-       WHERE bi.batch_id = $1
-       ORDER BY c.farmer_code ASC, bi.created_at ASC;`,
-      [batchId]
-    );
+      if (batch.organization_id !== organizationId) {
+        throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
+      }
 
-    return {
-      id: b.id,
-      organizationId: b.organization_id,
-      centerId: b.center_id,
-      batchNumber: b.batch_number,
-      billingCycleId: b.billing_cycle_id,
-      billingPeriodStart: formatDateOnly(b.billing_period_start),
-      billingPeriodEnd: formatDateOnly(b.billing_period_end),
-      paymentMethod: b.payment_method,
-      status: b.status,
-      totalBeneficiaries: b.total_beneficiaries,
-      totalAmount: Number(b.total_amount),
-      successfulCount: b.successful_count,
-      successfulAmount: Number(b.successful_amount),
-      failedCount: b.failed_count,
-      failedAmount: Number(b.failed_amount),
-      pendingCount: b.pending_count,
-      pendingAmount: Number(b.pending_amount),
-      reconciliationStatus: b.reconciliation_status,
-      calculationSnapshotHash: b.calculation_snapshot_hash,
-      bankName: b.bank_name || 'Union Bank of India',
-      bankChannel: b.bank_channel,
-      bankBatchReference: b.bank_batch_reference,
-      bankSubmissionId: b.bank_submission_id,
-      createdAt: b.created_at,
-      items: itemsRes.rows.map(i => ({
-        id: i.id,
-        payoutId: i.payout_id,
-        customerId: i.customer_id,
-        customerName: i.customer_name,
-        farmerCode: i.farmer_code,
-        amount: Number(i.amount),
-        currency: i.currency,
-        bankAccountMask: i.bank_account_mask,
-        bankIfsc: i.bank_ifsc,
-        status: i.status,
-        beneficiaryReference: i.beneficiary_reference,
-        bankUtr: i.bank_utr,
-        failureReason: i.failure_reason,
-        settledAt: i.settled_at,
-        grossPayable: i.gross_payable ? Number(i.gross_payable) : undefined,
-        totalDeductions: i.total_deductions ? Number(i.total_deductions) : undefined,
-        netPayable: i.net_payable ? Number(i.net_payable) : Number(i.amount),
-        remainingBalance: i.remaining_balance ? Number(i.remaining_balance) : undefined,
-      })),
-    };
+      const processedItems: any[] = [];
+
+      for (let idx = 0; idx < results.length; idx++) {
+        const itemResult = results[idx]!;
+        const itemRes = await client.query<any>(
+          `SELECT bi.*, cp.center_id, cp.currency, cp.payment_method, cp.bank_account_mask
+           FROM payment_batch_items bi
+           JOIN customer_payouts cp ON cp.id = bi.payout_id
+           WHERE bi.id = $1 AND bi.batch_id = $2 AND cp.organization_id = $3
+           FOR UPDATE OF bi, cp;`,
+          [itemResult.itemId, batchId, organizationId]
+        );
+        if (itemRes.rows.length === 0) {
+          continue;
+        }
+        const item = itemRes.rows[0];
+        const spName = `sp_batch_item_${idx}`;
+        await client.query(`SAVEPOINT ${spName}`);
+
+        try {
+          if (itemResult.status === 'SETTLED') {
+            const utr =
+              itemResult.beneficiaryReference ||
+              item.beneficiary_reference ||
+              `BATCH-UTR-${batch.batch_number}`;
+            const settledAt = new Date();
+            const settlement = await payoutService.confirmPayoutInTransaction(
+              client,
+              item.payout_id,
+              auth,
+              organizationId,
+              utr,
+              settledAt
+            );
+
+            await client.query(
+              `UPDATE payment_batch_items
+               SET status = 'SETTLED',
+                   beneficiary_reference = COALESCE($1, beneficiary_reference),
+                   bank_utr = COALESCE(bank_utr, $1),
+                   settled_at = COALESCE(settled_at, $2),
+                   updated_at = NOW()
+               WHERE id = $3 AND batch_id = $4;`,
+              [utr, settledAt, item.id, batchId]
+            );
+
+            if (!settlement?.isIdempotentReplay) {
+              deferredNotifications.push({
+                organizationId,
+                centerId: item.center_id,
+                customerId: item.customer_id,
+                eventType: NotificationEventType.PAYMENT_SETTLED,
+                eventId: `evt_payout_settled_${item.payout_id}`,
+                idempotencyKey: `notif_payout_${item.payout_id}`,
+                metadata: {
+                  payoutId: item.payout_id,
+                  amount: Number(item.amount),
+                  currency: item.currency || 'INR',
+                  paymentMethod: item.payment_method || 'BANK_TRANSFER',
+                  referenceNumber: utr,
+                  bankAccountMask: item.bank_account_mask || 'XXXX-XXXX-XXXX',
+                  settledDate: settledAt.toLocaleDateString('en-GB'),
+                },
+              });
+            }
+
+            processedItems.push({
+              itemId: item.id,
+              payoutId: item.payout_id,
+              status: 'SETTLED',
+              amount: Number(item.amount),
+              settledAt: settlement.settledAt,
+            });
+          } else if (itemResult.status === 'REVERSED') {
+            const revReason =
+              itemResult.failureReason || 'Reversal reported during batch reconciliation';
+            const revRef = itemResult.beneficiaryReference || item.bank_utr || item.id;
+            await payoutService.reversePayoutInTransaction(
+              client,
+              item.payout_id,
+              auth,
+              organizationId,
+              revReason,
+              `REV-${organizationId}-${item.payout_id}-${revRef}`
+            );
+
+            await client.query(
+              `UPDATE payment_batch_items
+               SET status = 'REVERSED', failure_reason = $1, updated_at = NOW()
+               WHERE id = $2 AND batch_id = $3;`,
+              [revReason, item.id, batchId]
+            );
+
+            processedItems.push({
+              itemId: item.id,
+              payoutId: item.payout_id,
+              status: 'REVERSED',
+              amount: Number(item.amount),
+              failureReason: revReason,
+            });
+          } else {
+            const failReason =
+              itemResult.failureReason ||
+              'Bank account invalid or rejected by beneficiary clearing house';
+            const failRes = await payoutService.failPayoutInTransaction(
+              client,
+              item.payout_id,
+              auth,
+              organizationId,
+              failReason
+            );
+
+            if (!failRes?.isIdempotentReplay) {
+              deferredNotifications.push({
+                organizationId,
+                centerId: item.center_id,
+                customerId: item.customer_id,
+                eventType: NotificationEventType.PAYMENT_FAILED,
+                eventId: `evt_payout_failed_${item.payout_id}`,
+                idempotencyKey: `notif_payout_fail_${item.payout_id}`,
+                metadata: {
+                  payoutId: item.payout_id,
+                  amount: Number(item.amount),
+                  referenceNumber: item.beneficiary_reference || 'N/A',
+                  failureReason: failReason,
+                },
+              });
+            }
+
+            processedItems.push({
+              itemId: item.id,
+              payoutId: item.payout_id,
+              status: 'FAILED',
+              amount: Number(item.amount),
+              failureReason: failReason,
+            });
+          }
+
+          await client.query(`RELEASE SAVEPOINT ${spName}`);
+        } catch (err: any) {
+          await client.query(`ROLLBACK TO SAVEPOINT ${spName}`);
+          await client.query(`RELEASE SAVEPOINT ${spName}`);
+
+          if (err instanceof AppError && err.statusCode < 500) {
+            processedItems.push({
+              itemId: item.id,
+              payoutId: item.payout_id,
+              status: 'FAILED',
+              amount: Number(item.amount),
+              error: err.message,
+            });
+          } else {
+            throw err;
+          }
+        }
+      }
+
+      const agg = await recomputeBatchAggregatesInTransaction(client, batchId, organizationId);
+
+      // Map generic batch workflow statuses cleanly ('SETTLED' / 'PARTIALLY_SETTLED' / 'FAILED')
+      let finalBatchStatus = 'PARTIALLY_SETTLED';
+      if (agg.successfulCount === agg.total && agg.total > 0) {
+        finalBatchStatus = 'SETTLED';
+      } else if (agg.failedCount === agg.total) {
+        finalBatchStatus = 'FAILED';
+      } else if (agg.reversedCount === agg.total && agg.total > 0) {
+        finalBatchStatus = 'RECONCILED';
+      }
+
+      const reconStatus =
+        agg.successfulCount + agg.failedCount + agg.reversedCount === agg.total
+          ? 'FULLY_RECONCILED'
+          : 'PARTIALLY_RECONCILED';
+
+      await client.query(
+        `UPDATE payment_batches
+         SET status = $1,
+             reconciliation_status = $2,
+             completed_at = COALESCE(completed_at, NOW()),
+             updated_at = NOW()
+         WHERE id = $3 AND organization_id = $4;`,
+        [finalBatchStatus, reconStatus, batchId, organizationId]
+      );
+
+      return {
+        batchId,
+        batchStatus: finalBatchStatus,
+        reconciliationStatus: reconStatus,
+        totalBeneficiaries: agg.total,
+        successfulCount: agg.successfulCount,
+        failedCount: agg.failedCount,
+        processedInCall: processedItems.length,
+        items: processedItems,
+      };
+    });
+
+    await flushDeferredNotifications(deferredNotifications);
+
+    return outcome;
   }
 
-  async exportBatch(batchId: string, format: string, auth: AuthContext) {
-    return BankFileService.exportBatch(batchId, format, auth);
+  async getBatchById(batchId: string, auth: AuthContext, targetOrganizationId?: string | null) {
+    const organizationId = resolveOperationalOrganizationId(auth, targetOrganizationId);
+    const tenantDb = await getStrictPaymentTenantDb(organizationId);
+
+    return tenantDb.withTransaction(async (client: pg.PoolClient) => {
+      const res = await client.query<any>(
+        'SELECT * FROM payment_batches WHERE id = $1;',
+        [batchId]
+      );
+      if (res.rows.length === 0) {
+        throw new NotFoundError(`Batch '${batchId}' not found`, 'BATCH_NOT_FOUND');
+      }
+      const b = res.rows[0];
+
+      if (b.organization_id !== organizationId) {
+        throw new ForbiddenError(
+          'Cross-organization batch access is strictly prohibited',
+          'CROSS_ORG_ACCESS_DENIED'
+        );
+      }
+
+      const itemsRes = await client.query<any>(
+        `SELECT bi.*, c.full_name as customer_name, c.farmer_code
+         FROM payment_batch_items bi
+         JOIN customers c ON c.id = bi.customer_id
+         WHERE bi.batch_id = $1
+         ORDER BY c.farmer_code ASC, bi.created_at ASC;`,
+        [batchId]
+      );
+
+      return {
+        id: b.id,
+        organizationId: b.organization_id,
+        centerId: b.center_id,
+        batchNumber: b.batch_number,
+        billingCycleId: b.billing_cycle_id,
+        billingPeriodStart: formatDateOnly(b.billing_period_start),
+        billingPeriodEnd: formatDateOnly(b.billing_period_end),
+        paymentMethod: b.payment_method,
+        status: b.status,
+        totalBeneficiaries: b.total_beneficiaries,
+        totalAmount: Number(b.total_amount),
+        successfulCount: b.successful_count,
+        successfulAmount: Number(b.successful_amount),
+        failedCount: b.failed_count,
+        failedAmount: Number(b.failed_amount),
+        pendingCount: b.pending_count,
+        pendingAmount: Number(b.pending_amount),
+        reconciliationStatus: b.reconciliation_status,
+        calculationSnapshotHash: b.calculation_snapshot_hash,
+        bankName: b.bank_name || 'Union Bank of India',
+        bankChannel: b.bank_channel,
+        bankBatchReference: b.bank_batch_reference,
+        bankSubmissionId: b.bank_submission_id,
+        createdAt: b.created_at,
+        items: itemsRes.rows.map((i: any) => ({
+          id: i.id,
+          payoutId: i.payout_id,
+          customerId: i.customer_id,
+          customerName: i.customer_name,
+          farmerCode: i.farmer_code,
+          amount: Number(i.amount),
+          currency: i.currency,
+          bankAccountMask: i.bank_account_mask,
+          bankIfsc: i.bank_ifsc,
+          status: i.status,
+          beneficiaryReference: i.beneficiary_reference,
+          bankUtr: i.bank_utr,
+          failureReason: i.failure_reason,
+          settledAt: i.settled_at,
+          grossPayable: i.gross_payable ? Number(i.gross_payable) : undefined,
+          totalDeductions: i.total_deductions ? Number(i.total_deductions) : undefined,
+          netPayable: i.net_payable ? Number(i.net_payable) : Number(i.amount),
+          remainingBalance: i.remaining_balance ? Number(i.remaining_balance) : undefined,
+        })),
+      };
+    });
+  }
+
+  async exportBatch(
+    batchId: string,
+    format: string,
+    auth: AuthContext,
+    options?: { debitAccountNumber?: string; targetOrganizationId?: string }
+  ) {
+    return BankFileService.exportBatch(batchId, format, auth, options);
   }
 
   downloadBatch(token: string) {

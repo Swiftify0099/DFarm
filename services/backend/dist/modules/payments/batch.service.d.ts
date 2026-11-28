@@ -12,6 +12,7 @@ export interface CreateBatchParams {
     idempotencyKey: string;
     excludeUnverifiedBankDetails?: boolean;
     debitAccountNumber?: string;
+    targetOrganizationId?: string;
     initialStatus?: 'DRAFT' | 'CALCULATED';
 }
 export interface ReconcileBatchItemInput {
@@ -27,8 +28,7 @@ export declare class BatchService {
      */
     calculateSettlementPreview(params: CalculationPeriodParams, auth: AuthContext): Promise<import("./settlement-calculation.service.js").SettlementCalculationResult>;
     /**
-     * Creates a settlement batch with authoritative ledger calculation, duplicate checks,
-     * bank validation warnings, and immutable calculation snapshots.
+     * Creates a settlement batch inside the strict dairy tenant DB transaction.
      */
     createBatch(params: CreateBatchParams, auth: AuthContext): Promise<{
         batchId: any;
@@ -56,7 +56,7 @@ export declare class BatchService {
     /**
      * Submits a calculated batch for independent review (Maker -> Checker).
      */
-    submitForReview(batchId: string, auth: AuthContext): Promise<{
+    submitForReview(batchId: string, auth: AuthContext, targetOrganizationId?: string | null): Promise<{
         batchId: string;
         status: string;
         submittedForReviewAt: string;
@@ -64,7 +64,7 @@ export declare class BatchService {
     /**
      * Approves a settlement batch (Checker action). Enforces Maker-Checker segregation of duties.
      */
-    approveBatch(batchId: string, auth: AuthContext): Promise<{
+    approveBatch(batchId: string, auth: AuthContext, targetOrganizationId?: string | null): Promise<{
         batchId: string;
         status: string;
         approvedBy: string;
@@ -73,7 +73,7 @@ export declare class BatchService {
     /**
      * Rejects a settlement batch with a reason. Releases reservations.
      */
-    rejectBatch(batchId: string, reason: string, auth: AuthContext): Promise<{
+    rejectBatch(batchId: string, reason: string, auth: AuthContext, targetOrganizationId?: string | null): Promise<{
         batchId: string;
         status: string;
         reason: string;
@@ -82,54 +82,15 @@ export declare class BatchService {
     /**
      * Submits batch to Union Bank of India via bulk file export or host-to-host API.
      */
-    submitBatchToUnionBank(batchId: string, params: SubmitBatchToUnionBankParams, auth: AuthContext): Promise<{
-        submissionId: string;
-        submissionReference: string;
-        batchId: string;
-        batchNumber: string;
-        status: string;
-        submissionType: string;
-        fileFormat?: string;
-        fileName?: string;
-        fileContent?: string;
-        fileHashSha256: string;
-        totalRecords: number;
-        totalAmount: number;
-        submittedAt: string;
-    }>;
+    submitBatchToUnionBank(batchId: string, params: SubmitBatchToUnionBankParams, auth: AuthContext): Promise<import("../../integrations/banking/union-bank/UnionBankSubmissionService.js").SubmitBatchToUnionBankResult>;
     /**
      * Reconciles batch items using bank response data / settlement report.
      */
-    reconcileBatchWithUnionBank(batchId: string, responseData: any, auth: AuthContext): Promise<{
-        batchId: string;
-        batchStatus: string;
-        reconciliationStatus: string;
-        totalBeneficiaries: number;
-        paidCount: number;
-        successfulCount: number;
-        failedCount: number;
-        reversedCount: number;
-        unknownCount: number;
-        processedItems: Array<{
-            itemId: string;
-            customerReference: string;
-            farmerCode: string;
-            expectedAmount: number;
-            bankAmount: number;
-            bankUtr?: string;
-            status: string;
-            message: string;
-            isIdempotentReplay: boolean;
-        }>;
-        exceptions: Array<{
-            reference: string;
-            reason: string;
-        }>;
-    }>;
+    reconcileBatchWithUnionBank(batchId: string, responseData: any, auth: AuthContext, targetOrganizationId?: string): Promise<import("../../integrations/banking/union-bank/UnionBankReconciliationService.js").ReconciliationResult>;
     /**
      * Queries status of an in-flight or timed-out batch item from Union Bank.
      */
-    queryBatchItemStatus(itemId: string, auth: AuthContext): Promise<{
+    queryBatchItemStatus(itemId: string, auth: AuthContext, targetOrganizationId?: string): Promise<{
         itemId: string;
         customerReference: string;
         previousStatus: string;
@@ -138,19 +99,20 @@ export declare class BatchService {
         settledAt?: string;
         canSafeRetry: boolean;
         inquiryNotes: string;
+        isIdempotentReplay?: boolean;
     }>;
     /**
      * Marks batch items whose network transmission timed out as UNKNOWN.
      */
-    markBatchTimeout(batchId: string, reason: string, auth: AuthContext): Promise<{
+    markBatchTimeout(batchId: string, reason: string, auth: AuthContext, targetOrganizationId?: string): Promise<{
         updatedCount: number;
     }>;
     /**
      * Retrieves beneficiary bank detail revision history.
      */
-    getBeneficiaryAuditHistory(customerId: string, auth: AuthContext): Promise<any[]>;
+    getBeneficiaryAuditHistory(customerId: string, auth: AuthContext, targetOrganizationId?: string | null): Promise<any[]>;
     /**
-     * Updates beneficiary bank details with format validation and audit logging.
+     * Updates beneficiary bank details with format validation, encryption, and audit logging.
      */
     updateBeneficiaryBankDetails(customerId: string, bankData: {
         bankName: string;
@@ -159,7 +121,7 @@ export declare class BatchService {
         bankAccountHolderName: string;
         verificationStatus?: 'VERIFIED' | 'UNVERIFIED' | 'PENDING_VERIFICATION' | 'REJECTED';
         reason?: string;
-    }, auth: AuthContext): Promise<{
+    }, auth: AuthContext, targetOrganizationId?: string | null): Promise<{
         customerId: string;
         bankName: string;
         bankAccountNumberMask: string;
@@ -168,23 +130,23 @@ export declare class BatchService {
         bankVerificationStatus: "REJECTED" | "VERIFIED" | "UNVERIFIED" | "PENDING_VERIFICATION";
         updatedAt: string;
     }>;
-    submitBatch(batchId: string, _auth: AuthContext): Promise<{
+    submitBatch(batchId: string, auth: AuthContext, targetOrganizationId?: string | null): Promise<{
         batchId: string;
         status: string;
         submittedAt: string;
         ledgerEffectApplied: boolean;
     }>;
-    reconcileBatch(batchId: string, results: ReconcileBatchItemInput[], auth: AuthContext): Promise<{
+    reconcileBatch(batchId: string, results: ReconcileBatchItemInput[], auth: AuthContext, targetOrganizationId?: string | null): Promise<{
         batchId: string;
         batchStatus: string;
         reconciliationStatus: string;
-        totalBeneficiaries: any;
-        successfulCount: any;
-        failedCount: any;
+        totalBeneficiaries: number;
+        successfulCount: number;
+        failedCount: number;
         processedInCall: number;
         items: any[];
     }>;
-    getBatchById(batchId: string, auth: AuthContext): Promise<{
+    getBatchById(batchId: string, auth: AuthContext, targetOrganizationId?: string | null): Promise<{
         id: any;
         organizationId: any;
         centerId: any;
@@ -230,7 +192,10 @@ export declare class BatchService {
             remainingBalance: number | undefined;
         }[];
     }>;
-    exportBatch(batchId: string, format: string, auth: AuthContext): Promise<{
+    exportBatch(batchId: string, format: string, auth: AuthContext, options?: {
+        debitAccountNumber?: string;
+        targetOrganizationId?: string;
+    }): Promise<{
         batchId: string;
         batchNumber: string;
         format: string;

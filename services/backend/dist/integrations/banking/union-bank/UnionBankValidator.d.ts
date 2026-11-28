@@ -2,6 +2,7 @@ import type { UnionBankPayoutItem } from './types.js';
 export declare class UnionBankValidator {
     private static readonly IFSC_REGEX;
     private static readonly ACCOUNT_REGEX;
+    private static readonly ALL_ZERO_REGEX;
     static isValidIfsc(ifsc: string): boolean;
     static isValidAccountNumber(account: string): boolean;
     /**
@@ -9,7 +10,8 @@ export declare class UnionBankValidator {
      */
     static validateIfsc(ifsc: string, contextName?: string): string;
     /**
-     * Validates Indian bank account number (9 to 18 numeric digits).
+     * Validates Indian bank account number (9 to 18 numeric digits, never all-zero).
+     * Account digits are masked in any thrown error message.
      */
     static validateAccountNumber(account: string, contextName?: string): string;
     /**

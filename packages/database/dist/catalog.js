@@ -57,6 +57,7 @@ export const MIGRATION_MANIFEST = [
     { version: '045', filename: '045_kiosk_shift_session_concurrency_and_ownership.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Atomic partial unique index for active kiosk shift sessions and tenant-scoped lookup indexes (RESTART-03)' },
     { version: '046', filename: '046_complete_milk_collection_session_organization_id.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Include organization_id in complete_milk_collection_session milk_collections insert after 039 NOT NULL constraint' },
     { version: '047', filename: '047_advance_response_contract_balanceAfter.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Fix post_customer_advance response contract: add balanceAfter alias to new-execution return for consistency with idempotent-replay path (RESTART-03.5 Fix F)' },
+    { version: '048', filename: '048_union_bank_reconciliation_idempotency_hardening.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Allow REVERSED batch items, harden fail/reverse payout idempotency & conflict safety, and enforce tenant session RLS across reconciliation tables (DF-022 / RESTART-10)' },
 ];
 export const MIGRATION_FILES = MIGRATION_MANIFEST
     .filter(m => m.target !== MigrationTarget.MANUAL_REVIEW_REQUIRED)

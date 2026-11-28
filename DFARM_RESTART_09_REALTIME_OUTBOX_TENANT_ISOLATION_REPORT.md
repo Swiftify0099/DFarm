@@ -3,14 +3,14 @@
 **Task:** `RESTART-09`  
 **Issue:** `DF-021` (`P0` — Tenant-Scoped Realtime Transactional Outbox & SSE Reliability)  
 **Branch:** `fix/cloudflare-pages-production-deploy`  
-**Current Remote & Local HEAD (`origin/fix/cloudflare-pages-production-deploy`):** `f461928e0e72b215eaa6d78c6ff99bbf90a507e1` (uncommitted CI unblock, PG17 test fixes, & verification docs on top; no commit/push executed per scope restrictions)  
-**Failed GitHub Actions Run (`f461928`):** `46112338739` (failed at `Run database catalog & static migration gates` before PG17 execution)  
-**Subsequent GitHub Actions Run IDs:** None yet (awaiting operator commit & push)  
-**PostgreSQL Version Verified Locally:** PostgreSQL `17.12` (`server_version_num=170012`)  
-**Classification:** **`OPEN / PARTIAL (CI & PG17 Gate Passed Locally 5/5, 0 Skips; Remote GitHub CI Re-Run Pending Commit/Push)`**  
+**Verified Remote HEAD (`origin/fix/cloudflare-pages-production-deploy`):** `36a4a5092be3a4458d74ce2255d7f1bbca9181f5`  
+**Prior Failed GitHub Actions Run (`f461928`):** `46112338739` (failed at `Run database catalog & static migration gates` before PG17 execution)  
+**Verified Passing GitHub Actions Run (`36a4a50`):** `46115119745` (**`SUCCESS`**, PostgreSQL `17.12`, zero failures & zero skips)  
+**PostgreSQL Version Verified:** PostgreSQL `17.12` (`server_version_num=170012`)  
+**Classification:** **`PASS (Verified in GitHub Actions PG 17 Run 46115119745; Zero Failures & Zero Skips)`**  
 
 > [!IMPORTANT]
-> Failed GitHub Actions run `46112338739` on remote HEAD `f461928e0e72b215eaa6d78c6ff99bbf90a507e1` failed at the prerequisite step `Run database catalog & static migration gates` (`Could not find packages/database/tests/**/*.test.js`) while also running on Node.js 20 instead of declared `>=22.0.0`, and did **not** verify the outbox implementation. After fixing `@dfarm/database` test discovery, updating `.github/workflows/dfarm-restart09-postgres17.yml` to Node.js 22 with `DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1`, hardening `scripts/ci-run-restart09-pg17.js`, and fixing schema/SSE-helper/teardown defects in `services/backend/tests/restart09-tenant-realtime-outbox.test.js`, the complete sequence (`npm ci`, `npm run build:backend`, `npm run db:validate`, `npm run db:test`, `ci-pg17-bootstrap.js`, `restart09-outbox-isolation-unit.test.js`, and `ci-run-restart09-pg17.js`) passed locally against disposable PostgreSQL `17.12` (`5/5` TAP tests, `0` failures, `0` skips). `DF-021` remains **OPEN / PARTIAL** until the remote GitHub Actions PostgreSQL 17 gate passes on the committed/pushed SHA.
+> Failed GitHub Actions run `46112338739` on prior HEAD `f461928e0e72b215eaa6d78c6ff99bbf90a507e1` failed at the prerequisite step `Run database catalog & static migration gates` (`Could not find packages/database/tests/**/*.test.js`) while also running on Node.js 20 instead of declared `>=22.0.0`, and did **not** verify the outbox implementation. After fixing `@dfarm/database` test discovery, updating `.github/workflows/dfarm-restart09-postgres17.yml` to Node.js 22 with `DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1`, hardening `scripts/ci-run-restart09-pg17.js`, and fixing schema/SSE-helper/teardown defects in `services/backend/tests/restart09-tenant-realtime-outbox.test.js`, the full gate passed locally (`5/5` TAP, `0` skips) and subsequently passed cleanly on GitHub Actions Run **`46115119745`** (`SUCCESS`, PostgreSQL `17.12`, zero failures and zero skips) on `36a4a5092be3a4458d74ce2255d7f1bbca9181f5`. `DF-021` is **`FIXED / VERIFIED`**.
 
 ---
 
@@ -109,4 +109,4 @@ Repository-wide search (`git grep -n "dashboard_events_outbox"`) across `service
   8. `node scripts/ci-run-restart09-pg17.js` — **PASS** against real PostgreSQL `17.12` (`5/5` TAP tests = `1` suite + `4` multi-scenario subtests, `0` fail, `0` skip, `0` `pg-mem` fallback, exit `0`).
   9. `node scripts/ci-run-offline-lifecycle-suite.js` — **PASS** (`22/22`, `0` fail, `0` skip).
   10. Fail-closed checks (`TEST_POSTGRES_URL=""` + `REQUIRE_REAL_POSTGRES=1`) — **PASS** (both `ci-run-restart09-pg17.js` and `restart09-tenant-realtime-outbox.test.js` exit `1`).
-- **Remaining Action:** Commit & push with operator approval and capture the passing GitHub Actions run ID for [`.github/workflows/dfarm-restart09-postgres17.yml`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/.github/workflows/dfarm-restart09-postgres17.yml). See [`DFARM_RESTART_09_CI_UNBLOCK_AND_PG17_VERIFICATION_REPORT.md`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/DFARM_RESTART_09_CI_UNBLOCK_AND_PG17_VERIFICATION_REPORT.md).
+- **Verified Remote CI Outcome:** Committed & pushed onto `36a4a5092be3a4458d74ce2255d7f1bbca9181f5`, where [`.github/workflows/dfarm-restart09-postgres17.yml`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/.github/workflows/dfarm-restart09-postgres17.yml) passed in GitHub Actions Run **`46115119745`** (**`SUCCESS`**, PostgreSQL `17.12`, zero failures and zero skips). See [`DFARM_RESTART_09_CI_UNBLOCK_AND_PG17_VERIFICATION_REPORT.md`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/DFARM_RESTART_09_CI_UNBLOCK_AND_PG17_VERIFICATION_REPORT.md).

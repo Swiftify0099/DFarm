@@ -3,15 +3,15 @@ export declare class UnionBankApiClient {
     private config;
     constructor(customConfig?: Partial<UnionBankConfig>);
     getEnvironment(): UnionBankEnvironment;
-    getDebitAccountNumber(): string;
+    getDebitAccountNumber(overrideDebitAccount?: string): string;
     /**
      * Checks whether the current environment has valid Union Bank production credentials.
      */
-    isProductionReady(): boolean;
+    isProductionReady(overrideDebitAccount?: string): boolean;
     /**
      * Submits a payment batch directly to Union Bank API or Host-to-Host connector.
-     * In Production: Enforces real bank credentials. If unconfigured, throws an informative error.
-     * In UAT: Operates in test simulation/sandbox mode.
+     * In Production: Enforces real bank credentials & configured dairy debit account.
+     * In UAT: Operates in test simulation/sandbox mode while still enforcing DF-024 debit validation.
      */
     submitBatch(payload: UnionBankBatchPayload): Promise<{
         success: boolean;

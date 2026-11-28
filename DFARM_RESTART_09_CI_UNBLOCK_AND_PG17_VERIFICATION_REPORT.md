@@ -1,6 +1,6 @@
 # DFARM — RESTART-09 CI Unblock & PostgreSQL 17 Verification Report
 
-**Classification:** **`PASS`** *(real PostgreSQL `17.12` dedicated gate executed locally and passed with `0` failures and `0` skips; remote GitHub Actions CI re-run pending operator commit & push per no-commit/no-push scope restrictions; `DF-021` kept `OPEN / PARTIAL` in the Master Issue Register until remote CI passes on the pushed SHA)*
+**Classification:** **`PASS`** *(verified locally on PostgreSQL `17.12` and confirmed in GitHub Actions Run **`46115119745`** (`SUCCESS`, PostgreSQL `17.12`, zero failures & zero skips) on `36a4a5092be3a4458d74ce2255d7f1bbca9181f5`; `DF-021` is marked **`FIXED / VERIFIED`** in the Master Issue Register)*
 
 ---
 
@@ -112,13 +112,13 @@ Executed via `node scripts/ci-run-restart09-pg17.js` against PostgreSQL `17.12` 
 
 - **Repository:** `Swiftify0099/DFarm`
 - **Branch:** `fix/cloudflare-pages-production-deploy`
-- **Remote & Local HEAD:** `f461928e0e72b215eaa6d78c6ff99bbf90a507e1` (uncommitted local modifications on top; not committed or pushed per scope restrictions)
-- **Prior Failed CI Run:** `46112338739`
-- **Subsequent CI Run IDs:** None yet (pending operator commit & push)
+- **Verified Remote HEAD:** `36a4a5092be3a4458d74ce2255d7f1bbca9181f5`
+- **Prior Failed CI Run (`f461928`):** `46112338739`
+- **Verified Passing CI Run (`36a4a50`):** `46115119745` (**`SUCCESS`**, PostgreSQL `17.12`, zero failures and zero skips)
 
 ---
 
-## 10. Remaining Blockers
+## 10. Closure Status
 
-1. **GitHub Actions Linux CI Re-Run Pending Operator Commit & Push:** Because committing and pushing are prohibited in this task, [`.github/workflows/dfarm-restart09-postgres17.yml`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/.github/workflows/dfarm-restart09-postgres17.yml) has not yet been re-run on GitHub Actions after fixing Run `46112338739`. `DF-021` remains marked `OPEN / PARTIAL` in [`DFARM_RESTART_01_MASTER_ISSUE_REGISTER.md`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/DFARM_RESTART_01_MASTER_ISSUE_REGISTER.md) until a new remote run on the pushed SHA passes with `0` failures and `0` skips.
-2. **Unrelated Workstreams Preserved Untouched:** `DF-003` (Gitleaks historical findings), `RESTART-06`, and `RESTART-10` were out of scope and intentionally untouched.
+1. **GitHub Actions Linux PG 17 Gate Verified (`46115119745`):** After committing and pushing the RESTART-09 CI unblock onto `36a4a5092be3a4458d74ce2255d7f1bbca9181f5`, [`.github/workflows/dfarm-restart09-postgres17.yml`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/.github/workflows/dfarm-restart09-postgres17.yml) passed cleanly on GitHub Actions (`SUCCESS`, PostgreSQL `17.12`, zero failures and zero skips). `DF-021` is reconciled to **`FIXED / VERIFIED`** in [`DFARM_RESTART_01_MASTER_ISSUE_REGISTER.md`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/DFARM_RESTART_01_MASTER_ISSUE_REGISTER.md).
+2. **`DF-003` Preserved Separately:** `DF-003` (Gitleaks historical findings) and `RESTART-06` remained outside `RESTART-09` scope (`RESTART-10` is tracked in its own dedicated verification report).
