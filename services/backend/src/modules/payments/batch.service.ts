@@ -21,11 +21,16 @@ import { UnionBankSubmissionService, SubmitBatchToUnionBankParams } from '../../
 import { UnionBankReconciliationService } from '../../integrations/banking/union-bank/UnionBankReconciliationService.js';
 import { UnionBankStatusInquiryService } from '../../integrations/banking/union-bank/UnionBankStatusInquiryService.js';
 import { UnionBankValidator } from '../../integrations/banking/union-bank/UnionBankValidator.js';
-import { CredentialEncryption } from '../../infrastructure/security/CredentialEncryption.js';
+import {
+  createLegacyPlaintextTracker,
+  decryptStoredBankAccountFailClosed,
+  encryptBeneficiaryBankAccount,
+  hasEncryptedEnvelopeMarker,
+  resolveBeneficiaryBankMask,
+} from './beneficiary-bank-account.js';
 import {
   flushDeferredNotifications,
   getStrictPaymentTenantDb,
-  maskAccountNumber,
   recomputeBatchAggregatesInTransaction,
   resolveOperationalOrganizationId,
   type DeferredNotification,
@@ -155,6 +160,7 @@ export class BatchService {
 
           eligibleBeneficiaries = calculationResult.farmers.filter((f: any) => {
             if (f.netPayableAmount <= 0) return false;
+            if (f.hasMalformedCiphertext) return false;
             if (params.excludeUnverifiedBankDetails && !f.isBankValid) return false;
             return true;
           });
@@ -171,7 +177,7 @@ export class BatchService {
         } else {
           let customersQuery = `
             SELECT c.id, c.primary_center_id, c.full_name, c.farmer_code, c.bank_name,
-                   c.bank_account_number, c.bank_ifsc_code, cla.current_balance
+                   c.bank_account_number, c.bank_account_mask, c.bank_ifsc_code, cla.current_balance
             FROM customers c
             JOIN customer_ledger_accounts cla ON cla.customer_id = c.id
             WHERE c.organization_id = $1 AND c.is_deleted = FALSE AND cla.current_balance > 0.00
@@ -204,25 +210,41 @@ export class BatchService {
             );
           }
 
-          eligibleBeneficiaries = eligibleRes.rows.map((r: any) => ({
-            customerId: r.id,
-            farmerCode: r.farmer_code,
-            fullName: r.full_name,
-            centerId: r.primary_center_id,
-            bankName: r.bank_name,
-            bankAccountNumberMask: r.bank_account_number ? maskAccountNumber(r.bank_account_number) : null,
-            bankIfsc: r.bank_ifsc_code,
-            netPayableAmount: Number(r.current_balance),
-            grossMilkAmount: Number(r.current_balance),
-            openingBalance: 0,
-            deductionsAmount: 0,
-            adjustmentsCredit: 0,
-            adjustmentsDebit: 0,
-            alreadyPaidAmount: 0,
-            remainingBalance: 0,
-            sourceLedgerTransactionIds: [],
-            sourceCollectionIds: [],
-          }));
+          const legacyTracker = createLegacyPlaintextTracker('BatchService.createBatch');
+          eligibleBeneficiaries = eligibleRes.rows.map((r: any) => {
+            if (hasEncryptedEnvelopeMarker(r.bank_account_number)) {
+              decryptStoredBankAccountFailClosed(r.bank_account_number, {
+                contextName: `Farmer ${r.farmer_code}`,
+                tracker: legacyTracker,
+              });
+            }
+            const bankMask = resolveBeneficiaryBankMask({
+              storedMask: r.bank_account_mask,
+              storedAccount: r.bank_account_number,
+              allowDecryptFallback: true,
+              tracker: legacyTracker,
+            });
+            return {
+              customerId: r.id,
+              farmerCode: r.farmer_code,
+              fullName: r.full_name,
+              centerId: r.primary_center_id,
+              bankName: r.bank_name,
+              bankAccountNumberMask: bankMask,
+              bankIfsc: r.bank_ifsc_code,
+              netPayableAmount: Number(r.current_balance),
+              grossMilkAmount: Number(r.current_balance),
+              openingBalance: 0,
+              deductionsAmount: 0,
+              adjustmentsCredit: 0,
+              adjustmentsDebit: 0,
+              alreadyPaidAmount: 0,
+              remainingBalance: 0,
+              sourceLedgerTransactionIds: [],
+              sourceCollectionIds: [],
+            };
+          });
+          legacyTracker.flushSummary(organizationId);
 
           totalBatchAmount = eligibleBeneficiaries.reduce((sum, f) => sum + f.netPayableAmount, 0);
           totalBatchAmount = Math.round((totalBatchAmount + Number.EPSILON) * 100) / 100;
@@ -709,23 +731,21 @@ export class BatchService {
         throw new ForbiddenError('Cross-organization access prohibited', 'CROSS_ORG_ACCESS_DENIED');
       }
 
-      const cleanAccount = UnionBankValidator.validateAccountNumber(bankData.bankAccountNumber, cust.full_name);
       const cleanIfsc = UnionBankValidator.validateIfsc(bankData.bankIfscCode, cust.full_name);
       const cleanName = (bankData.bankAccountHolderName || cust.full_name).trim();
       const cleanBank = (bankData.bankName || 'Union Bank of India').trim();
       const newStatus = bankData.verificationStatus || 'VERIFIED';
 
-      const prevMask = cust.bank_account_mask || (cust.bank_account_number ? maskAccountNumber(cust.bank_account_number) : null);
-      const newMask = maskAccountNumber(cleanAccount);
+      const prevMask = resolveBeneficiaryBankMask({
+        storedMask: cust.bank_account_mask,
+        storedAccount: cust.bank_account_number,
+        allowDecryptFallback: true,
+      });
 
-      let storedAccount = cleanAccount;
-      if (process.env['TENANT_DB_ENCRYPTION_KEY'] || process.env['CREDENTIAL_ENCRYPTION_KEY']) {
-        try {
-          storedAccount = CredentialEncryption.encrypt(cleanAccount);
-        } catch {
-          storedAccount = cleanAccount;
-        }
-      }
+      const {
+        encryptedAccount: storedAccount,
+        mask: newMask,
+      } = encryptBeneficiaryBankAccount(bankData.bankAccountNumber, cust.full_name);
 
       await client.query(
         `UPDATE customers

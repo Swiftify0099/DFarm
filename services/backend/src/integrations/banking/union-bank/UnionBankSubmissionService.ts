@@ -32,8 +32,11 @@ import {
   NotFoundError,
 } from '../../../shared/errors/app-error.js';
 import type { AuthContext } from '../../../middleware/authenticate.js';
-import { CredentialEncryption } from '../../../infrastructure/security/CredentialEncryption.js';
 import { logger } from '../../../shared/logger/index.js';
+import {
+  createLegacyPlaintextTracker,
+  decryptStoredBankAccountFailClosed,
+} from '../../../modules/payments/beneficiary-bank-account.js';
 import {
   getStrictPaymentTenantDb,
   maskAccountNumber,
@@ -77,19 +80,6 @@ export interface SubmitBatchToUnionBankResult {
   bankAcknowledgementRef?: string | null;
 }
 
-function decryptAccountIfNeeded(raw: string | null | undefined): string {
-  const val = (raw || '').trim();
-  if (!val) return '';
-  if (val.includes(':')) {
-    try {
-      return CredentialEncryption.decrypt(val);
-    } catch {
-      return val;
-    }
-  }
-  return val;
-}
-
 async function resolveDairyAuthorizedDebitAccount(
   client: pg.PoolClient,
   organizationId: string,
@@ -104,13 +94,28 @@ async function resolveDairyAuthorizedDebitAccount(
     [organizationId]
   );
 
-  const configuredFromOrg = decryptAccountIfNeeded(orgRes.rows[0]?.bank_debit_account_encrypted);
-  const candidate = (requestedDebitAccount || configuredFromOrg || '').trim();
+  const trimmedReq = (requestedDebitAccount || '').trim();
+  const orgEnc = orgRes.rows[0]?.bank_debit_account_encrypted;
+
+  let candidate = trimmedReq;
+  if (!candidate && orgEnc) {
+    const decryptedDebit = decryptStoredBankAccountFailClosed(orgEnc, {
+      contextName: 'Dairy Union Bank Debit Account',
+      notConfiguredCode: 'DAIRY_DEBIT_ACCOUNT_NOT_CONFIGURED',
+    });
+    candidate = decryptedDebit.accountNumber;
+  }
 
   if (!candidate) {
     throw new BadRequestError(
       'Authorized dairy Union Bank debit account is not configured for this dairy. Bank file generation and submission rejected.',
       'DAIRY_DEBIT_ACCOUNT_NOT_CONFIGURED'
+    );
+  }
+  if (candidate.includes(':') || /[^0-9\s-]/.test(candidate)) {
+    throw new BadRequestError(
+      'Invalid dairy Union Bank debit account number format. Must contain 9 to 18 numeric digits.',
+      'INVALID_BANK_ACCOUNT'
     );
   }
 
@@ -284,6 +289,7 @@ export class UnionBankSubmissionService {
       }
 
       // Verify all beneficiaries & decrypt beneficiary accounts without logging them
+      const legacyTracker = createLegacyPlaintextTracker('UnionBankSubmissionService.submitBatch');
       const payloadItems = itemsRes.rows.map((r: any) => {
         if (r.beneficiary_status !== 'ACTIVE') {
           throw new BadRequestError(
@@ -291,9 +297,12 @@ export class UnionBankSubmissionService {
             'BENEFICIARY_NOT_ACTIVE'
           );
         }
-        const plainBeneficiaryAccount = decryptAccountIfNeeded(r.bank_account_number);
+        const decryptedBeneficiary = decryptStoredBankAccountFailClosed(r.bank_account_number, {
+          contextName: `Farmer ${r.farmer_code}`,
+          tracker: legacyTracker,
+        });
         const validatedBeneficiaryAccount = UnionBankValidator.validateAccountNumber(
-          plainBeneficiaryAccount,
+          decryptedBeneficiary.accountNumber,
           `Farmer ${r.farmer_code}`
         );
         const validatedIfsc = UnionBankValidator.validateIfsc(r.bank_ifsc, `Farmer ${r.farmer_code}`);
@@ -311,6 +320,7 @@ export class UnionBankSubmissionService {
           narration: `Milk Payment ${batch.batch_number} - ${r.farmer_code}`,
         };
       });
+      legacyTracker.flushSummary(organizationId);
 
       const payload: UnionBankBatchPayload = {
         batchId: batch.id,

@@ -8,10 +8,15 @@ import { NotificationService } from '../notifications/services/notification.serv
 import { logger } from '../../shared/logger/index.js';
 /**
  * Masks sensitive bank account digits while keeping the trailing 4 characters
- * where available so logs, responses, and errors never expose full numbers.
+ * where available so logs, responses, and errors never expose full numbers
+ * or extract trailing digits from AES-256-GCM ciphertext (`iv:authTag:ciphertext`).
  */
 export function maskAccountNumber(account) {
-    const digits = String(account || '').replace(/[^0-9]/g, '');
+    const raw = String(account || '').trim();
+    if (!raw || raw.includes(':')) {
+        return 'XXXX';
+    }
+    const digits = raw.replace(/[^0-9]/g, '');
     if (digits.length >= 4) {
         return `XXXX-XXXX-${digits.slice(-4)}`;
     }

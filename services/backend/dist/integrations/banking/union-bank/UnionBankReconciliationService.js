@@ -131,7 +131,7 @@ export class UnionBankReconciliationService {
            bi.bank_reference_number,
            c.farmer_code,
            c.full_name AS customer_name,
-           c.bank_account_mask,
+           COALESCE(bi.bank_account_mask, cp.bank_account_mask, c.bank_account_mask) AS bank_account_mask,
            cp.center_id,
            cp.status AS payout_status,
            cp.reference_number AS payout_reference_number,

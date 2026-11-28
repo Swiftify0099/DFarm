@@ -6,6 +6,7 @@ import { ForbiddenError, ValidationError, NotFoundError } from '../../shared/err
 import { query } from '../../config/db.js';
 import { NotificationService } from '../notifications/services/notification.service.js';
 import { logger } from '../../shared/logger/index.js';
+import { resolveBeneficiaryBankMask } from '../payments/beneficiary-bank-account.js';
 import type {
   CustomerProfile,
   PaginatedCustomersResult,
@@ -468,10 +469,11 @@ export class CustomerService {
       date: payoutRes.rows[0].settled_at || payoutRes.rows[0].created_at,
     } : null;
 
-    // Mask bank account for privacy
-    const maskedBank = customer.bankAccountNumber && customer.bankAccountNumber.length >= 4
-      ? 'XXXX-XXXX-' + customer.bankAccountNumber.slice(-4)
-      : null;
+    // Mask bank account for privacy without exposing encrypted ciphertext fragments
+    const maskedBank = resolveBeneficiaryBankMask({
+      storedAccount: customer.bankAccountNumber,
+      allowDecryptFallback: true,
+    });
 
     return {
       customer: {

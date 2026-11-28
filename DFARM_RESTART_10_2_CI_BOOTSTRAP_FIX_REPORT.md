@@ -3,10 +3,12 @@
 **Task:** `RESTART-10.2` (`DF-022` + `DF-024` CI Bootstrap Remediation & Remote Reconciliation)  
 **Repository:** `Swiftify0099/DFarm`  
 **Branch:** `fix/cloudflare-pages-production-deploy`  
-**Current Remote & Local HEAD:** `2a57b0de2225ea080eba005cc74fe7c8c8d40609`  
+**Current Public Remote & Local HEAD:** `af578d8624099c8ef020643de5c3d135b75a4a69` *(commit where `RESTART-10.2` landed; superseded locally by uncommitted `RESTART-10.3` worktree edits)*  
+**RESTART-10.2 Baseline Remote HEAD:** `2a57b0de2225ea080eba005cc74fe7c8c8d40609`  
 **RESTART-10.1 Baseline:** `36a4a5092be3a4458d74ce2255d7f1bbca9181f5`  
 **Failed GitHub Actions Run (`2a57b0d`):** `46123080053` (Job `140912227936`)  
-**Classification:** **`OPEN / PARTIAL`** *(CI workflow preflight defect fixed locally and all offline builds/unit/regression/fail-closed checks verified; live two-tenant PostgreSQL `17.12` GitHub Actions execution awaits operator commit/push of the `RESTART-10.2` workflow fix because Docker Desktop is stopped and PostgreSQL 17 is absent locally)*
+**Subsequent GitHub Actions Run (`af578d8`):** `46125434340` — **`FAILURE`** *(CI preflight, `npm ci`, builds, `db:validate`, pre-bootstrap `db:test`, PG17 role bootstrap, and `restart10-unit` `10/10` all passed; integration test failed before Groups A–L on `customers.bank_account_mask`, remediated in `RESTART-10.3` — see [`DFARM_RESTART_10_3_PG17_TEST_FIXTURE_AND_GROUP_L_REPORT.md`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/DFARM_RESTART_10_3_PG17_TEST_FIXTURE_AND_GROUP_L_REPORT.md))*  
+**Classification:** **`OPEN / PARTIAL`** *(The `RESTART-10.2` CI workflow bootstrap fix was pushed in `af578d8` and confirmed passing through preflight/bootstrap/unit `10/10` in Run `46125434340`; `RESTART-10.3` fixes the exposed test-fixture schema mismatch and Group L assertion locally while live PG `17.12` execution awaits commit/push and `UnionBankReconciliationService.ts:246` `c.bank_account_mask` remediation)*
 
 ---
 
@@ -88,7 +90,7 @@ Executed locally on Node `v22.20.0` / npm `10.9.3` after the workflow correction
 
 ---
 
-## 5. GitHub Actions Verification Status (`2a57b0d` & Pending Retry)
+## 5. GitHub Actions Verification Status (`2a57b0d`, `af578d8` Run `46125434340`, & `RESTART-10.3` Follow-Up)
 
 Committed & pushed SHA `2a57b0de2225ea080eba005cc74fe7c8c8d40609` triggered:
 - **RESTART-03:** Run `46123079973` — **`SUCCESS`**
@@ -98,7 +100,8 @@ Committed & pushed SHA `2a57b0de2225ea080eba005cc74fe7c8c8d40609` triggered:
 - **RESTART-10:** Run `46123080053` (Job `140912227936`) — **`FAILURE`** at Step 6 (`Verify PostgreSQL 17 connectivity & server version`: `ERR_MODULE_NOT_FOUND: Cannot find package 'pg' imported from [eval]`)
 - **Secret Scanning (Gitleaks):** Run `46123080046` — **`FAILURE`** (separate security workstream)
 
-**Retry Run on `RESTART-10.2` Workflow Fix:** **NOT YET EXECUTED** — no commit/push was performed per Git safety rules; the new RESTART-10 PostgreSQL `17.12` run ID, tested commit SHA, job logs, TAP totals, and server version must be captured after the operator commits and pushes these changes.
+Committed & pushed SHA `af578d8624099c8ef020643de5c3d135b75a4a69` (`RESTART-10.2`) triggered:
+- **RESTART-10:** Run `46125434340` — **`FAILURE`**: PostgreSQL preflight, `npm ci`, builds, `db:validate`, pre-bootstrap `db:test`, PG17 role bootstrap, and `restart10-unit` (`10/10`) **all passed**; the two-tenant integration test failed before Groups A–L because `seedTenantDairy()` inserted non-existent `customers.bank_account_mask` (with secondary cleanup log noise `role "dfarm_r10_app_..." does not exist`). See [`DFARM_RESTART_10_3_PG17_TEST_FIXTURE_AND_GROUP_L_REPORT.md`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/DFARM_RESTART_10_3_PG17_TEST_FIXTURE_AND_GROUP_L_REPORT.md) for the `RESTART-10.3` fixture, Group L, and cleanup fixes plus the newly identified `UnionBankReconciliationService.ts:246` / `batch.service.ts:718,734` production SQL blocker.
 
 ---
 
@@ -150,5 +153,5 @@ Because GitHub Actions Run `46123080053` aborted at Step 6 before `npm ci` and P
 
 - **Repository:** `Swiftify0099/DFarm`
 - **Branch:** `fix/cloudflare-pages-production-deploy`
-- **Local & Remote HEAD (`origin/fix/cloudflare-pages-production-deploy`):** `2a57b0de2225ea080eba005cc74fe7c8c8d40609`
-- **Worktree State:** Uncommitted `RESTART-10.2` changes only (`.github/workflows/dfarm-restart10-postgres17.yml`, `DFARM_RESTART_01_MASTER_ISSUE_REGISTER.md`, `DFARM_RESTART_10_UNION_BANK_TENANT_ISOLATION_REPORT.md`, and `DFARM_RESTART_10_2_CI_BOOTSTRAP_FIX_REPORT.md`); zero commits, pushes, history rewrites, or `.temp` modifications executed.
+- **Current Remote & Local HEAD (`origin/fix/cloudflare-pages-production-deploy`):** `af578d8624099c8ef020643de5c3d135b75a4a69`
+- **Worktree State:** Uncommitted `RESTART-10.3` updates on top of `af578d8` (`services/backend/tests/restart10-union-bank-tenant-isolation.test.js`, `DFARM_RESTART_01_MASTER_ISSUE_REGISTER.md`, `DFARM_RESTART_10_UNION_BANK_TENANT_ISOLATION_REPORT.md`, `DFARM_RESTART_10_2_CI_BOOTSTRAP_FIX_REPORT.md`, and new `DFARM_RESTART_10_3_PG17_TEST_FIXTURE_AND_GROUP_L_REPORT.md`); zero commits, pushes, history rewrites, or `.temp` modifications executed.

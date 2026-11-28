@@ -21,6 +21,7 @@ export interface FarmerPayableItem {
     beneficiaryStatus: string;
     isBankValid: boolean;
     hasBankValidationWarning: boolean;
+    hasMalformedCiphertext?: boolean;
     bankValidationErrors: string[];
     openingBalance: number;
     grossMilkAmount: number;

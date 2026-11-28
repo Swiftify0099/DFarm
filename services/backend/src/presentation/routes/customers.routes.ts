@@ -29,6 +29,7 @@ import { CustomerNotFoundError } from '../../domain/errors/index.js';
 import { PhoneNumber } from '../../domain/value-objects/index.js';
 import { doveOtpService } from '../../infrastructure/otp/DoveOtpService.js';
 import { logger } from '../../shared/logger/index.js';
+import { resolveBeneficiaryBankMask } from '../../modules/payments/beneficiary-bank-account.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -124,14 +125,19 @@ router.get('/me', authenticate, async (req: Request, res: Response, next: NextFu
     const customerId = req.user!.userId;
     const data = await getCustomerByIdUseCase.execute(customerId, req.user?.organizationId);
 
-    // Safely mask bank account number
+    // Safely mask bank account number without slicing encrypted ciphertext
     const maskedData: any = { ...data };
     if (maskedData.bankDetails && maskedData.bankDetails.accountNumber) {
-      const rawAcc = String(maskedData.bankDetails.accountNumber);
+      const safeMask =
+        resolveBeneficiaryBankMask({
+          storedMask: maskedData.bankDetails.accountNumberMask,
+          storedAccount: String(maskedData.bankDetails.accountNumber),
+          allowDecryptFallback: true,
+        }) || 'XXXX';
       maskedData.bankDetails = {
         ...maskedData.bankDetails,
-        accountNumberMask: rawAcc.length >= 4 ? `XXXX-XXXX-${rawAcc.slice(-4)}` : 'XXXX',
-        accountNumber: rawAcc.length >= 4 ? `XXXX-XXXX-${rawAcc.slice(-4)}` : 'XXXX',
+        accountNumberMask: safeMask,
+        accountNumber: safeMask,
       };
     }
 
@@ -1253,14 +1259,19 @@ router.get('/:id', authenticate, async (req: Request, res: Response, next: NextF
       return;
     }
 
-    // Safely mask bank account number in general response
+    // Safely mask bank account number in general response without slicing encrypted ciphertext
     const maskedData: any = { ...data };
     if (maskedData.bankDetails && maskedData.bankDetails.accountNumber) {
-      const rawAcc = String(maskedData.bankDetails.accountNumber);
+      const safeMask =
+        resolveBeneficiaryBankMask({
+          storedMask: maskedData.bankDetails.accountNumberMask,
+          storedAccount: String(maskedData.bankDetails.accountNumber),
+          allowDecryptFallback: true,
+        }) || 'XXXX';
       maskedData.bankDetails = {
         ...maskedData.bankDetails,
-        accountNumberMask: rawAcc.length >= 4 ? `XXXX-XXXX-${rawAcc.slice(-4)}` : 'XXXX',
-        accountNumber: rawAcc.length >= 4 ? `XXXX-XXXX-${rawAcc.slice(-4)}` : 'XXXX',
+        accountNumberMask: safeMask,
+        accountNumber: safeMask,
       };
     }
 

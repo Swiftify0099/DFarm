@@ -12,7 +12,11 @@ export class UnionBankValidator {
         return this.IFSC_REGEX.test((ifsc || '').trim().toUpperCase());
     }
     static isValidAccountNumber(account) {
-        const clean = (account || '').trim().replace(/[^0-9]/g, '');
+        const raw = (account || '').trim();
+        if (!raw || raw.includes(':') || /[^0-9\s-]/.test(raw)) {
+            return false;
+        }
+        const clean = raw.replace(/[^0-9]/g, '');
         return this.ACCOUNT_REGEX.test(clean) && !this.ALL_ZERO_REGEX.test(clean);
     }
     /**
@@ -30,7 +34,11 @@ export class UnionBankValidator {
      * Account digits are masked in any thrown error message.
      */
     static validateAccountNumber(account, contextName) {
-        const clean = (account || '').trim().replace(/[^0-9]/g, '');
+        const raw = (account || '').trim();
+        if (raw.includes(':') || /[^0-9\s-]/.test(raw)) {
+            throw new BadRequestError(`Invalid bank account number (${maskAccountNumber(raw)})${contextName ? ` for ${contextName}` : ''}. Must contain 9 to 18 numeric digits.`, 'INVALID_BANK_ACCOUNT');
+        }
+        const clean = raw.replace(/[^0-9]/g, '');
         if (!clean) {
             throw new BadRequestError(`Bank account number is not configured${contextName ? ` for ${contextName}` : ''}.`, contextName?.toLowerCase().includes('debit') ? 'DAIRY_DEBIT_ACCOUNT_NOT_CONFIGURED' : 'INVALID_BANK_ACCOUNT');
         }

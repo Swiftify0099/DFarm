@@ -1740,6 +1740,7 @@ export class TenantDatabaseManager {
 
     try {
       db.public.none('ALTER TABLE customers ADD COLUMN IF NOT EXISTS global_customer_id text;');
+      db.public.none('ALTER TABLE customers ADD COLUMN IF NOT EXISTS bank_account_mask VARCHAR(30);');
       db.public.none('ALTER TABLE users ADD COLUMN IF NOT EXISTS mobile_number VARCHAR(20);');
       db.public.none('ALTER TABLE users ADD COLUMN IF NOT EXISTS normalized_mobile_number VARCHAR(20);');
       db.public.none('ALTER TABLE users ADD COLUMN IF NOT EXISTS user_role VARCHAR(30);');

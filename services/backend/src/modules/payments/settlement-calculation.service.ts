@@ -8,6 +8,10 @@ import type pg from 'pg';
 import { BadRequestError, ForbiddenError } from '../../shared/errors/app-error.js';
 import type { AuthContext } from '../../middleware/authenticate.js';
 import { getStrictPaymentTenantDb } from './tenant-payment-context.js';
+import {
+  createLegacyPlaintextTracker,
+  validateBeneficiaryBankAccountForSettlement,
+} from './beneficiary-bank-account.js';
 
 export interface CalculationPeriodParams {
   organizationId: string;
@@ -31,6 +35,7 @@ export interface FarmerPayableItem {
   beneficiaryStatus: string;
   isBankValid: boolean;
   hasBankValidationWarning: boolean;
+  hasMalformedCiphertext?: boolean;
   bankValidationErrors: string[];
   
   // Financial breakdown (PostgreSQL NUMERIC rounded to 2 decimals)
@@ -128,7 +133,7 @@ export class SettlementCalculationService {
     let custSql = `
       SELECT 
         c.id, c.farmer_code, c.full_name, c.primary_center_id, c.bank_name,
-        c.bank_account_number, c.bank_ifsc_code, c.bank_account_holder_name,
+        c.bank_account_number, c.bank_account_mask, c.bank_ifsc_code, c.bank_account_holder_name,
         COALESCE(c.bank_verification_status, 'UNVERIFIED') as bank_verification_status,
         COALESCE(c.beneficiary_status, 'ACTIVE') as beneficiary_status,
         dc.name as center_name, dc.code as center_code
@@ -300,6 +305,7 @@ export class SettlementCalculationService {
     let warningsCount = 0;
     let invalidBankCount = 0;
     let eligibleCount = 0;
+    const legacyTracker = createLegacyPlaintextTracker('SettlementCalculationService.calculateSettlement');
 
     for (const cust of customers) {
       const calc = calcMap.get(cust.id) || {
@@ -338,16 +344,16 @@ export class SettlementCalculationService {
       // Remaining balance reflects cumulative ledger balance minus current reservation
       const remainingBalance = Math.round(((totalCredit - totalCharges - alreadyPaidAmount - netPayable) + Number.EPSILON) * 100) / 100;
 
-      // Validate Bank Details
+      // Validate Bank Details (decrypting AES-256-GCM ciphertext or accepting strict legacy numeric plaintext)
       const bankErrors: string[] = [];
-      const cleanAccount = (cust.bank_account_number || '').trim().replace(/[^0-9]/g, '');
-      const cleanIfsc = (cust.bank_ifsc_code || '').trim().toUpperCase();
+      const accountCheck = validateBeneficiaryBankAccountForSettlement(cust.bank_account_number, {
+        storedMask: cust.bank_account_mask,
+        contextName: cust.full_name,
+        tracker: legacyTracker,
+      });
+      bankErrors.push(...accountCheck.errors);
 
-      if (!cleanAccount) {
-        bankErrors.push('Missing bank account number');
-      } else if (cleanAccount.length < 9 || cleanAccount.length > 18) {
-        bankErrors.push(`Invalid account number length (${cleanAccount.length} digits; expected 9 to 18 digits)`);
-      }
+      const cleanIfsc = (cust.bank_ifsc_code || '').trim().toUpperCase();
 
       if (!cleanIfsc) {
         bankErrors.push('Missing IFSC code');
@@ -365,9 +371,7 @@ export class SettlementCalculationService {
         warningsCount += bankErrors.length;
       }
 
-      const mask = cleanAccount.length >= 4
-        ? 'XXXX-XXXX-' + cleanAccount.slice(-4)
-        : (cleanAccount ? 'XXXX-' + cleanAccount : null);
+      const mask = accountCheck.mask;
 
       if (netPayable > 0.00 && isBankValid) {
         eligibleCount++;
@@ -386,6 +390,7 @@ export class SettlementCalculationService {
         beneficiaryStatus: cust.beneficiary_status || 'ACTIVE',
         isBankValid,
         hasBankValidationWarning: !isBankValid || cust.bank_verification_status !== 'VERIFIED',
+        hasMalformedCiphertext: accountCheck.hasMalformedCiphertext,
         bankValidationErrors: bankErrors,
         openingBalance,
         grossMilkAmount,
@@ -439,6 +444,8 @@ export class SettlementCalculationService {
       cEntry.totalAlreadyPaid = Math.round((cEntry.totalAlreadyPaid + alreadyPaidAmount) * 100) / 100;
       cEntry.totalRemainingBalance = Math.round((cEntry.totalRemainingBalance + remainingBalance) * 100) / 100;
     }
+
+    legacyTracker.flushSummary(organizationId);
 
     const calculatedAt = new Date().toISOString();
     const snapshotData = {

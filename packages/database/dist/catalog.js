@@ -58,6 +58,7 @@ export const MIGRATION_MANIFEST = [
     { version: '046', filename: '046_complete_milk_collection_session_organization_id.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Include organization_id in complete_milk_collection_session milk_collections insert after 039 NOT NULL constraint' },
     { version: '047', filename: '047_advance_response_contract_balanceAfter.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Fix post_customer_advance response contract: add balanceAfter alias to new-execution return for consistency with idempotent-replay path (RESTART-03.5 Fix F)' },
     { version: '048', filename: '048_union_bank_reconciliation_idempotency_hardening.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Allow REVERSED batch items, harden fail/reverse payout idempotency & conflict safety, and enforce tenant session RLS across reconciliation tables (DF-022 / RESTART-10)' },
+    { version: '049', filename: '049_customer_beneficiary_bank_encryption_and_mask.sql', target: MigrationTarget.TENANT_OPERATIONAL, description: 'Widen customers.bank_account_number to TEXT for AES-256-GCM ciphertext, add customers.bank_account_mask with safe legacy backfill, and update create_customer_payout to use v_customer.bank_account_mask (RESTART-10.4)' },
 ];
 export const MIGRATION_FILES = MIGRATION_MANIFEST
     .filter(m => m.target !== MigrationTarget.MANUAL_REVIEW_REQUIRED)

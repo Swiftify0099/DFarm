@@ -23,36 +23,33 @@
 // ==============================================================================
 import crypto from 'node:crypto';
 import { AppError, BadRequestError, ConflictError, ForbiddenError, NotFoundError, } from '../../../shared/errors/app-error.js';
-import { CredentialEncryption } from '../../../infrastructure/security/CredentialEncryption.js';
 import { logger } from '../../../shared/logger/index.js';
+import { createLegacyPlaintextTracker, decryptStoredBankAccountFailClosed, } from '../../../modules/payments/beneficiary-bank-account.js';
 import { getStrictPaymentTenantDb, maskAccountNumber, resolveOperationalOrganizationId, } from '../../../modules/payments/tenant-payment-context.js';
 import { UnionBankFileGenerator } from './UnionBankFileGenerator.js';
 import { UnionBankApiClient } from './UnionBankApiClient.js';
 import { UnionBankValidator } from './UnionBankValidator.js';
-function decryptAccountIfNeeded(raw) {
-    const val = (raw || '').trim();
-    if (!val)
-        return '';
-    if (val.includes(':')) {
-        try {
-            return CredentialEncryption.decrypt(val);
-        }
-        catch {
-            return val;
-        }
-    }
-    return val;
-}
 async function resolveDairyAuthorizedDebitAccount(client, organizationId, requestedDebitAccount) {
     // Check tenant-scoped stored corporate bank debit account in tenant DB if present
     const orgRes = await client.query(`SELECT bank_debit_account_encrypted
      FROM organizations
      WHERE id = $1
      LIMIT 1;`, [organizationId]);
-    const configuredFromOrg = decryptAccountIfNeeded(orgRes.rows[0]?.bank_debit_account_encrypted);
-    const candidate = (requestedDebitAccount || configuredFromOrg || '').trim();
+    const trimmedReq = (requestedDebitAccount || '').trim();
+    const orgEnc = orgRes.rows[0]?.bank_debit_account_encrypted;
+    let candidate = trimmedReq;
+    if (!candidate && orgEnc) {
+        const decryptedDebit = decryptStoredBankAccountFailClosed(orgEnc, {
+            contextName: 'Dairy Union Bank Debit Account',
+            notConfiguredCode: 'DAIRY_DEBIT_ACCOUNT_NOT_CONFIGURED',
+        });
+        candidate = decryptedDebit.accountNumber;
+    }
     if (!candidate) {
         throw new BadRequestError('Authorized dairy Union Bank debit account is not configured for this dairy. Bank file generation and submission rejected.', 'DAIRY_DEBIT_ACCOUNT_NOT_CONFIGURED');
+    }
+    if (candidate.includes(':') || /[^0-9\s-]/.test(candidate)) {
+        throw new BadRequestError('Invalid dairy Union Bank debit account number format. Must contain 9 to 18 numeric digits.', 'INVALID_BANK_ACCOUNT');
     }
     // Never allow platform env fallback or all-zero placeholder accounts
     return UnionBankValidator.validateAccountNumber(candidate, 'Dairy Union Bank Debit Account');
@@ -168,12 +165,16 @@ export class UnionBankSubmissionService {
                 throw new BadRequestError('Payment batch contains no items for submission', 'EMPTY_BATCH');
             }
             // Verify all beneficiaries & decrypt beneficiary accounts without logging them
+            const legacyTracker = createLegacyPlaintextTracker('UnionBankSubmissionService.submitBatch');
             const payloadItems = itemsRes.rows.map((r) => {
                 if (r.beneficiary_status !== 'ACTIVE') {
                     throw new BadRequestError(`Cannot submit batch: Farmer ${r.farmer_code} has non-active beneficiary status '${r.beneficiary_status}'`, 'BENEFICIARY_NOT_ACTIVE');
                 }
-                const plainBeneficiaryAccount = decryptAccountIfNeeded(r.bank_account_number);
-                const validatedBeneficiaryAccount = UnionBankValidator.validateAccountNumber(plainBeneficiaryAccount, `Farmer ${r.farmer_code}`);
+                const decryptedBeneficiary = decryptStoredBankAccountFailClosed(r.bank_account_number, {
+                    contextName: `Farmer ${r.farmer_code}`,
+                    tracker: legacyTracker,
+                });
+                const validatedBeneficiaryAccount = UnionBankValidator.validateAccountNumber(decryptedBeneficiary.accountNumber, `Farmer ${r.farmer_code}`);
                 const validatedIfsc = UnionBankValidator.validateIfsc(r.bank_ifsc, `Farmer ${r.farmer_code}`);
                 const validatedAmount = UnionBankValidator.validateAmount(r.amount);
                 return {
@@ -188,6 +189,7 @@ export class UnionBankSubmissionService {
                     narration: `Milk Payment ${batch.batch_number} - ${r.farmer_code}`,
                 };
             });
+            legacyTracker.flushSummary(organizationId);
             const payload = {
                 batchId: batch.id,
                 batchNumber: batch.batch_number,

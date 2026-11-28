@@ -27,7 +27,8 @@ export interface BatchAggregateStats {
 }
 /**
  * Masks sensitive bank account digits while keeping the trailing 4 characters
- * where available so logs, responses, and errors never expose full numbers.
+ * where available so logs, responses, and errors never expose full numbers
+ * or extract trailing digits from AES-256-GCM ciphertext (`iv:authTag:ciphertext`).
  */
 export declare function maskAccountNumber(account: string | null | undefined): string;
 /**

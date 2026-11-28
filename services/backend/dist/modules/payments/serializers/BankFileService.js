@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { BadRequestError, NotFoundError, ForbiddenError } from '../../../shared/errors/app-error.js';
-import { CredentialEncryption } from '../../../infrastructure/security/CredentialEncryption.js';
+import { createLegacyPlaintextTracker, decryptStoredBankAccountFailClosed, } from '../beneficiary-bank-account.js';
+import { UnionBankValidator } from '../../../integrations/banking/union-bank/UnionBankValidator.js';
 import { getStrictPaymentTenantDb, resolveOperationalOrganizationId, } from '../tenant-payment-context.js';
 import { StandardNeftSerializer } from './StandardNeftSerializer.js';
 import { SbiCmpBankAdapter } from './SbiCmpBankAdapter.js';
@@ -54,12 +55,15 @@ export class BankFileService {
             const orgRes = await client.query('SELECT name, bank_debit_account_encrypted FROM organizations WHERE id = $1 LIMIT 1;', [organizationId]);
             let configuredDebitAccount = options?.debitAccountNumber?.trim() || '';
             if (!configuredDebitAccount && orgRes.rows[0]?.bank_debit_account_encrypted) {
-                const rawEnc = orgRes.rows[0].bank_debit_account_encrypted;
-                configuredDebitAccount = rawEnc.includes(':') ? CredentialEncryption.decrypt(rawEnc) : rawEnc;
+                const decryptedDebit = decryptStoredBankAccountFailClosed(orgRes.rows[0].bank_debit_account_encrypted, {
+                    contextName: 'Dairy Union Bank Debit Account',
+                    notConfiguredCode: 'DAIRY_DEBIT_ACCOUNT_NOT_CONFIGURED',
+                });
+                configuredDebitAccount = decryptedDebit.accountNumber;
             }
             // 4. Fetch Batch Items with Customer Bank Details
             const itemsRes = await client.query(`SELECT bi.id as item_id, bi.payout_id, bi.amount, bi.bank_ifsc, bi.beneficiary_reference,
-                c.farmer_code, c.full_name, c.bank_account_number
+                c.farmer_code, c.full_name, c.bank_account_number, c.bank_account_mask
          FROM payment_batch_items bi
          JOIN customers c ON c.id = bi.customer_id
          WHERE bi.batch_id = $1
@@ -67,29 +71,27 @@ export class BankFileService {
             if (itemsRes.rows.length === 0) {
                 throw new BadRequestError('Payment batch has no items to export', 'EMPTY_BATCH');
             }
-            // 5. Decrypt Bank Accounts Server-Side Under Strict Scope
+            // 5. Decrypt & Strictly Validate Bank Accounts Server-Side Under Strict Scope
+            const legacyTracker = createLegacyPlaintextTracker('BankFileService.exportBatch');
             const exportItems = itemsRes.rows.map((row) => {
-                let plainAccount = row.bank_account_number || '';
-                if (plainAccount.includes(':')) {
-                    try {
-                        plainAccount = CredentialEncryption.decrypt(plainAccount);
-                    }
-                    catch {
-                        // If not AES ciphertext, use raw
-                    }
-                }
+                const decryptedAccount = decryptStoredBankAccountFailClosed(row.bank_account_number, {
+                    contextName: `Farmer ${row.farmer_code}`,
+                    tracker: legacyTracker,
+                });
+                const validatedIfsc = UnionBankValidator.validateIfsc(row.bank_ifsc, `Farmer ${row.farmer_code}`);
                 return {
                     payoutId: row.payout_id,
                     itemId: row.item_id,
                     farmerCode: row.farmer_code,
                     customerName: row.full_name,
-                    bankAccount: plainAccount,
-                    bankIfsc: row.bank_ifsc,
+                    bankAccount: decryptedAccount.accountNumber,
+                    bankIfsc: validatedIfsc,
                     amount: Number(row.amount),
                     referenceNumber: row.beneficiary_reference || `REF-${batch.batch_number}-${row.farmer_code}`,
                     narration: `Milk Settl ${batch.batch_number}`,
                 };
             });
+            legacyTracker.flushSummary(organizationId);
             const exportDetail = {
                 batchId: batch.id,
                 batchNumber: batch.batch_number,

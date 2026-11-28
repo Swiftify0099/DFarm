@@ -77,6 +77,27 @@ describe('DFarm Migration Catalog Integrity, 031 Quarantine & 040 Ownership Suit
     );
   });
 
+  it('3b. Migration 049 belongs exclusively to TENANT_OPERATIONAL and is excluded from CONTROL_PLANE', () => {
+    const entry049 = MIGRATION_MANIFEST.find(m => m.version === '049');
+    assert.ok(entry049, 'Migration 049 must exist in MIGRATION_MANIFEST');
+    assert.equal(entry049.filename, '049_customer_beneficiary_bank_encryption_and_mask.sql');
+    assert.equal(entry049.target, MigrationTarget.TENANT_OPERATIONAL);
+
+    assert.ok(MIGRATION_FILES.includes('049_customer_beneficiary_bank_encryption_and_mask.sql'));
+    assert.ok(
+      TENANT_OPERATIONAL_MIGRATIONS.some(
+        m => m.version === '049' && m.filename === '049_customer_beneficiary_bank_encryption_and_mask.sql'
+      )
+    );
+    assert.equal(
+      CONTROL_PLANE_MIGRATIONS.some(
+        m => m.version === '049' || m.filename === '049_customer_beneficiary_bank_encryption_and_mask.sql'
+      ),
+      false,
+      '049_customer_beneficiary_bank_encryption_and_mask.sql must NEVER be on CONTROL_PLANE_MIGRATIONS'
+    );
+  });
+
   it('4. Deterministic track ordering and track partitioning contain zero quarantined or cross-track leaks', () => {
     const cpVersions = CONTROL_PLANE_MIGRATIONS.map(m => m.version);
     const tenantVersions = TENANT_OPERATIONAL_MIGRATIONS.map(m => m.version);

@@ -41,6 +41,18 @@ const {
   PLATFORM_FEDERATION_DAIRY_ID,
 } = await import('../dist/infrastructure/database/TenantDatabaseManager.js');
 const { batchService } = await import('../dist/modules/payments/batch.service.js');
+const { CredentialEncryption } = await import('../dist/infrastructure/security/CredentialEncryption.js');
+const { BankFileService } = await import('../dist/modules/payments/serializers/BankFileService.js');
+const { SettlementCalculationService } = await import('../dist/modules/payments/settlement-calculation.service.js');
+const { maskAccountNumber } = await import('../dist/modules/payments/tenant-payment-context.js');
+const {
+  encryptBeneficiaryBankAccount,
+  decryptStoredBankAccountFailClosed,
+  validateBeneficiaryBankAccountForSettlement,
+  resolveBeneficiaryBankMask,
+  getLegacyPlaintextDetectionCount,
+  resetLegacyPlaintextDetectionCount,
+} = await import('../dist/modules/payments/beneficiary-bank-account.js');
 
 const ORG_A = '11111111-1111-4111-8111-111111111111';
 const ORG_B = '22222222-2222-4222-8222-222222222222';
@@ -317,6 +329,7 @@ test('1. Static source integrity: zero config/db imports, zero pool.connect, zer
     'services/backend/src/integrations/banking/union-bank/UnionBankApiClient.ts',
     'services/backend/src/integrations/banking/union-bank/UnionBankValidator.ts',
     'services/backend/src/modules/payments/tenant-payment-context.ts',
+    'services/backend/src/modules/payments/beneficiary-bank-account.ts',
     'services/backend/src/modules/payments/payout.service.ts',
     'services/backend/src/modules/payments/reconciliation.service.ts',
     'services/backend/src/modules/payments/reconciliation.controller.ts',
@@ -381,6 +394,31 @@ test('1. Static source integrity: zero config/db imports, zero pool.connect, zer
     fs.existsSync(path.join(REPO_ROOT, 'supabase/migrations/048_union_bank_reconciliation_idempotency_hardening.sql')),
     true
   );
+  assert.match(catalogSrc, /049_customer_beneficiary_bank_encryption_and_mask\.sql/);
+  assert.equal(
+    fs.existsSync(path.join(REPO_ROOT, 'supabase/migrations/049_customer_beneficiary_bank_encryption_and_mask.sql')),
+    true
+  );
+
+  // RESTART-10.4 static fail-closed checks across batch/settlement/bank-file/submission/reconciliation
+  const batchCode = stripComments(fs.readFileSync(
+    path.join(REPO_ROOT, 'services/backend/src/modules/payments/batch.service.ts'),
+    'utf8'
+  ));
+  const bankFileCode = stripComments(fs.readFileSync(
+    path.join(REPO_ROOT, 'services/backend/src/modules/payments/serializers/BankFileService.ts'),
+    'utf8'
+  ));
+  const subCode = stripComments(fs.readFileSync(
+    path.join(REPO_ROOT, 'services/backend/src/integrations/banking/union-bank/UnionBankSubmissionService.ts'),
+    'utf8'
+  ));
+  assert.equal(/CREDENTIAL_ENCRYPTION_KEY/.test(batchCode), false, 'BatchService must not guard encryption with unused env var or plaintext fallback');
+  assert.match(batchCode, /encryptBeneficiaryBankAccount\s*\(/);
+  assert.match(reconCode, /COALESCE\(\s*bi\.bank_account_mask\s*,\s*cp\.bank_account_mask\s*,\s*c\.bank_account_mask\s*\)\s+AS\s+bank_account_mask/);
+  assert.match(bankFileCode, /decryptStoredBankAccountFailClosed\s*\(/);
+  assert.match(subCode, /decryptStoredBankAccountFailClosed\s*\(/);
+  assert.equal(/If not AES ciphertext, use raw/.test(bankFileCode), false);
 });
 
 test('2. Organization resolution: enforces authenticated tenant for staff, rejects contradicting body/query/header orgs, requires explicit non-platform org for SUPER_ADMIN', async () => {
@@ -1457,4 +1495,669 @@ test('10. PayoutService non-tx routes, BatchService & PaymentController.getFarme
   } finally {
     tenantDbManager.getStrictTenantDb = origStrict;
   }
+});
+
+test('11. Shared beneficiary bank helpers: AES-256-GCM length/fail-closed encryption, strict decrypt, legacy policy & safe masking', async () => {
+  const synthAccount = '987654321098';
+  const written = encryptBeneficiaryBankAccount(synthAccount, 'Farmer Alpha');
+  assert.ok(written.encryptedAccount.length > 50, 'AES-256-GCM ciphertext must exceed VARCHAR(50)');
+  assert.match(written.encryptedAccount, /^[0-9a-f]{24}:[0-9a-f]{32}:(?:[0-9a-f]{2})+$/i);
+  assert.equal(written.mask, 'XXXX-XXXX-1098');
+  assert.equal(written.cleanAccount, synthAccount);
+
+  // Decryption round-trip
+  const decrypted = decryptStoredBankAccountFailClosed(written.encryptedAccount, { contextName: 'Farmer Alpha' });
+  assert.equal(decrypted.accountNumber, synthAccount);
+  assert.equal(decrypted.source, 'ENCRYPTED');
+  assert.equal(decrypted.mask, 'XXXX-XXXX-1098');
+
+  // Safe masking never extracts trailing hex digits from AES ciphertext
+  assert.equal(maskAccountNumber(written.encryptedAccount), 'XXXX');
+  assert.equal(
+    resolveBeneficiaryBankMask({ storedMask: null, storedAccount: written.encryptedAccount, allowDecryptFallback: false }),
+    null
+  );
+  assert.equal(
+    resolveBeneficiaryBankMask({ storedMask: null, storedAccount: written.encryptedAccount, allowDecryptFallback: true }),
+    'XXXX-XXXX-1098'
+  );
+
+  // Tampered authTag / ciphertext & malformed envelopes must fail closed (never return ciphertext)
+  const lastChar = written.encryptedAccount.slice(-1);
+  const tampered = written.encryptedAccount.slice(0, -1) + (lastChar === '0' ? '1' : '0');
+  assert.throws(
+    () => decryptStoredBankAccountFailClosed(tampered, { contextName: 'Farmer Alpha' }),
+    (err) => err.code === 'INVALID_ENCRYPTED_BANK_ACCOUNT'
+  );
+  assert.throws(
+    () => decryptStoredBankAccountFailClosed('0123:4567:89abcdef123456', { contextName: 'Farmer Alpha' }),
+    (err) => err.code === 'INVALID_ENCRYPTED_BANK_ACCOUNT'
+  );
+
+  // Fail-closed encryption failure: no plaintext fallback allowed
+  const origEncrypt = CredentialEncryption.encrypt;
+  try {
+    CredentialEncryption.encrypt = () => {
+      throw new Error('Simulated KMS/key failure');
+    };
+    assert.throws(
+      () => encryptBeneficiaryBankAccount(synthAccount, 'Farmer Alpha'),
+      (err) => err.code === 'BENEFICIARY_BANK_ENCRYPTION_FAILED' && !err.message.includes(synthAccount)
+    );
+  } finally {
+    CredentialEncryption.encrypt = origEncrypt;
+  }
+
+  // Strict legacy plaintext compatibility policy: accepts valid 9-18 numeric, counts safely without raw digits, rejects ambiguous
+  resetLegacyPlaintextDetectionCount();
+  const legacyAcc = '123456789012';
+  const origInfo = logger.info;
+  const capturedLogs = [];
+  logger.info = (...args) => { capturedLogs.push(JSON.stringify(args)); };
+  try {
+    const legacyOut = decryptStoredBankAccountFailClosed(legacyAcc, { contextName: 'Legacy Farmer' });
+    assert.equal(legacyOut.accountNumber, legacyAcc);
+    assert.equal(legacyOut.source, 'LEGACY_PLAINTEXT');
+    assert.equal(legacyOut.mask, 'XXXX-XXXX-9012');
+    assert.equal(getLegacyPlaintextDetectionCount(), 1);
+    for (const badLegacy of ['000000000000', '12345678', '1234567890123456789', 'ACCT123456789', 'deadbeef12345678']) {
+      assert.throws(
+        () => decryptStoredBankAccountFailClosed(badLegacy, { contextName: 'Bad Legacy' }),
+        (err) => err.code === 'INVALID_BANK_ACCOUNT'
+      );
+    }
+    const settlementLegacy = validateBeneficiaryBankAccountForSettlement(legacyAcc, { contextName: 'Legacy Farmer' });
+    assert.equal(settlementLegacy.isValid, true);
+    assert.equal(settlementLegacy.mask, 'XXXX-XXXX-9012');
+    for (const logLine of capturedLogs) {
+      assert.equal(logLine.includes(legacyAcc), false, 'Raw legacy bank account must never be logged');
+    }
+  } finally {
+    logger.info = origInfo;
+  }
+});
+
+test('12. BatchService.updateBeneficiaryBankDetails: encrypted write, no plaintext fallback, masked audit log & tenant isolation', async () => {
+  const origStrict = tenantDbManager.getStrictTenantDb.bind(tenantDbManager);
+  const origEncrypt = CredentialEncryption.encrypt;
+  const origInfo = logger.info;
+  const infoLogs = [];
+  logger.info = (...args) => { infoLogs.push(JSON.stringify(args)); };
+
+  const custState = {
+    id: CUST_1,
+    organization_id: ORG_A,
+    full_name: 'Ramesh Farmer',
+    bank_name: 'Old Bank',
+    bank_account_number: '111122223333',
+    bank_account_mask: 'XXXX-XXXX-3333',
+    bank_ifsc_code: 'SBIN0001234',
+    bank_account_holder_name: 'Ramesh Farmer',
+    bank_verification_status: 'UNVERIFIED',
+  };
+  const updates = [];
+  const auditInserts = [];
+
+  tenantDbManager.getStrictTenantDb = async () => ({
+    async withTransaction(fn) {
+      const client = {
+        async query(sql, params = []) {
+          const s = sql.replace(/\s+/g, ' ').trim();
+          if (s.startsWith('SELECT * FROM customers WHERE id = $1')) {
+            return { rows: params[0] === CUST_1 ? [{ ...custState }] : [] };
+          }
+          if (s.startsWith('UPDATE customers SET bank_name =')) {
+            updates.push(params);
+            custState.bank_name = params[0];
+            custState.bank_account_number = params[1];
+            custState.bank_account_mask = params[2];
+            return { rows: [], rowCount: 1 };
+          }
+          if (s.startsWith('INSERT INTO beneficiary_audit_logs')) {
+            auditInserts.push(params);
+            return { rows: [], rowCount: 1 };
+          }
+          if (s.startsWith('SELECT organization_id FROM customers WHERE id =')) {
+            return { rows: params[0] === CUST_1 ? [{ organization_id: ORG_A }] : [] };
+          }
+          if (s.startsWith('SELECT bal.*, u.full_name')) {
+            return {
+              rows: auditInserts.map((a) => ({
+                previous_account_mask: a[4],
+                new_account_mask: a[5],
+              })),
+            };
+          }
+          return { rows: [], rowCount: 0 };
+        },
+      };
+      return fn(client);
+    },
+  });
+
+  try {
+    const newAcct = '556677889900';
+    const res = await batchService.updateBeneficiaryBankDetails(
+      CUST_1,
+      {
+        bankName: 'Union Bank of India',
+        bankAccountNumber: newAcct,
+        bankIfscCode: 'UBIN0530789',
+        bankAccountHolderName: 'Ramesh Farmer',
+      },
+      makeAuth()
+    );
+
+    assert.equal(res.bankAccountNumberMask, 'XXXX-XXXX-9900');
+    assert.equal(JSON.stringify(res).includes(newAcct), false, 'Response must not expose plaintext account');
+    assert.equal(updates.length, 1);
+    assert.ok(updates[0][1].length > 50, 'Stored ciphertext must exceed 50 chars');
+    assert.notEqual(updates[0][1], newAcct);
+    assert.equal(CredentialEncryption.decrypt(updates[0][1]), newAcct);
+    assert.equal(updates[0][2], 'XXXX-XXXX-9900');
+
+    // Audit log contains strictly masked values
+    assert.equal(auditInserts.length, 1);
+    assert.equal(auditInserts[0][4], 'XXXX-XXXX-3333');
+    assert.equal(auditInserts[0][5], 'XXXX-XXXX-9900');
+    assert.equal(JSON.stringify(auditInserts[0]).includes(newAcct), false);
+    assert.equal(JSON.stringify(infoLogs).includes(newAcct), false);
+
+    // Tenant B cannot read or modify Tenant A customer bank details
+    await assert.rejects(
+      () => batchService.updateBeneficiaryBankDetails(
+        CUST_1,
+        {
+          bankName: 'Union Bank',
+          bankAccountNumber: '998877665544',
+          bankIfscCode: 'UBIN0530789',
+          bankAccountHolderName: 'Attacker',
+        },
+        makeAuth({ organizationId: ORG_B })
+      ),
+      (err) => err.code === 'CROSS_ORG_ACCESS_DENIED'
+    );
+    await assert.rejects(
+      () => batchService.getBeneficiaryAuditHistory(CUST_1, makeAuth({ organizationId: ORG_B })),
+      (err) => err.code === 'CROSS_ORG_ACCESS_DENIED'
+    );
+
+    // Fail-closed when encryption fails: zero plaintext fallback UPDATE/INSERT
+    CredentialEncryption.encrypt = () => {
+      throw new Error('Simulated cipher failure');
+    };
+    const updatesBefore = updates.length;
+    await assert.rejects(
+      () => batchService.updateBeneficiaryBankDetails(
+        CUST_1,
+        {
+          bankName: 'Union Bank',
+          bankAccountNumber: '445566778899',
+          bankIfscCode: 'UBIN0530789',
+          bankAccountHolderName: 'Ramesh Farmer',
+        },
+        makeAuth()
+      ),
+      (err) => err.code === 'BENEFICIARY_BANK_ENCRYPTION_FAILED'
+    );
+    assert.equal(updates.length, updatesBefore, 'Plaintext fallback write must never occur');
+  } finally {
+    CredentialEncryption.encrypt = origEncrypt;
+    tenantDbManager.getStrictTenantDb = origStrict;
+    logger.info = origInfo;
+  }
+});
+
+test('13. SettlementCalculationService & BatchService.createBatch: decrypt validation, stored masks, tampered exclusion & payout/item mask persistence', async () => {
+  const origStrict = tenantDbManager.getStrictTenantDb.bind(tenantDbManager);
+  const encValid = CredentialEncryption.encrypt('246813579024');
+  const encForTamper = CredentialEncryption.encrypt('112233445566');
+  const tampered = encForTamper.slice(0, -1) + (encForTamper.slice(-1) === '0' ? '1' : '0');
+  const legacyValid = '369258147036';
+
+  const insertedPayouts = [];
+  const insertedBatchItems = [];
+  const nonPeriodQueries = [];
+
+  const mockClient = {
+    async query(sql, params = []) {
+      const s = sql.replace(/\s+/g, ' ').trim();
+      if (s.includes('FROM customers c JOIN dairy_centers dc')) {
+        return {
+          rows: [
+            {
+              id: CUST_1,
+              farmer_code: 'F001',
+              full_name: 'Encrypted Valid',
+              primary_center_id: CENTER_A,
+              center_name: 'Center A',
+              center_code: 'CA',
+              bank_name: 'Union Bank of India',
+              bank_account_number: encValid,
+              bank_account_mask: 'XXXX-XXXX-9024',
+              bank_ifsc_code: 'UBIN0530789',
+              bank_account_holder_name: 'Encrypted Valid',
+              bank_verification_status: 'VERIFIED',
+              beneficiary_status: 'ACTIVE',
+            },
+            {
+              id: CUST_2,
+              farmer_code: 'F002',
+              full_name: 'Tampered Cipher',
+              primary_center_id: CENTER_A,
+              center_name: 'Center A',
+              center_code: 'CA',
+              bank_name: 'Union Bank of India',
+              bank_account_number: tampered,
+              bank_account_mask: 'XXXX-XXXX-5566',
+              bank_ifsc_code: 'UBIN0530789',
+              bank_account_holder_name: 'Tampered Cipher',
+              bank_verification_status: 'VERIFIED',
+              beneficiary_status: 'ACTIVE',
+            },
+            {
+              id: '55555555-5555-4555-8555-555555555553',
+              farmer_code: 'F003',
+              full_name: 'Legacy Numeric',
+              primary_center_id: CENTER_A,
+              center_name: 'Center A',
+              center_code: 'CA',
+              bank_name: 'SBI',
+              bank_account_number: legacyValid,
+              bank_account_mask: null,
+              bank_ifsc_code: 'SBIN0001234',
+              bank_account_holder_name: 'Legacy Numeric',
+              bank_verification_status: 'VERIFIED',
+              beneficiary_status: 'ACTIVE',
+            },
+          ],
+        };
+      }
+      if (s.includes('WITH period_collections AS')) {
+        return {
+          rows: [
+            {
+              customer_id: CUST_1,
+              opening_balance: '0.00',
+              gross_milk_amount: '500.00',
+              milk_quantity_liters: '10.00',
+              collection_count: 1,
+              deductions_amount: '0.00',
+              adjustments_credit: '0.00',
+              adjustments_debit: '0.00',
+              already_paid_amount: '0.00',
+              pending_reserved_amount: '0.00',
+              collection_ids: [],
+              txn_ids: [],
+            },
+            {
+              customer_id: CUST_2,
+              opening_balance: '0.00',
+              gross_milk_amount: '300.00',
+              milk_quantity_liters: '6.00',
+              collection_count: 1,
+              deductions_amount: '0.00',
+              adjustments_credit: '0.00',
+              adjustments_debit: '0.00',
+              already_paid_amount: '0.00',
+              pending_reserved_amount: '0.00',
+              collection_ids: [],
+              txn_ids: [],
+            },
+            {
+              customer_id: '55555555-5555-4555-8555-555555555553',
+              opening_balance: '0.00',
+              gross_milk_amount: '200.00',
+              milk_quantity_liters: '4.00',
+              collection_count: 1,
+              deductions_amount: '0.00',
+              adjustments_credit: '0.00',
+              adjustments_debit: '0.00',
+              already_paid_amount: '0.00',
+              pending_reserved_amount: '0.00',
+              collection_ids: [],
+              txn_ids: [],
+            },
+          ],
+        };
+      }
+      if (s.includes('FROM customers c JOIN customer_ledger_accounts cla')) {
+        nonPeriodQueries.push(s);
+        return {
+          rows: [{
+            id: CUST_1,
+            farmer_code: 'F001',
+            full_name: 'Encrypted Valid',
+            primary_center_id: CENTER_A,
+            bank_name: 'Union Bank of India',
+            bank_account_number: encValid,
+            bank_account_mask: 'XXXX-XXXX-9024',
+            bank_ifsc_code: 'UBIN0530789',
+            current_balance: '450.00',
+          }],
+        };
+      }
+      if (s.startsWith('INSERT INTO customer_payouts')) {
+        insertedPayouts.push(params);
+      }
+      if (s.startsWith('INSERT INTO payment_batch_items')) {
+        insertedBatchItems.push(params);
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  };
+
+  tenantDbManager.getStrictTenantDb = async () => ({
+    async withTransaction(fn) {
+      return fn(mockClient);
+    },
+  });
+
+  try {
+    const preview = await SettlementCalculationService.calculateSettlement(
+      {
+        organizationId: ORG_A,
+        periodStart: '2026-11-01',
+        periodEnd: '2026-11-15',
+      },
+      makeAuth(),
+      mockClient
+    );
+
+    const previewStr = JSON.stringify(preview);
+    assert.equal(previewStr.includes('246813579024'), false, 'Preview must never leak plaintext account');
+    assert.equal(previewStr.includes(encValid), false, 'Preview must never leak ciphertext');
+    assert.equal(previewStr.includes(tampered), false, 'Preview must never leak tampered ciphertext');
+
+    const p1 = preview.farmers.find((f) => f.customerId === CUST_1);
+    const p2 = preview.farmers.find((f) => f.customerId === CUST_2);
+    const p3 = preview.farmers.find((f) => f.customerId === '55555555-5555-4555-8555-555555555553');
+    assert.equal(p1.isBankValid, true);
+    assert.equal(p1.bankAccountNumberMask, 'XXXX-XXXX-9024');
+    assert.equal(p2.isBankValid, false);
+    assert.equal(p2.hasMalformedCiphertext, true);
+    assert.equal(p2.bankAccountNumberMask, 'XXXX-XXXX-5566');
+    assert.equal(p3.isBankValid, true);
+    assert.equal(p3.bankAccountNumberMask, 'XXXX-XXXX-7036');
+    assert.equal(preview.farmersWithInvalidBankCount, 1);
+    assert.equal(preview.totalEligibleFarmers, 2);
+
+    // Period batch creation excludes tampered-ciphertext farmer & persists valid masks to both tables
+    const batchRes = await batchService.createBatch(
+      {
+        billingPeriodStart: '2026-11-01',
+        billingPeriodEnd: '2026-11-15',
+        idempotencyKey: 'unit-r104-period-batch',
+      },
+      makeAuth()
+    );
+    assert.equal(batchRes.totalBeneficiaries, 2);
+    assert.equal(batchRes.totalAmount, 700);
+    assert.deepEqual(insertedPayouts.map((p) => p[10]), ['XXXX-XXXX-9024', 'XXXX-XXXX-7036']);
+    assert.deepEqual(insertedBatchItems.map((p) => p[5]), ['XXXX-XXXX-9024', 'XXXX-XXXX-7036']);
+
+    // Non-period batch creation selects c.bank_account_mask & preserves XXXX-XXXX-9024
+    insertedPayouts.length = 0;
+    insertedBatchItems.length = 0;
+    const nonPeriodBatch = await batchService.createBatch(
+      { idempotencyKey: 'unit-r104-nonperiod-batch' },
+      makeAuth()
+    );
+    assert.ok(nonPeriodQueries[0].includes('c.bank_account_mask'));
+    assert.equal(nonPeriodBatch.beneficiaries[0].bankAccountMask, 'XXXX-XXXX-9024');
+    assert.equal(insertedPayouts[0][10], 'XXXX-XXXX-9024');
+    assert.equal(insertedBatchItems[0][5], 'XXXX-XXXX-9024');
+  } finally {
+    tenantDbManager.getStrictTenantDb = origStrict;
+  }
+});
+
+test('14. BankFileService.exportBatch: decrypts AES beneficiary & debit accounts, fails closed on tampering & invalid IFSC', async () => {
+  const origStrict = tenantDbManager.getStrictTenantDb.bind(tenantDbManager);
+  const encBeneficiary = CredentialEncryption.encrypt('778899001122');
+  const encDebit = CredentialEncryption.encrypt('053211010009999');
+  const tamperedBeneficiary = encBeneficiary.slice(0, -1) + (encBeneficiary.slice(-1) === '0' ? '1' : '0');
+  const tamperedDebit = encDebit.slice(0, -1) + (encDebit.slice(-1) === '0' ? '1' : '0');
+
+  let itemAccountToReturn = encBeneficiary;
+  let orgDebitToReturn = encDebit;
+  let itemIfscToReturn = 'UBIN0530789';
+
+  tenantDbManager.getStrictTenantDb = async () => ({
+    async withTransaction(fn) {
+      const client = {
+        async query(sql) {
+          const s = sql.replace(/\s+/g, ' ').trim();
+          if (s.startsWith('SELECT * FROM payment_batches WHERE id =')) {
+            return {
+              rows: [{
+                id: BATCH_A,
+                organization_id: ORG_A,
+                batch_number: 'BATCH-EXP-01',
+                status: 'APPROVED',
+                approved_by: 'checker-1',
+                created_by: 'maker-1',
+                total_beneficiaries: 1,
+                total_amount: '500.00',
+              }],
+            };
+          }
+          if (s.startsWith('SELECT name, bank_debit_account_encrypted FROM organizations')) {
+            return { rows: [{ name: 'Sahyadri Dairy', bank_debit_account_encrypted: orgDebitToReturn }] };
+          }
+          if (s.includes('FROM payment_batch_items bi JOIN customers c')) {
+            return {
+              rows: [{
+                item_id: ITEM_1,
+                payout_id: PAYOUT_1,
+                amount: '500.00',
+                bank_ifsc: itemIfscToReturn,
+                beneficiary_reference: 'REF-EXP-1',
+                farmer_code: 'F001',
+                full_name: 'Ramesh',
+                bank_account_number: itemAccountToReturn,
+                bank_account_mask: 'XXXX-XXXX-1122',
+              }],
+            };
+          }
+          return { rows: [], rowCount: 1 };
+        },
+      };
+      return fn(client);
+    },
+  });
+
+  try {
+    // Happy path: encrypted beneficiary & encrypted org debit decrypted cleanly
+    const exported = await BankFileService.exportBatch(BATCH_A, 'UNION_BANK_BULK_NEFT_CSV', makeAuth());
+    const file = BankFileService.getExportByToken(exported.downloadToken);
+    assert.ok(file.content.includes('778899001122'));
+    assert.ok(file.content.includes('053211010009999'));
+
+    // Tampered beneficiary ciphertext fails closed
+    itemAccountToReturn = tamperedBeneficiary;
+    await assert.rejects(
+      () => BankFileService.exportBatch(BATCH_A, 'UNION_BANK_BULK_NEFT_CSV', makeAuth()),
+      (err) => err.code === 'INVALID_ENCRYPTED_BANK_ACCOUNT'
+    );
+
+    // Tampered encrypted debit account fails closed
+    itemAccountToReturn = encBeneficiary;
+    orgDebitToReturn = tamperedDebit;
+    await assert.rejects(
+      () => BankFileService.exportBatch(BATCH_A, 'UNION_BANK_BULK_NEFT_CSV', makeAuth()),
+      (err) => err.code === 'INVALID_ENCRYPTED_BANK_ACCOUNT'
+    );
+
+    // Invalid IFSC rejected
+    orgDebitToReturn = encDebit;
+    itemIfscToReturn = 'BADIFSC';
+    await assert.rejects(
+      () => BankFileService.exportBatch(BATCH_A, 'UNION_BANK_BULK_NEFT_CSV', makeAuth()),
+      (err) => err.code === 'INVALID_IFSC_CODE'
+    );
+  } finally {
+    tenantDbManager.getStrictTenantDb = origStrict;
+  }
+});
+
+test('15. UnionBankSubmissionService encrypted debit/beneficiary & fail-closed rejection; UnionBankReconciliationService canonical mask SQL', async () => {
+  const origStrict = tenantDbManager.getStrictTenantDb.bind(tenantDbManager);
+  const encBen = CredentialEncryption.encrypt('445566778899');
+  const encDebit = CredentialEncryption.encrypt('053211010009999');
+  const tamperedBen = encBen.slice(0, -1) + (encBen.slice(-1) === '0' ? '1' : '0');
+
+  let benAccount = encBen;
+  let debitEnc = encDebit;
+
+  tenantDbManager.getStrictTenantDb = async () => ({
+    async withTransaction(fn) {
+      const client = {
+        async query(sql) {
+          const s = sql.replace(/\s+/g, ' ').trim();
+          if (s.startsWith('SELECT * FROM payment_batches WHERE id =')) {
+            return {
+              rows: [{
+                id: BATCH_A,
+                organization_id: ORG_A,
+                batch_number: 'BATCH-SUB-01',
+                status: 'APPROVED',
+                approved_by: 'checker-1',
+                created_by: 'maker-1',
+              }],
+            };
+          }
+          if (s.startsWith('SELECT * FROM bank_submissions WHERE organization_id =')) {
+            return { rows: [] };
+          }
+          if (s.startsWith('SELECT bank_debit_account_encrypted FROM organizations')) {
+            return { rows: [{ bank_debit_account_encrypted: debitEnc }] };
+          }
+          if (s.includes('FROM payment_batch_items bi JOIN customers c')) {
+            return {
+              rows: [{
+                item_id: ITEM_1,
+                payout_id: PAYOUT_1,
+                amount: '600.00',
+                bank_ifsc: 'UBIN0530789',
+                beneficiary_reference: 'REF-SUB-1',
+                customer_id: CUST_1,
+                farmer_code: 'F001',
+                full_name: 'Ramesh',
+                bank_account_number: benAccount,
+                beneficiary_status: 'ACTIVE',
+              }],
+            };
+          }
+          return { rows: [], rowCount: 1 };
+        },
+      };
+      return fn(client);
+    },
+  });
+
+  try {
+    const subRes = await UnionBankSubmissionService.submitBatch(
+      {
+        batchId: BATCH_A,
+        submissionType: 'BULK_FILE_EXPORT',
+        fileFormat: 'UNION_BANK_BULK_NEFT_CSV',
+        idempotencyKey: 'unit-r104-enc-sub',
+      },
+      makeAuth()
+    );
+    assert.ok(subRes.fileContent.includes('445566778899'));
+    assert.ok(subRes.fileContent.includes('053211010009999'));
+    assert.equal(subRes.debitAccountMask, 'XXXX-XXXX-9999');
+
+    benAccount = tamperedBen;
+    await assert.rejects(
+      () => UnionBankSubmissionService.submitBatch(
+        {
+          batchId: BATCH_A,
+          submissionType: 'BULK_FILE_EXPORT',
+          fileFormat: 'UNION_BANK_BULK_NEFT_CSV',
+          idempotencyKey: 'unit-r104-tampered-sub',
+        },
+        makeAuth()
+      ),
+      (err) => err.code === 'INVALID_ENCRYPTED_BANK_ACCOUNT'
+    );
+
+    benAccount = 'ACCT99887766';
+    await assert.rejects(
+      () => UnionBankSubmissionService.submitBatch(
+        {
+          batchId: BATCH_A,
+          submissionType: 'BULK_FILE_EXPORT',
+          fileFormat: 'UNION_BANK_BULK_NEFT_CSV',
+          idempotencyKey: 'unit-r104-ambiguous-sub',
+        },
+        makeAuth()
+      ),
+      (err) => err.code === 'INVALID_BANK_ACCOUNT'
+    );
+
+    // Reconciliation service SQL uses COALESCE canonical mask
+    const origNotify15 = NotificationService.enqueueNotification;
+    NotificationService.enqueueNotification = async () => ({ queued: true });
+    const { tenantDb: reconDb } = createInstrumentedTenantDb({
+      itemsRows: [{
+        item_id: ITEM_1,
+        batch_id: BATCH_A,
+        payout_id: PAYOUT_1,
+        customer_id: CUST_1,
+        amount: '600.00',
+        item_status: 'SUBMITTED',
+        beneficiary_reference: 'REF-SUB-1',
+        bank_utr: null,
+        bank_reference_number: null,
+        farmer_code: 'F001',
+        customer_name: 'Ramesh',
+        bank_account_mask: 'XXXX-XXXX-8899',
+        center_id: CENTER_A,
+        payout_status: 'SUBMITTED',
+        payout_reference_number: null,
+        payout_currency: 'INR',
+        payout_payment_method: 'BANK_TRANSFER',
+      }],
+    });
+    tenantDbManager.getStrictTenantDb = async () => reconDb;
+    try {
+      const reconOut = await UnionBankReconciliationService.reconcileBatchWithBankData(
+        BATCH_A,
+        [{ customerReference: 'REF-SUB-1', bankUtr: 'UTR-COALESCE-1', amount: 600, status: 'PAID' }],
+        makeAuth()
+      );
+      assert.equal(reconOut.paidCount, 1);
+      const selectItemsQuery = reconDb.getMetrics().executedQueries.find((q) => q.sql.includes('FROM payment_batch_items bi'));
+      assert.ok(selectItemsQuery);
+      assert.match(
+        selectItemsQuery.sql,
+        /COALESCE\(bi\.bank_account_mask, cp\.bank_account_mask, c\.bank_account_mask\) AS bank_account_mask/
+      );
+    } finally {
+      NotificationService.enqueueNotification = origNotify15;
+    }
+  } finally {
+    tenantDbManager.getStrictTenantDb = origStrict;
+  }
+});
+
+test('16. Migration 049 SQL integrity: TEXT width, bank_account_mask backfill filter & create_customer_payout mask contract', () => {
+  const sql049 = fs.readFileSync(
+    path.join(REPO_ROOT, 'supabase/migrations/049_customer_beneficiary_bank_encryption_and_mask.sql'),
+    'utf8'
+  );
+  const sql049Code = sql049.replace(/--.*$/gm, '');
+  assert.match(sql049Code, /ALTER TABLE public\.customers[\s\S]*ALTER COLUMN bank_account_number TYPE TEXT;/i);
+  assert.match(sql049Code, /ADD COLUMN IF NOT EXISTS bank_account_mask VARCHAR\(30\);/i);
+  assert.match(sql049Code, /BTRIM\(bank_account_number\) ~ '\^\[0-9\]\{9,18\}\$'/);
+  assert.match(sql049Code, /BTRIM\(bank_account_number\) !~ '\^0\+\$'/);
+  assert.equal(/RIGHT\(\s*v_customer\.bank_account_number/i.test(sql049Code), false);
+  assert.match(sql049Code, /v_mask := NULLIF\(BTRIM\(v_customer\.bank_account_mask\), ''\);/);
+  assert.match(sql049Code, /CREATE OR REPLACE FUNCTION public\.create_customer_payout\(/i);
+  assert.match(sql049Code, /SECURITY DEFINER[\s\S]*SET search_path = pg_catalog, public/i);
+  assert.match(sql049Code, /'PENDING_APPROVAL'/);
+  assert.match(sql049Code, /OVERPAYMENT_NOT_PERMITTED/);
 });

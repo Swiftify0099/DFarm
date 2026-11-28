@@ -72,11 +72,11 @@ async function seedTenantDairy({
     await pool.query(
       `INSERT INTO customers (
          id, organization_id, primary_center_id, farmer_code, full_name,
-         normalized_mobile_number, bank_account_mask, bank_ifsc_code,
+         normalized_mobile_number, bank_ifsc_code,
          status, registration_status
        ) VALUES (
          $1, $2, $3, $4, $5,
-         $6, $7, 'UBIN0530789',
+         $6, 'UBIN0530789',
          'ACTIVE', 'APPROVED'
        );`,
       [
@@ -86,7 +86,6 @@ async function seedTenantDairy({
         f.farmerCode,
         f.customerName,
         f.mobile,
-        f.accountMask || 'XXXX9001',
       ]
     );
 
@@ -202,7 +201,42 @@ test('RESTART-10 PG17 Gate: Union Bank Reverse MIS Reconciliation Two-Tenant Fin
     removeTimeoutMs: 3000,
   });
 
-  const adminPool = new Pool({ connectionString: adminUrl, max: 3 });
+  const poolErrors = [];
+  const guardedPools = new WeakSet();
+  function attachPoolErrorGuard(pool, label) {
+    if (!pool || guardedPools.has(pool)) return pool;
+    guardedPools.add(pool);
+    pool.on('error', (err) => {
+      poolErrors.push({ label, code: err?.code, message: err?.message || String(err) });
+    });
+    return pool;
+  }
+
+  async function waitForDbIdle(pool, dbName, timeoutMs = 5000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const res = await pool.query(
+        `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+        [dbName]
+      );
+      if (Number(res.rows[0]?.cnt || 0) === 0) return;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    const finalRes = await pool.query(
+      `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+      [dbName]
+    );
+    const remaining = Number(finalRes.rows[0]?.cnt || 0);
+    if (remaining > 0) {
+      throw new Error(`Disposable database '${dbName}' still had ${remaining} active connection(s) before DROP DATABASE.`);
+    }
+  }
+
+  const adminPool = attachPoolErrorGuard(new Pool({ connectionString: adminUrl, max: 3 }), 'adminPool');
+  const createdDatabases = [];
+  let rlsRoleAttempted = false;
+  let rlsRoleCreated = false;
+  let faultTriggerCreated = false;
   let poolCtrl;
   let poolA;
   let poolB;
@@ -223,6 +257,8 @@ test('RESTART-10 PG17 Gate: Union Bank Reverse MIS Reconciliation Two-Tenant Fin
     process.env['CREDENTIAL_ENCRYPTION_KEY'] ||
     '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
+  const { db } = await import('../dist/infrastructure/database/PostgresPool.js');
+  attachPoolErrorGuard(db.pool, 'globalDbPool');
   const { MigrationRunner } = await import('../dist/infrastructure/database/MigrationRunner.js');
   const { CredentialEncryption } = await import('../dist/infrastructure/security/CredentialEncryption.js');
   const { tenantDbManager, PLATFORM_FEDERATION_DAIRY_ID, TenantDatabaseUnavailableError } = await import(
@@ -240,6 +276,12 @@ test('RESTART-10 PG17 Gate: Union Bank Reverse MIS Reconciliation Two-Tenant Fin
   const { PayoutService } = await import('../dist/modules/payments/payout.service.js');
   const { ReconciliationService } = await import('../dist/modules/payments/reconciliation.service.js');
   const { batchService } = await import('../dist/modules/payments/batch.service.js');
+  const { SettlementCalculationService } = await import(
+    '../dist/modules/payments/settlement-calculation.service.js'
+  );
+  const { BankFileService } = await import(
+    '../dist/modules/payments/serializers/BankFileService.js'
+  );
   const { NotificationService } = await import('../dist/modules/notifications/services/notification.service.js');
 
   const orgA = crypto.randomUUID();
@@ -404,53 +446,21 @@ test('RESTART-10 PG17 Gate: Union Bank Reverse MIS Reconciliation Two-Tenant Fin
   let capturedNotifications = [];
   let forceNotifyFailure = false;
 
-  t.after(async () => {
-    try {
-      tenantDbManager.setControlPlaneDb(origCtrlDb);
-      tenantDbManager.getAllTenantDbs = origGetAllTenantDbs;
-      tenantDbManager.getTenantDb = origGetTenantDb;
-      NotificationService.enqueueNotification = origNotify;
+  let primaryError = null;
+  try {
+    // -------------------------------------------------------------------------
+    // Setup disposable Control Plane DB + Two Physical Tenant DBs + Real Migrations
+    // -------------------------------------------------------------------------
+    await adminPool.query(`CREATE DATABASE "${dbCtrlName}";`);
+    createdDatabases.push(dbCtrlName);
+    await adminPool.query(`CREATE DATABASE "${dbAName}";`);
+    createdDatabases.push(dbAName);
+    await adminPool.query(`CREATE DATABASE "${dbBName}";`);
+    createdDatabases.push(dbBName);
 
-      if (poolA) {
-        await poolA.query(`DROP TRIGGER IF EXISTS trg_r10_fault_inject ON customer_payouts;`).catch(() => {});
-        await poolA.query(`DROP FUNCTION IF EXISTS public.fn_r10_fault_inject();`).catch(() => {});
-        await poolA.query(`REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM "${rlsRoleName}";`).catch(() => {});
-        await poolA.query(`REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM "${rlsRoleName}";`).catch(() => {});
-        await poolA.query(`REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM "${rlsRoleName}";`).catch(() => {});
-        await poolA.query(`REVOKE ALL ON SCHEMA public FROM "${rlsRoleName}";`).catch(() => {});
-      }
-
-      for (const id of [orgA, orgB, orgDisabled]) {
-        const tp = tenantDbManager.getTenantPool?.(id);
-        await closePoolCleanly(tp, `tenant-${id}`, () => tenantDbManager.closeTenantPool(id));
-      }
-      await tenantDbManager.closeAllPools().catch(() => {});
-
-      await closePoolCleanly(rlsPool, 'rlsPool');
-      await closePoolCleanly(rlsRestrictedPool, 'rlsRestrictedPool');
-      await closePoolCleanly(poolA, 'poolA');
-      await closePoolCleanly(poolB, 'poolB');
-      await closePoolCleanly(poolCtrl, 'poolCtrl');
-
-      await adminPool.query(`DROP DATABASE IF EXISTS "${dbAName}";`).catch(() => {});
-      await adminPool.query(`DROP DATABASE IF EXISTS "${dbBName}";`).catch(() => {});
-      await adminPool.query(`DROP DATABASE IF EXISTS "${dbCtrlName}";`).catch(() => {});
-      await adminPool.query(`DROP ROLE IF EXISTS "${rlsRoleName}";`).catch(() => {});
-    } finally {
-      await closePoolCleanly(adminPool, 'adminPool');
-    }
-  });
-
-  // -------------------------------------------------------------------------
-  // Setup disposable Control Plane DB + Two Physical Tenant DBs + Real Migrations
-  // -------------------------------------------------------------------------
-  await adminPool.query(`CREATE DATABASE "${dbCtrlName}";`);
-  await adminPool.query(`CREATE DATABASE "${dbAName}";`);
-  await adminPool.query(`CREATE DATABASE "${dbBName}";`);
-
-  poolCtrl = new Pool({ connectionString: urlCtrl, max: 5 });
-  poolA = new Pool({ connectionString: urlA, max: 8 });
-  poolB = new Pool({ connectionString: urlB, max: 5 });
+    poolCtrl = attachPoolErrorGuard(new Pool({ connectionString: urlCtrl, max: 5 }), 'poolCtrl');
+    poolA = attachPoolErrorGuard(new Pool({ connectionString: urlA, max: 8 }), 'poolA');
+    poolB = attachPoolErrorGuard(new Pool({ connectionString: urlB, max: 5 }), 'poolB');
 
   await MigrationRunner.runControlPlaneMigrations(poolCtrl);
   await MigrationRunner.runTenantMigrations(poolA, orgA);
@@ -732,6 +742,7 @@ test('RESTART-10 PG17 Gate: Union Bank Reverse MIS Reconciliation Two-Tenant Fin
     capturedNotifications = [];
 
     // Inject trigger in DB A that raises an unexpected PG XX000 failure when settling farmer fA4Rb2
+    faultTriggerCreated = true;
     await poolA.query(`
       CREATE OR REPLACE FUNCTION public.fn_r10_fault_inject()
       RETURNS TRIGGER AS $$
@@ -762,6 +773,7 @@ test('RESTART-10 PG17 Gate: Union Bank Reverse MIS Reconciliation Two-Tenant Fin
     } finally {
       await poolA.query(`DROP TRIGGER IF EXISTS trg_r10_fault_inject ON customer_payouts;`);
       await poolA.query(`DROP FUNCTION IF EXISTS public.fn_r10_fault_inject();`);
+      faultTriggerCreated = false;
     }
 
     // Farmer 1 (who succeeded BEFORE failure) MUST be completely rolled back!
@@ -985,6 +997,7 @@ test('RESTART-10 PG17 Gate: Union Bank Reverse MIS Reconciliation Two-Tenant Fin
 
   await t.test('Group H: Real PostgreSQL RLS (NOSUPERUSER NOBYPASSRLS) enforces app.current_organization_id & runs production reconciliation end-to-end', async () => {
     // Create non-superuser role in cluster and grant object permissions on DB A
+    rlsRoleAttempted = true;
     await adminPool.query(`
       DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${rlsRoleName}') THEN
@@ -992,6 +1005,7 @@ test('RESTART-10 PG17 Gate: Union Bank Reverse MIS Reconciliation Two-Tenant Fin
         END IF;
       END $$;
     `);
+    rlsRoleCreated = true;
     await poolA.query(`GRANT USAGE ON SCHEMA public TO "${rlsRoleName}";`);
     await poolA.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${rlsRoleName}";`);
     await poolA.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${rlsRoleName}";`);
@@ -1009,7 +1023,7 @@ test('RESTART-10 PG17 Gate: Union Bank Reverse MIS Reconciliation Two-Tenant Fin
     );
 
     const urlRlsA = buildDbUrl(TEST_PG_URL, dbAName, { username: rlsRoleName, password: rlsRolePassword });
-    rlsRestrictedPool = new Pool({ connectionString: urlRlsA, max: 3 });
+    rlsRestrictedPool = attachPoolErrorGuard(new Pool({ connectionString: urlRlsA, max: 3 }), 'rlsRestrictedPool');
 
     // Confirm role really has NOSUPERUSER NOBYPASSRLS
     const roleFlags = await rlsRestrictedPool.query(
@@ -1116,11 +1130,11 @@ test('RESTART-10 PG17 Gate: Union Bank Reverse MIS Reconciliation Two-Tenant Fin
     await poolA.query(
       `INSERT INTO customers (
          id, organization_id, primary_center_id, farmer_code, full_name,
-         normalized_mobile_number, bank_account_number, bank_account_mask, bank_ifsc_code,
+         normalized_mobile_number, bank_account_number, bank_ifsc_code,
          beneficiary_status, bank_verification_status, status, registration_status
        ) VALUES (
          $1, $2, $3, 'FA-SUB-01', 'Submission Farmer',
-         $4, '112233445566', 'XXXX-XXXX-5566', 'UBIN0530789',
+         $4, '112233445566', 'UBIN0530789',
          'ACTIVE', 'VERIFIED', 'ACTIVE', 'APPROVED'
        );`,
       [subCustId, orgA, centerA, `9600${suffix.replace(/[^0-9]/g, '').padStart(6, '0').slice(0, 6)}`]
@@ -1328,8 +1342,415 @@ test('RESTART-10 PG17 Gate: Union Bank Reverse MIS Reconciliation Two-Tenant Fin
     const afterRollback = await poolA.query(`SELECT current_setting('app.current_organization_id', true) AS v;`);
     assert.equal(afterRollback.rows[0].v || '', '', 'Local GUC app.current_organization_id must reset after ROLLBACK');
 
-    assert.equal(centralQueries.length, 0, 'Central control plane must receive zero financial queries');
+    const groupLCentralFinancialQueries = centralQueries.filter((q) =>
+      /\b(payment_batches|payment_batch_items|customer_payouts|customer_ledger_accounts|ledger_transactions|ledger_entries|payment_reconciliation_records|payment_adjustments)\b/i.test(q)
+    );
+
+    assert.equal(
+      groupLCentralFinancialQueries.length,
+      0,
+      'Central control plane must never execute operational financial SQL'
+    );
     assert.equal(getAllTenantDbsCalled, false, 'getAllTenantDbs must never be called');
     assert.equal(permissiveGetTenantDbCalled, false, 'Permissive getTenantDb must never be called');
   });
+
+  await t.test('Group M: RESTART-10.4 migration 049, encrypted customer bank storage, fail-closed crypto, settlement, bank export, reconciliation & create_customer_payout SQL mask', async () => {
+    // A & B: Verify migration 049 applied cleanly to tenant DB (TEXT bank_account_number + VARCHAR(30) bank_account_mask)
+    // and skipped on control-plane DB
+    const colInfo = await poolA.query(
+      `SELECT column_name, data_type, character_maximum_length
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'customers'
+         AND column_name IN ('bank_account_number', 'bank_account_mask')
+       ORDER BY column_name ASC;`
+    );
+    assert.deepEqual(
+      colInfo.rows,
+      [
+        { column_name: 'bank_account_mask', data_type: 'character varying', character_maximum_length: 30 },
+        { column_name: 'bank_account_number', data_type: 'text', character_maximum_length: null },
+      ]
+    );
+    const migA = await poolA.query(`SELECT version FROM schema_migrations WHERE version = '049';`);
+    const migCtrl = await poolCtrl.query(`SELECT version FROM schema_migrations WHERE version = '049';`);
+    assert.equal(migA.rows.length, 1, 'Migration 049 must be applied to TENANT_OPERATIONAL');
+    assert.equal(migCtrl.rows.length, 0, 'Migration 049 must NOT be applied to CONTROL_PLANE');
+
+    // Seed synthetic customers in Tenant A for end-to-end encrypted, legacy, and tampered scenarios
+    const cEncId = crypto.randomUUID();
+    const cLegacyId = crypto.randomUUID();
+    const cTamperedId = crypto.randomUUID();
+    const checkerA = crypto.randomUUID();
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    await poolA.query(
+      `INSERT INTO users (id, organization_id, username, full_name, phone_number, role, status)
+       VALUES ($1, $2, $3, 'Checker Owner', $4, 'ACCOUNTANT', 'ACTIVE')
+       ON CONFLICT (id) DO NOTHING;`,
+      [checkerA, orgA, `chk_${suffix}`, `9700${suffix.replace(/[^0-9]/g, '').padStart(6, '0').slice(0, 6)}`]
+    );
+
+    const encTamperBase = CredentialEncryption.encrypt('554433221100');
+    const tamperedCipher =
+      encTamperBase.slice(0, -1) + (encTamperBase.slice(-1) === '0' ? '1' : '0');
+
+    await poolA.query(
+      `INSERT INTO customers (
+         id, organization_id, primary_center_id, farmer_code, full_name,
+         normalized_mobile_number, bank_name, bank_account_number, bank_account_mask, bank_ifsc_code,
+         bank_account_holder_name, status, bank_verification_status, beneficiary_status, registration_status
+       ) VALUES
+         ($1, $2, $3, 'FA-R104-ENC', 'Encrypted Farmer', $4, 'Union Bank of India', '101010101010', 'XXXX-XXXX-1010', 'UBIN0530789', 'Encrypted Farmer', 'ACTIVE', 'VERIFIED', 'ACTIVE', 'APPROVED'),
+         ($5, $2, $3, 'FA-R104-LEG', 'Legacy Farmer', $6, 'State Bank of India', '234567890123', NULL, 'SBIN0001234', 'Legacy Farmer', 'ACTIVE', 'VERIFIED', 'ACTIVE', 'APPROVED'),
+         ($7, $2, $3, 'FA-R104-BAD', 'Tampered Farmer', $8, 'Union Bank of India', $9, 'XXXX-XXXX-1100', 'UBIN0530789', 'Tampered Farmer', 'ACTIVE', 'VERIFIED', 'ACTIVE', 'APPROVED');`,
+      [
+        cEncId, orgA, centerA, `9510${suffix.replace(/[^0-9]/g, '').padStart(6, '0').slice(0, 6)}`,
+        cLegacyId, `9520${suffix.replace(/[^0-9]/g, '').padStart(6, '0').slice(0, 6)}`,
+        cTamperedId, `9530${suffix.replace(/[^0-9]/g, '').padStart(6, '0').slice(0, 6)}`, tamperedCipher,
+      ]
+    );
+
+    for (const [idx, cid, bal] of [
+      [1, cEncId, 1500.0],
+      [2, cLegacyId, 800.0],
+      [3, cTamperedId, 600.0],
+    ]) {
+      await poolA.query(
+        `INSERT INTO customer_ledger_accounts (customer_id, organization_id, current_balance)
+         VALUES ($1, $2, $3);`,
+        [cid, orgA, bal]
+      );
+      await poolA.query(
+        `INSERT INTO ledger_transactions (
+           organization_id, center_id, customer_id, transaction_type, direction,
+           amount, balance_after, reference_entity, reference_id, description, idempotency_key, created_by
+         ) VALUES (
+           $1, $2, $3, 'MILK_COLLECTION_CREDIT', 'CREDIT',
+           $4, $4, 'MILK_COLLECTION', $5, 'RESTART-10.4 settlement credit', $6, $7
+         );`,
+        [orgA, centerA, cid, bal, crypto.randomUUID(), `idem-r104-lt-${idx}-${suffix}`, userA]
+      );
+    }
+
+    // C & N: Update beneficiary bank details -> encrypted (>50 chars) & audit log contains only masks
+    const synthUpdatedAcct = '987654321098';
+    const updRes = await batchService.updateBeneficiaryBankDetails(
+      cEncId,
+      {
+        bankName: 'Union Bank of India',
+        bankAccountNumber: synthUpdatedAcct,
+        bankIfscCode: 'UBIN0530789',
+        bankAccountHolderName: 'Encrypted Farmer',
+      },
+      authA
+    );
+    assert.equal(updRes.bankAccountNumberMask, 'XXXX-XXXX-1098');
+    assert.equal(JSON.stringify(updRes).includes(synthUpdatedAcct), false);
+
+    const encRow = await poolA.query(
+      `SELECT bank_account_number, bank_account_mask FROM customers WHERE id = $1;`,
+      [cEncId]
+    );
+    assert.ok(encRow.rows[0].bank_account_number.length > 50, 'Full AES-256-GCM envelope stored without VARCHAR(50) truncation');
+    assert.notEqual(encRow.rows[0].bank_account_number, synthUpdatedAcct);
+    assert.equal(CredentialEncryption.decrypt(encRow.rows[0].bank_account_number), synthUpdatedAcct);
+    assert.equal(encRow.rows[0].bank_account_mask, 'XXXX-XXXX-1098');
+
+    const auditRows = await poolA.query(
+      `SELECT previous_account_mask, new_account_mask FROM beneficiary_audit_logs WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1;`,
+      [cEncId]
+    );
+    assert.equal(auditRows.rows[0].previous_account_mask, 'XXXX-XXXX-1010');
+    assert.equal(auditRows.rows[0].new_account_mask, 'XXXX-XXXX-1098');
+
+    // D: Encryption failure must fail closed without storing plaintext
+    const origEncFn = CredentialEncryption.encrypt;
+    CredentialEncryption.encrypt = () => {
+      throw new Error('Simulated production key outage');
+    };
+    try {
+      await assert.rejects(
+        () => batchService.updateBeneficiaryBankDetails(
+          cEncId,
+          {
+            bankName: 'Union Bank of India',
+            bankAccountNumber: '777766665555',
+            bankIfscCode: 'UBIN0530789',
+            bankAccountHolderName: 'Encrypted Farmer',
+          },
+          authA
+        ),
+        (err) => err.code === 'BENEFICIARY_BANK_ENCRYPTION_FAILED'
+      );
+      const afterFailRow = await poolA.query(
+        `SELECT bank_account_number FROM customers WHERE id = $1;`,
+        [cEncId]
+      );
+      assert.equal(CredentialEncryption.decrypt(afterFailRow.rows[0].bank_account_number), synthUpdatedAcct);
+    } finally {
+      CredentialEncryption.encrypt = origEncFn;
+    }
+
+    // M: Tenant B cannot read or modify Tenant A customer bank details
+    await assert.rejects(
+      () => batchService.getBeneficiaryAuditHistory(cEncId, authB),
+      (err) => err.code === 'CUSTOMER_NOT_FOUND'
+    );
+    await assert.rejects(
+      () => batchService.updateBeneficiaryBankDetails(
+        cEncId,
+        {
+          bankName: 'Union Bank of India',
+          bankAccountNumber: '665544332211',
+          bankIfscCode: 'UBIN0530789',
+          bankAccountHolderName: 'Cross Tenant Attack',
+        },
+        { ...authB },
+        orgA
+      ),
+      (err) => err.code === 'CROSS_ORG_ACCESS_DENIED'
+    );
+
+    // L: SQL public.create_customer_payout() consumes customers.bank_account_mask, not RIGHT(ciphertext, 4)
+    const encTailFour = encRow.rows[0].bank_account_number.slice(-4);
+    const directPayout = await poolA.query(
+      `SELECT public.create_customer_payout(
+         $1, $2, $3, 250.00, 'BANK_TRANSFER', $4, 'MANUAL_PAYOUT', NULL, $5, FALSE, 'RESTART-10.4 SQL mask test', $6
+       ) AS payout;`,
+      [orgA, centerA, cEncId, `REF-SQLM-${suffix}`, `idem-sqlm-${suffix}`, userA]
+    );
+    const sqlPayoutJson = directPayout.rows[0].payout;
+    assert.equal(sqlPayoutJson.bankAccountMask, 'XXXX-XXXX-1098');
+    if (encTailFour !== '1098') {
+      assert.notEqual(sqlPayoutJson.bankAccountMask, `XXXX-XXXX-${encTailFour}`);
+    }
+    const storedSqlPayout = await poolA.query(
+      `SELECT bank_account_mask FROM customer_payouts WHERE id = $1;`,
+      [sqlPayoutJson.payoutId]
+    );
+    assert.equal(storedSqlPayout.rows[0].bank_account_mask, 'XXXX-XXXX-1098');
+    // Cleanly cancel the standalone DRAFT/PENDING_APPROVAL test payout so it doesn't reserve full balance
+    await poolA.query(
+      `UPDATE customer_payouts SET status = 'FAILED', failure_reason = 'RESTART-10.4 mask test cleanup' WHERE id = $1;`,
+      [sqlPayoutJson.payoutId]
+    );
+
+    // H, G, F: SettlementCalculationService validates decrypted + legacy accounts, flags tampered ciphertext, preserves stored masks
+    const previewRes = await batchService.calculateSettlementPreview(
+      {
+        organizationId: orgA,
+        periodStart: todayStr,
+        periodEnd: todayStr,
+        customerIds: [cEncId, cLegacyId, cTamperedId],
+      },
+      authA
+    );
+    const previewJson = JSON.stringify(previewRes);
+    assert.equal(previewJson.includes(synthUpdatedAcct), false, 'Preview must never leak decrypted plaintext');
+    assert.equal(previewJson.includes(encRow.rows[0].bank_account_number), false, 'Preview must never leak AES ciphertext');
+
+    const prevEnc = previewRes.farmers.find((f) => f.customerId === cEncId);
+    const prevLeg = previewRes.farmers.find((f) => f.customerId === cLegacyId);
+    const prevTam = previewRes.farmers.find((f) => f.customerId === cTamperedId);
+    assert.equal(prevEnc.isBankValid, true);
+    assert.equal(prevEnc.bankAccountNumberMask, 'XXXX-XXXX-1098');
+    assert.equal(prevLeg.isBankValid, true);
+    assert.equal(prevLeg.bankAccountNumberMask, 'XXXX-XXXX-0123');
+    assert.equal(prevTam.isBankValid, false);
+    assert.equal(prevTam.hasMalformedCiphertext, true);
+    assert.equal(prevTam.bankAccountNumberMask, 'XXXX-XXXX-1100');
+
+    // I: Batch creation excludes tampered-ciphertext farmer & persists masks to customer_payouts + payment_batch_items
+    const batchRes = await batchService.createBatch(
+      {
+        billingPeriodStart: todayStr,
+        billingPeriodEnd: todayStr,
+        customerIds: [cEncId, cLegacyId, cTamperedId],
+        idempotencyKey: `idem-r104-batch-${suffix}`,
+        paymentMethod: 'BANK_TRANSFER',
+      },
+      authA
+    );
+    assert.equal(batchRes.totalBeneficiaries, 2);
+    const r104PayoutMasks = await poolA.query(
+      `SELECT customer_id, bank_account_mask FROM customer_payouts WHERE batch_id = $1 ORDER BY bank_account_mask ASC;`,
+      [batchRes.batchId]
+    );
+    const r104ItemMasks = await poolA.query(
+      `SELECT customer_id, bank_account_mask FROM payment_batch_items WHERE batch_id = $1 ORDER BY bank_account_mask ASC;`,
+      [batchRes.batchId]
+    );
+    assert.deepEqual(
+      r104PayoutMasks.rows.map((r) => r.bank_account_mask),
+      ['XXXX-XXXX-0123', 'XXXX-XXXX-1098']
+    );
+    assert.deepEqual(
+      r104ItemMasks.rows.map((r) => r.bank_account_mask),
+      ['XXXX-XXXX-0123', 'XXXX-XXXX-1098']
+    );
+
+    // K: Approve batch with checkerA & verify BankFileService + UnionBankSubmissionService decrypt & reject tampered ciphertext
+    await batchService.submitForReview(batchRes.batchId, authA);
+    await batchService.approveBatch(batchRes.batchId, { ...authA, userId: checkerA });
+
+    const expRes = await BankFileService.exportBatch(
+      batchRes.batchId,
+      'UNION_BANK_BULK_NEFT_CSV',
+      authA,
+      { debitAccountNumber: '053211010009999' }
+    );
+    const expFile = BankFileService.getExportByToken(expRes.downloadToken);
+    assert.ok(expFile.content.includes(synthUpdatedAcct), 'Bank file export must include decrypted AES account');
+    assert.ok(expFile.content.includes('234567890123'), 'Bank file export must include valid legacy numeric account');
+    assert.equal(expFile.content.includes('554433221100'), false, 'Excluded tampered customer must not appear in bank file');
+
+    // J: UnionBankReconciliationService settles batch reading canonical historical mask without schema error
+    const itemRefsRes = await poolA.query(
+      `SELECT beneficiary_reference, amount FROM payment_batch_items WHERE batch_id = $1 ORDER BY created_at ASC;`,
+      [batchRes.batchId]
+    );
+    const reconSummary = await UnionBankReconciliationService.reconcileBatchWithBankData(
+      batchRes.batchId,
+      itemRefsRes.rows.map((r, idx) => ({
+        customerReference: r.beneficiary_reference,
+        bankUtr: `UTR-R104-${idx}-${suffix}`,
+        amount: Number(r.amount),
+        status: 'PAID',
+      })),
+      authA
+    );
+    assert.equal(reconSummary.paidCount, 2);
+
+    // Non-period batch creation with encrypted customer submits cleanly via UnionBankSubmissionService
+    await poolA.query(
+      `UPDATE customer_ledger_accounts SET current_balance = 500.00 WHERE customer_id = $1;`,
+      [cEncId]
+    );
+    const subBatchRes = await batchService.createBatch(
+      {
+        customerIds: [cEncId],
+        idempotencyKey: `idem-r104-sub-np-${suffix}`,
+        paymentMethod: 'BANK_TRANSFER',
+      },
+      authA
+    );
+    await batchService.submitForReview(subBatchRes.batchId, authA);
+    await batchService.approveBatch(subBatchRes.batchId, { ...authA, userId: checkerA });
+    const h2hBulk = await UnionBankSubmissionService.submitBatch(
+      {
+        batchId: subBatchRes.batchId,
+        submissionType: 'BULK_FILE_EXPORT',
+        fileFormat: 'UNION_BANK_BULK_NEFT_CSV',
+        debitAccountNumber: '053211010009999',
+        idempotencyKey: `idem-r104-ubsub-${suffix}`,
+      },
+      authA
+    );
+    assert.ok(h2hBulk.fileContent.includes(synthUpdatedAcct));
+  });
+  } catch (err) {
+    primaryError = err;
+    throw err;
+  } finally {
+    const cleanupErrors = [];
+    const runCleanupStep = async (fn) => {
+      try {
+        await fn();
+      } catch (err) {
+        cleanupErrors.push(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+
+    tenantDbManager.setControlPlaneDb(origCtrlDb);
+    tenantDbManager.getAllTenantDbs = origGetAllTenantDbs;
+    tenantDbManager.getTenantDb = origGetTenantDb;
+    NotificationService.enqueueNotification = origNotify;
+
+    let rlsRoleExists = rlsRoleCreated;
+    if (adminPool && rlsRoleAttempted && !rlsRoleExists) {
+      await runCleanupStep(async () => {
+        const roleRes = await adminPool.query(
+          `SELECT 1 FROM pg_roles WHERE rolname = $1;`,
+          [rlsRoleName]
+        );
+        rlsRoleExists = roleRes.rows.length > 0;
+      });
+    }
+
+    if (poolA) {
+      if (faultTriggerCreated) {
+        await runCleanupStep(async () => {
+          await poolA.query(`DROP TRIGGER IF EXISTS trg_r10_fault_inject ON customer_payouts;`);
+          await poolA.query(`DROP FUNCTION IF EXISTS public.fn_r10_fault_inject();`);
+        });
+      }
+      if (rlsRoleExists) {
+        await runCleanupStep(async () => {
+          await poolA.query(`REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM "${rlsRoleName}";`);
+          await poolA.query(`REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM "${rlsRoleName}";`);
+          await poolA.query(`REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM "${rlsRoleName}";`);
+          await poolA.query(`REVOKE ALL ON SCHEMA public FROM "${rlsRoleName}";`);
+        });
+      }
+    }
+
+    for (const id of [orgA, orgB, orgDisabled]) {
+      await runCleanupStep(async () => {
+        const tp = tenantDbManager.getTenantPool?.(id);
+        if (tp) {
+          attachPoolErrorGuard(tp, `tenant-${id}`);
+          await closePoolCleanly(tp, `tenant-${id}`, () => tenantDbManager.closeTenantPool(id));
+        }
+      });
+    }
+    await runCleanupStep(() => tenantDbManager.closeAllPools());
+    await runCleanupStep(() => closePoolCleanly(db.pool, 'globalDbPool', () => db.close()));
+
+    for (const [pool, label] of [
+      [rlsPool, 'rlsPool'],
+      [rlsRestrictedPool, 'rlsRestrictedPool'],
+      [poolA, 'poolA'],
+      [poolB, 'poolB'],
+      [poolCtrl, 'poolCtrl'],
+    ]) {
+      if (pool) {
+        await runCleanupStep(() => closePoolCleanly(pool, label));
+      }
+    }
+
+    for (const dbName of [...createdDatabases].reverse()) {
+      await runCleanupStep(async () => {
+        await waitForDbIdle(adminPool, dbName);
+        await adminPool.query(`DROP DATABASE IF EXISTS "${dbName}";`);
+      });
+    }
+
+    if (rlsRoleExists) {
+      await runCleanupStep(async () => {
+        await adminPool.query(`DROP ROLE IF EXISTS "${rlsRoleName}";`);
+      });
+    }
+
+    await runCleanupStep(() => closePoolCleanly(adminPool, 'adminPool'));
+    await runCleanupStep(async () => {
+      assert.deepEqual(poolErrors, [], `Unexpected async PostgreSQL pool errors: ${JSON.stringify(poolErrors)}`);
+    });
+
+    if (cleanupErrors.length > 0) {
+      const cleanErr =
+        cleanupErrors.length === 1
+          ? cleanupErrors[0]
+          : new AggregateError(
+              cleanupErrors,
+              `Cleanup failed with ${cleanupErrors.length} errors: ${cleanupErrors.map((e) => e.message).join('; ')}`
+            );
+      if (primaryError) {
+        const orig = primaryError instanceof Error ? primaryError : new Error(String(primaryError));
+        throw new AggregateError([orig, cleanErr], `${orig.message} (cleanup also failed: ${cleanErr.message})`);
+      }
+      throw cleanErr;
+    }
+  }
 });
