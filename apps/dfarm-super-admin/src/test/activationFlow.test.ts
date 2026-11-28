@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { apiClient } from '@/api/client'
-import { mockBackend } from '@/services/mockBackend'
+import { mockBackend, SYNTHETIC_DF_SAN_2813_MOCK_TOKEN } from '@/services/mockBackend'
 import { storage } from '@/services/storage'
 
 describe('Dairy Admin Two-Factor Activation Flow', () => {
@@ -15,7 +15,7 @@ describe('Dairy Admin Two-Factor Activation Flow', () => {
 
   it('validates activation token and fallback dairy code successfully', async () => {
     const res = await apiClient.validateActivationToken(
-      'f0beef6f13794b864a3f5285bf354264644dc71e1d8aafbeadd71927f1a9c59d',
+      SYNTHETIC_DF_SAN_2813_MOCK_TOKEN,
       'DF-SAN-2813'
     )
 
@@ -28,7 +28,7 @@ describe('Dairy Admin Two-Factor Activation Flow', () => {
 
   it('requests activation OTP and returns preview OTP code', async () => {
     const res = await apiClient.requestActivationOtp(
-      'f0beef6f13794b864a3f5285bf354264644dc71e1d8aafbeadd71927f1a9c59d',
+      SYNTHETIC_DF_SAN_2813_MOCK_TOKEN,
       'DF-SAN-2813'
     )
 
@@ -40,13 +40,13 @@ describe('Dairy Admin Two-Factor Activation Flow', () => {
 
   it('activates primary admin account and updates tenant operational readiness to 50%', async () => {
     const otpRes = await apiClient.requestActivationOtp(
-      'f0beef6f13794b864a3f5285bf354264644dc71e1d8aafbeadd71927f1a9c59d',
+      SYNTHETIC_DF_SAN_2813_MOCK_TOKEN,
       'DF-SAN-2813'
     )
 
     const otpCode = otpRes.previewOtp || otpRes.devOtpHint!
     const result = await apiClient.activatePrimaryAdmin(
-      'f0beef6f13794b864a3f5285bf354264644dc71e1d8aafbeadd71927f1a9c59d',
+      SYNTHETIC_DF_SAN_2813_MOCK_TOKEN,
       otpCode,
       'DF-SAN-2813'
     )
@@ -56,7 +56,7 @@ describe('Dairy Admin Two-Factor Activation Flow', () => {
 
     // Subsequent token validation must indicate account is already activated
     const reval = await apiClient.validateActivationToken(
-      'f0beef6f13794b864a3f5285bf354264644dc71e1d8aafbeadd71927f1a9c59d',
+      SYNTHETIC_DF_SAN_2813_MOCK_TOKEN,
       'DF-SAN-2813'
     )
     expect(reval.code).toBe('ALREADY_CONSUMED')

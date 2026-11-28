@@ -13,3 +13,74 @@ regexes = [
   '''your-(project-ref|password|admin-password|email@gmail\.com|app-password)''',
 ]
 
+# Narrow per-finding false-positive rules (every block requires BOTH exact file path AND exact literal match)
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "FP-01/02/36/37 (Permanent): Non-secret public keyReference metadata label in Aes256GcmBiometricEncryptor"
+  condition = "AND"
+  paths = ['''(?:^|[\\/])services[\\/]backend[\\/](?:src|dist)[\\/]infrastructure[\\/]security[\\/]Aes256GcmBiometricEncryptor\.(?:ts|js)$''']
+  regexTarget = "line"
+  regexes = ["keyReference\\s*=\\s*'key-sface128-v1'"]
+
+  [[rules.allowlists]]
+  description = "FP-06 (Permanent): Public Git commit SHAs cited in DFARM_FIX02_2_REMOTE_HISTORY_REWRITE_APPROVAL.md"
+  condition = "AND"
+  paths = ['''(?:^|[\\/])DFARM_FIX02_2_REMOTE_HISTORY_REWRITE_APPROVAL\.md$''']
+  regexTarget = "line"
+  regexes = ['''Google Maps API key commits: `(?:c3b1a2491666082569d1bf806aec060d0cd626fc|110b899711ca68ca94cc75a256fc5f410f412431)`''']
+
+  [[rules.allowlists]]
+  description = "FP-25 (Permanent): Organization UUID (not a token) in root-cause diagram"
+  condition = "AND"
+  paths = ['''(?:^|[\\/])docs[\\/]implementation[\\/]customer-tenant-approval-fix[\\/]06_DAIRY_ADMIN_PENDING_QUEUE_ROOT_CAUSE\.md$''']
+  regexTarget = "line"
+  regexes = ['''Token issued for: 65190859-c8e2-4a06-b862-5ed7ad8628cb \(DF-SAN-6632\)''']
+
+  [[rules.allowlists]]
+  description = "FP-31 (Permanent): Non-secret idempotencyKey example in COLLECTION_TRANSACTION_FLOW.md"
+  condition = "AND"
+  paths = ['''(?:^|[\\/])docs[\\/]integration[\\/]COLLECTION_TRANSACTION_FLOW\.md$''']
+  regexTarget = "line"
+  regexes = ['''"idempotencyKey": "idemp-txn-98234-01"''']
+
+  [[rules.allowlists]]
+  description = "FP-32 (Permanent): Non-secret idempotencyKey example in DATA_CONSISTENCY_AND_CACHE_INVALIDATION.md"
+  condition = "AND"
+  paths = ['''(?:^|[\\/])docs[\\/]integration[\\/]DATA_CONSISTENCY_AND_CACHE_INVALIDATION\.md$''']
+  regexTarget = "line"
+  regexes = ['''idempotencyKey = "KIOSK01_f81d4fae-7dec-11d0-a765-00a0c91e6bf6"''']
+
+  [[rules.allowlists]]
+  description = "FP-39 (Permanent): Non-secret idempotencyKey example in API_ENDPOINT_PARITY_REPORT.md"
+  condition = "AND"
+  paths = ['''(?:^|[\\/])reports[\\/]migration-parity-audit[\\/]API_ENDPOINT_PARITY_REPORT\.md$''']
+  regexTarget = "line"
+  regexes = ['''"idempotencyKey": "IDEMP-20261114-BUFF-1485"''']
+
+  [[rules.allowlists]]
+  description = "FP-45 (Permanent): Non-secret idempotencyKey example in docs/api/notification-api.md"
+  condition = "AND"
+  paths = ['''(?:^|[\\/])docs[\\/]api[\\/]notification-api\.md$''']
+  regexTarget = "line"
+  regexes = ['''"idempotencyKey": "idem_collection_12345"''']
+
+  [[rules.allowlists]]
+  description = "FP-47 (Permanent): Non-secret idempotencyKey example in docs/api/synchronization-api.md"
+  condition = "AND"
+  paths = ['''(?:^|[\\/])docs[\\/]api[\\/]synchronization-api\.md$''']
+  regexTarget = "line"
+  regexes = ['''"idempotencyKey": "IDEMP-COL-e42392ef-d9f0-4540-aceb-8d80c85a2f50"''']
+
+[[rules]]
+id = "cloudflare-api-key"
+
+  [[rules.allowlists]]
+  description = "FP-04/05 (Permanent): Public branch ref and commit SHA in FIX-02 rewrite docs"
+  condition = "AND"
+  paths = ['''(?:^|[\\/])DFARM_FIX02_(?:GIT_HISTORY_REWRITE_PLAN|2_REMOTE_HISTORY_REWRITE_APPROVAL)\.md$''']
+  regexTarget = "line"
+  regexes = ['''refs/heads/feature/cloudflare-pages-deployment:9cd42bc9a43d55e8772af9edd121d8dbb64b05e3''']
+
+

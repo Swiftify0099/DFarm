@@ -1,0 +1,63 @@
+# ==============================================================================
+# DFarm Gitleaks Historical Baseline (.gitleaksignore)
+# ==============================================================================
+# Scope: ONLY the 25 verified, non-active historical synthetic test fixtures
+# and truncated documentation placeholders that were ALREADY remediated in HEAD.
+#
+# Explicitly NOT ignored (16 genuine/sensitive historical exposures remain active
+# and fail CI until operator credential rotation & approved history rewrite):
+#   - 2x Google Maps API key (110b8997, c3b1a249)
+#   - 11x .temp/chrome-cdp/ browser profile/cache/extension blobs (e638850f)
+#   - 3x DF-SAN-2813 activation token (74f2596c)
+# ==============================================================================
+
+# Finding #3: Synthetic 32-hex test input for 16-byte key rejection (replaced in HEAD with 'a1b2'.repeat(8))
+c67dbb94694a67882b0cf92a3d8e6c41b049de2d:services/backend/tests/restart02-auth-security-remediation.test.js:generic-api-key:297
+
+# Findings #7-#15: Synthetic .dummy JWT stubs and 0123... 32-hex test input (replaced in HEAD with placeholder_* and 'abcd'.repeat(8))
+e04283590c2d319c72d505635047de157a8e71ea:services/backend/tests/prompt423-device-proof-and-signing-key-audit.test.js:generic-api-key:482
+e04283590c2d319c72d505635047de157a8e71ea:services/backend/tests/prompt423-device-proof-and-signing-key-audit.test.js:generic-api-key:483
+e04283590c2d319c72d505635047de157a8e71ea:services/backend/tests/prompt423-device-proof-and-signing-key-audit.test.js:generic-api-key:501
+e04283590c2d319c72d505635047de157a8e71ea:services/backend/tests/prompt423-device-proof-and-signing-key-audit.test.js:generic-api-key:502
+e04283590c2d319c72d505635047de157a8e71ea:services/backend/tests/prompt423-device-proof-and-signing-key-audit.test.js:generic-api-key:516
+e04283590c2d319c72d505635047de157a8e71ea:services/backend/tests/prompt423-device-proof-and-signing-key-audit.test.js:generic-api-key:517
+e04283590c2d319c72d505635047de157a8e71ea:services/backend/tests/prompt423-device-proof-and-signing-key-audit.test.js:generic-api-key:518
+e04283590c2d319c72d505635047de157a8e71ea:services/backend/tests/prompt423-device-proof-and-signing-key-audit.test.js:generic-api-key:550
+e04283590c2d319c72d505635047de157a8e71ea:services/backend/tests/prompt423-device-proof-and-signing-key-audit.test.js:generic-api-key:551
+
+# Findings #26-#28: Truncated JWT header placeholder (eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...) in doc (replaced in HEAD with <REDACTED_*>)
+e638850f196b758736237b9119a40ee977586a39:docs/implementation/dairy-registry-admin-login-fix/08_DAIRY_ADMIN_LOGIN_END_TO_END_VERIFICATION.md:generic-api-key:47
+e638850f196b758736237b9119a40ee977586a39:docs/implementation/dairy-registry-admin-login-fix/08_DAIRY_ADMIN_LOGIN_END_TO_END_VERIFICATION.md:generic-api-key:48
+e638850f196b758736237b9119a40ee977586a39:docs/implementation/dairy-registry-admin-login-fix/08_DAIRY_ADMIN_LOGIN_END_TO_END_VERIFICATION.md:generic-api-key:80
+
+# Finding #29: Synthetic test literal dfarm_test_razorpay_secret_key_123 in test (replaced in HEAD with runtime join)
+e638850f196b758736237b9119a40ee977586a39:services/backend/tests/super-admin-production.test.js:generic-api-key:352
+
+# Finding #38: Dummy ASCII base64 auth_tag ("g93abcd123456789") in report (replaced in HEAD with <BASE64_GCM_AUTH_TAG_PLACEHOLDER>)
+6a3b890c619eced44c8f0b2242222737783aff7a:reports/registration-expo-complete-verification/FACE_RECOGNITION_REPORT.md:generic-api-key:94
+
+# Findings #40-#41: Truncated PEM header stub and 0123456789abcdef... sequential hex in .env.example (replaced in HEAD with placeholder_*)
+577775934ee7762f9a44eba9beff1a47f5dfaee6:.env.example:private-key:85
+577775934ee7762f9a44eba9beff1a47f5dfaee6:.env.example:generic-api-key:53
+
+# Findings #42-#43: Truncated JWT header placeholders in docs/api/authentication-api.md (replaced in HEAD with <JWT_ACCESS_TOKEN_PLACEHOLDER>)
+577775934ee7762f9a44eba9beff1a47f5dfaee6:docs/api/authentication-api.md:generic-api-key:34
+577775934ee7762f9a44eba9beff1a47f5dfaee6:docs/api/authentication-api.md:generic-api-key:137
+
+# Finding #44: Truncated JWT header placeholder in docs/api/customer-mobile-api.md (replaced in HEAD with <JWT_ACCESS_TOKEN_PLACEHOLDER>)
+577775934ee7762f9a44eba9beff1a47f5dfaee6:docs/api/customer-mobile-api.md:generic-api-key:60
+
+# Finding #46: Truncated JWT header placeholder in docs/api/synchronization-api.md (replaced in HEAD with <JWT_DEVICE_TOKEN_PLACEHOLDER>)
+577775934ee7762f9a44eba9beff1a47f5dfaee6:docs/api/synchronization-api.md:generic-api-key:37
+
+# Finding #48: Truncated PEM header placeholder in docs/integrations/firebase-push.md (replaced in HEAD with placeholder_*)
+577775934ee7762f9a44eba9beff1a47f5dfaee6:docs/integrations/firebase-push.md:private-key:19
+
+# Finding #49: Synthetic sequential hex a1b2c3d4... in docs/integrations/whatsapp-business.md (replaced in HEAD with placeholder_*)
+577775934ee7762f9a44eba9beff1a47f5dfaee6:docs/integrations/whatsapp-business.md:generic-api-key:20
+
+# Finding #53: Synthetic sequential hex 0123456789abcdef... in biometric-engine.test.js (replaced in HEAD with crypto.randomBytes)
+577775934ee7762f9a44eba9beff1a47f5dfaee6:services/backend/tests/biometric-engine.test.js:generic-api-key:48
+
+# Finding #54: Dummy ASCII base64 authTag ("0123456789012345") in phase11-rate-and-integration.test.js (replaced in HEAD with Buffer.from)
+577775934ee7762f9a44eba9beff1a47f5dfaee6:services/backend/tests/phase11-rate-and-integration.test.js:generic-api-key:276

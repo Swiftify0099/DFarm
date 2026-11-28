@@ -81,6 +81,9 @@ function computeSimpleHash(text: string): string {
   return `${part1}${part2}${part1}${part2}`.slice(0, 64);
 }
 
+// Synthetic offline-mock fallback token for DF-SAN-2813 (cannot authenticate to real backend DB)
+export const SYNTHETIC_DF_SAN_2813_MOCK_TOKEN = 'placeholder_df_san_2813_offline_mock_activation_token'
+
 interface StoredOtp {
   mobile: string
   code: string
@@ -1216,7 +1219,7 @@ class MockBackendEngine {
     }
 
     // 4. Special Fallback for user's DF-SAN-2813 tenant if freshly opened in a clean browser session
-    if (!invitation && (fallbackDairyCode === 'DF-SAN-2813' || token === 'f0beef6f13794b864a3f5285bf354264644dc71e1d8aafbeadd71927f1a9c59d')) {
+    if (!invitation && (fallbackDairyCode === 'DF-SAN-2813' || token === SYNTHETIC_DF_SAN_2813_MOCK_TOKEN)) {
       const now = new Date().toISOString()
       invitation = {
         id: 'inv_df_san_2813',
@@ -1227,8 +1230,8 @@ class MockBackendEngine {
         adminName: 'Pankaj Popat Yewale',
         adminMobile: '7507495615',
         email: 'pankajyc5656@gmail.com',
-        tokenHash: computeSimpleHash('f0beef6f13794b864a3f5285bf354264644dc71e1d8aafbeadd71927f1a9c59d'),
-        rawToken: 'f0beef6f13794b864a3f5285bf354264644dc71e1d8aafbeadd71927f1a9c59d',
+        tokenHash: computeSimpleHash(SYNTHETIC_DF_SAN_2813_MOCK_TOKEN),
+        rawToken: SYNTHETIC_DF_SAN_2813_MOCK_TOKEN,
         status: 'PENDING',
         deliveryStatus: 'ACCEPTED',
         createdAt: now,

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mockBackend } from '@/services/mockBackend'
+import { mockBackend, SYNTHETIC_DF_SAN_2813_MOCK_TOKEN } from '@/services/mockBackend'
 import { storage } from '@/services/storage'
 
 describe('Dairy Business & Tenant Lifecycle Management', () => {
@@ -205,7 +205,7 @@ describe('Dairy Business & Tenant Lifecycle Management', () => {
   })
 
   it('validates activation token for DF-SAN-2813 fallback scenario', async () => {
-    const val = await mockBackend.validateActivationToken('f0beef6f13794b864a3f5285bf354264644dc71e1d8aafbeadd71927f1a9c59d', 'DF-SAN-2813')
+    const val = await mockBackend.validateActivationToken(SYNTHETIC_DF_SAN_2813_MOCK_TOKEN, 'DF-SAN-2813')
     expect(val.code).toBe('VALID')
     expect(val.data?.dairyCode).toBe('DF-SAN-2813')
     expect(val.data?.dairyName).toBe("Anand Malk's")
