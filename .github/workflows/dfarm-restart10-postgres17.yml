@@ -76,8 +76,21 @@ jobs:
       - name: Verify PostgreSQL 17 connectivity & server version
         run: |
           set -euo pipefail
-          PGPASSWORD=postgres_ci_password psql -h 127.0.0.1 -U postgres -d dfarm_central -c "SELECT version();"
-          node -e "import('pg').then(async ({default:pg})=>{const c=new pg.Client({connectionString:process.env.TEST_POSTGRES_URL});await c.connect();const r=await c.query('SHOW server_version');console.log('PG version:',r.rows[0].server_version);await c.end();})"
+          PGPASSWORD=postgres_ci_password psql -h 127.0.0.1 -U postgres -d dfarm_central -v ON_ERROR_STOP=1 -c "SELECT version();"
+          PG_VERSION="$(
+            PGPASSWORD=postgres_ci_password \
+            psql -h 127.0.0.1 \
+                 -U postgres \
+                 -d dfarm_central \
+                 -v ON_ERROR_STOP=1 \
+                 -Atqc "SHOW server_version"
+          )"
+          echo "PostgreSQL server version: ${PG_VERSION}"
+          PG_MAJOR="${PG_VERSION%%.*}"
+          if [ "$PG_MAJOR" != "17" ]; then
+            echo "Expected PostgreSQL 17, received ${PG_VERSION}"
+            exit 1
+          fi
 
       - name: Install workspace dependencies
         run: npm ci
@@ -88,8 +101,15 @@ jobs:
           npm run build -w @dfarm/database
           npm run build:backend
 
-      - name: Validate migration catalog & database package tests
-        run: npm run db:validate && npm run db:test
+      - name: Validate database migration catalog & schema
+        run: npm run db:validate
+
+      - name: Run database package catalog & runtime tests
+        # dfarm_central is unmigrated prior to PG17 role bootstrap/two-tenant provisioning (matches RESTART-09);
+        # RESTART-10 PG17 execution still enforces REQUIRE_REAL_POSTGRES=1, TEST_REAL_POSTGRES=1, and zero skips.
+        env:
+          TEST_REAL_POSTGRES: ""
+        run: npm run db:test
 
       - name: Bootstrap disposable PostgreSQL 17 cluster auth roles
         run: node scripts/ci-pg17-bootstrap.js
