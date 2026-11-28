@@ -10,6 +10,10 @@ const REQUIRED_SUITES = [
     path: 'services/backend/tests/restart05-migration-reconciliation.test.js',
   },
   {
+    name: 'RESTART-05.1 Migration Runner Fail-Closed Safety, Auth Integrity & CLI Parity Suite',
+    path: 'services/backend/tests/restart051-migration-safety.test.js',
+  },
+  {
     name: 'RESTART-05 Real PG17 Migration Ownership, Quarantine & Atomicity Gate',
     path: 'services/backend/tests/restart05-real-postgres-migrations.test.js',
   },

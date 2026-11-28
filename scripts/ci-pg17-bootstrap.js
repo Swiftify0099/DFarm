@@ -1,10 +1,37 @@
 import pg from 'pg';
 import crypto from 'node:crypto';
 import { assertDisposablePg17Cluster } from './pg17-safety-guard.js';
+import { bootstrapDisposableTestAuthOnUrl } from './pg17-test-auth-bootstrap.js';
 
 const { Pool } = pg;
 
 const TEST_PG_URL = process.env['TEST_POSTGRES_URL'] || '';
+
+function makeDbUrl(baseUrl, dbName) {
+  const u = new URL(baseUrl);
+  u.pathname = `/${dbName}`;
+  return u.toString();
+}
+
+async function waitForDbIdle(pool, dbName) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const res = await pool.query(
+      `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+      [dbName]
+    );
+    if (Number(res.rows[0]?.cnt || 0) === 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  const finalRes = await pool.query(
+    `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid();`,
+    [dbName]
+  );
+  const remaining = Number(finalRes.rows[0]?.cnt || 0);
+  if (remaining > 0) {
+    throw new Error(`Probe database '${dbName}' still has ${remaining} active connection(s) before DROP DATABASE.`);
+  }
+}
 
 async function main() {
   const preflight = await assertDisposablePg17Cluster({ connectionString: TEST_PG_URL });
@@ -21,6 +48,8 @@ async function main() {
   });
 
   const probeDbName = `dfarm_bootstrap_probe_${crypto.randomUUID().replace(/-/g, '').slice(0, 8)}`;
+  let probeCreated = false;
+  let primaryError = null;
 
   try {
     // 1. Verify primary bootstrap role (postgres) exists and has superuser + createdb
@@ -36,7 +65,7 @@ async function main() {
       throw new Error("Role 'postgres' must have SUPERUSER and CREATEDB in disposable CI cluster.");
     }
 
-    // 3. Idempotently bootstrap minimum Supabase compatibility roles audited from active migrations
+    // 2. Idempotently bootstrap minimum Supabase compatibility roles audited from active migrations
     // Audited across supabase/migrations/*.sql: postgres, anon, authenticated, service_role.
     await pool.query(`
       DO $$
@@ -61,7 +90,7 @@ async function main() {
       END $$;
     `);
 
-    // 4. Verify all required roles & attributes (print role names & attributes only, never credentials)
+    // 3. Verify all required roles & attributes (print role names & attributes only, never credentials)
     const rolesRes = await pool.query(`
       SELECT rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin, rolbypassrls
       FROM pg_roles
@@ -93,14 +122,19 @@ async function main() {
       }
     }
 
-    // 5. Verify ability to create and drop disposable test databases cleanly
+    // 4. Isolated test-only auth.uid() bootstrap on disposable template1 and central test DB
+    // Never overwrites an existing auth.uid(); keeps production MigrationRunner & CLI completely free of auth mutations.
+    const tplAuthRes = await bootstrapDisposableTestAuthOnUrl(makeDbUrl(TEST_PG_URL, 'template1'), TEST_PG_URL);
+    const centralAuthRes = await bootstrapDisposableTestAuthOnUrl(TEST_PG_URL, TEST_PG_URL);
+    console.log(
+      `Test-only auth.uid() bootstrap status: template1(created=${tplAuthRes.created}), dfarm_central(created=${centralAuthRes.created}).`
+    );
+
+    // 5. Verify ability to create and drop disposable test databases cleanly (without DROP DATABASE ... WITH (FORCE))
     await pool.query(`CREATE DATABASE ${probeDbName};`);
+    probeCreated = true;
     const probePool = new Pool({
-      connectionString: (() => {
-        const u = new URL(TEST_PG_URL);
-        u.pathname = `/${probeDbName}`;
-        return u.toString();
-      })(),
+      connectionString: makeDbUrl(TEST_PG_URL, probeDbName),
       connectionTimeoutMillis: 3000,
       max: 1,
     });
@@ -112,12 +146,36 @@ async function main() {
     } finally {
       await probePool.end();
     }
-    await pool.query(`DROP DATABASE IF EXISTS ${probeDbName} WITH (FORCE);`);
+    await waitForDbIdle(pool, probeDbName);
+    await pool.query(`DROP DATABASE IF EXISTS ${probeDbName};`);
+    probeCreated = false;
     console.log(`Verified disposable test database create/drop lifecycle (${probeDbName}).`);
     console.log('CI PostgreSQL 17 role bootstrap & preflight validation PASSED.');
+  } catch (err) {
+    primaryError = err instanceof Error ? err : new Error(String(err));
   } finally {
-    await pool.query(`DROP DATABASE IF EXISTS ${probeDbName} WITH (FORCE);`).catch(() => {});
-    await pool.end().catch(() => {});
+    const cleanupErrors = [];
+    if (probeCreated) {
+      try {
+        await waitForDbIdle(pool, probeDbName);
+        await pool.query(`DROP DATABASE IF EXISTS ${probeDbName};`);
+      } catch (e) {
+        cleanupErrors.push(e instanceof Error ? e : new Error(String(e)));
+      }
+    }
+    try {
+      await pool.end();
+    } catch (e) {
+      cleanupErrors.push(e instanceof Error ? e : new Error(String(e)));
+    }
+    if (primaryError && cleanupErrors.length > 0) {
+      throw new AggregateError([primaryError, ...cleanupErrors], `${primaryError.message}; cleanup failed`);
+    }
+    if (primaryError) throw primaryError;
+    if (cleanupErrors.length === 1) throw cleanupErrors[0];
+    if (cleanupErrors.length > 1) {
+      throw new AggregateError(cleanupErrors, `Bootstrap cleanup failed (${cleanupErrors.length} errors)`);
+    }
   }
 }
 

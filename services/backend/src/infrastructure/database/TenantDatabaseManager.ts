@@ -720,21 +720,24 @@ export class TenantDatabaseManager {
     await this.awaitPendingTenantClose(dairyId);
 
     let tenantClient: IDatabaseClient;
+    let tenantPoolRef: pg.Pool | null = null;
 
     if (isTestDouble) {
       tenantClient = this.createIsolatedMemoryDatabase(dairyId);
       this.tenantMemDbs.set(dairyId, tenantClient);
     } else {
       const tenantPool = this.createTenantPool(dairyId, tenantUri);
+      tenantPoolRef = tenantPool;
       this.tenantPools.set(dairyId, tenantPool);
       tenantClient = this.wrapPgPool(tenantPool, dairyId);
     }
 
     try {
-      if (!isTestDouble) {
-        // Apply the complete operational migration track
+      if (!isTestDouble && tenantPoolRef) {
+        // Apply the complete operational migration track using the physical pg.Pool directly
+        // so advisory lock acquisition, per-migration transactions, and unlock share one PoolClient.
         logger.info({ dairyId, dbName }, 'Applying complete operational migrations to tenant database...');
-        await MigrationRunner.runTenantMigrations(tenantClient, dairyId);
+        await MigrationRunner.runTenantMigrations(tenantPoolRef, dairyId);
       }
 
       // 5. Insert tenant metadata verifying ownership

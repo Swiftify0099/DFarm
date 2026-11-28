@@ -5,8 +5,19 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import * as dbPackage from '../../../packages/database/dist/index.js';
-import {
+
+// Enforce strict isolated offline defaults BEFORE dynamically importing backend modules
+// so local .env files are never consulted during offline execution.
+process.env.NODE_ENV = 'test';
+process.env.DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
+process.env.CENTRAL_DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
+process.env.DATABASE_PROVISIONER_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
+process.env.DIRECT_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
+process.env.SUPABASE_URL = 'http://127.0.0.1:59998';
+process.env.TENANT_POOL_CONNECTION_TIMEOUT_MS = '500';
+
+const dbPackage = await import('../../../packages/database/dist/index.js');
+const {
   MigrationRunner,
   MigrationTarget,
   MIGRATION_MANIFEST,
@@ -14,10 +25,10 @@ import {
   CONTROL_PLANE_MIGRATIONS,
   TENANT_OPERATIONAL_MIGRATIONS,
   QUARANTINED_MIGRATIONS,
-} from '../dist/infrastructure/database/MigrationRunner.js';
-import { tenantDbControlService } from '../dist/infrastructure/database/TenantDatabaseControlService.js';
-import { DeviceChallengeService } from '../dist/infrastructure/security/DeviceChallengeService.js';
-import { resolveCliMigrationPlan } from '../../../scripts/migrate.js';
+} = await import('../dist/infrastructure/database/MigrationRunner.js');
+const { tenantDbControlService } = await import('../dist/infrastructure/database/TenantDatabaseControlService.js');
+const { DeviceChallengeService } = await import('../dist/infrastructure/security/DeviceChallengeService.js');
+const { resolveCliMigrationPlan } = await import('../../../scripts/migrate.js');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,16 +43,27 @@ function createMockMigrationClient(options = {}) {
   const schemaMigrations = new Map(options.initialSchemaMigrations || []);
   const supabaseHistory = new Map(options.initialSupabaseHistory || []);
   const executedSql = [];
+  const allQueries = [];
   const txLog = [];
   let pendingRollbacks = [];
 
   return {
+    __isMockClient: true,
     executedSql,
+    allQueries,
     txLog,
     schemaMigrations,
     supabaseHistory,
     async query(text, params = []) {
       const sql = String(text).trim();
+      allQueries.push(sql);
+
+      if (
+        sql.includes('CREATE SCHEMA IF NOT EXISTS auth') ||
+        /CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+auth\.uid\s*\(/i.test(sql)
+      ) {
+        throw new Error('FORBIDDEN: MigrationRunner must never create auth schema or overwrite auth.uid()');
+      }
 
       if (sql === 'BEGIN;') {
         txLog.push('BEGIN');
@@ -67,7 +89,10 @@ function createMockMigrationClient(options = {}) {
       if (sql.startsWith('SELECT pg_advisory_lock') || sql.startsWith('SELECT pg_advisory_unlock')) {
         return { rows: [{ pg_advisory_lock: '' }], rowCount: 1 };
       }
-      if (sql.includes('CREATE SCHEMA IF NOT EXISTS auth') || sql.includes('CREATE TABLE IF NOT EXISTS schema_migrations')) {
+      if (
+        sql.includes('CREATE SCHEMA IF NOT EXISTS supabase_migrations') ||
+        sql.includes('CREATE TABLE IF NOT EXISTS schema_migrations')
+      ) {
         return { rows: [], rowCount: 0 };
       }
       if (sql.includes('INSERT INTO schema_migrations') && sql.includes('FROM supabase_migrations.schema_migrations')) {
@@ -90,6 +115,10 @@ function createMockMigrationClient(options = {}) {
         const targetNames = new Set(params[0] || []);
         const matches = Array.from(supabaseHistory.values()).filter(r => targetNames.has(r.name));
         return { rows: matches, rowCount: matches.length };
+      }
+      if (sql === 'SELECT version, name FROM schema_migrations;') {
+        const rows = Array.from(schemaMigrations.values()).map(r => ({ version: r.version, name: r.name }));
+        return { rows, rowCount: rows.length };
       }
       if (sql === 'SELECT version, name, checksum FROM schema_migrations;') {
         const rows = Array.from(schemaMigrations.values());
@@ -236,7 +265,8 @@ describe('RESTART-05 Migration Manifest Parity, 031/040 Ownership & Runner Safet
     const results = await MigrationRunner.executeMigrationTrack(
       mockClient,
       [spoofedQuarantine, active031],
-      'test_quarantine_guard'
+      'test_quarantine_guard',
+      { allowCustomTrackForTesting: true, clientCapabilities: { mode: 'mock' } }
     );
 
     assert.equal(results.length, 1);
@@ -272,7 +302,8 @@ describe('RESTART-05 Migration Manifest Parity, 031/040 Ownership & Runner Safet
     const results = await MigrationRunner.executeMigrationTrack(
       mockClient,
       [active031],
-      'test_checksum_mismatch'
+      'test_checksum_mismatch',
+      { allowCustomTrackForTesting: true, clientCapabilities: { mode: 'mock' } }
     );
 
     assert.equal(results.length, 1);
@@ -303,7 +334,13 @@ describe('RESTART-05 Migration Manifest Parity, 031/040 Ownership & Runner Safet
     });
 
     await assert.rejects(
-      () => MigrationRunner.executeMigrationTrack(mockClient, [active031], 'test_filename_conflict'),
+      () =>
+        MigrationRunner.executeMigrationTrack(
+          mockClient,
+          [active031],
+          'test_filename_conflict',
+          { allowCustomTrackForTesting: true, clientCapabilities: { mode: 'mock' } }
+        ),
       /Migration version conflict for v031/i
     );
     assert.equal(mockClient.schemaMigrations.get('031').name, '031_some_other_migration.sql');
@@ -319,7 +356,13 @@ describe('RESTART-05 Migration Manifest Parity, 031/040 Ownership & Runner Safet
     });
 
     await assert.rejects(
-      () => MigrationRunner.executeMigrationTrack(mockClient, [active031], 'test_supabase_hist_collision'),
+      () =>
+        MigrationRunner.executeMigrationTrack(
+          mockClient,
+          [active031],
+          'test_supabase_hist_collision',
+          { allowCustomTrackForTesting: true, clientCapabilities: { mode: 'mock' } }
+        ),
       /Migration history conflict.*031_remove_dairy_admin_7507495615\.sql/i
     );
     assert.equal(mockClient.schemaMigrations.has('031'), false);
@@ -333,7 +376,13 @@ describe('RESTART-05 Migration Manifest Parity, 031/040 Ownership & Runner Safet
     });
 
     await assert.rejects(
-      () => MigrationRunner.executeMigrationTrack(mockClient, [entry031, entry040], 'test_failure_propagation'),
+      () =>
+        MigrationRunner.executeMigrationTrack(
+          mockClient,
+          [entry031, entry040],
+          'test_failure_propagation',
+          { allowCustomTrackForTesting: true, clientCapabilities: { mode: 'mock' } }
+        ),
       /Migration 040_device_auth_challenges\.sql \(v040\) failed/i
     );
 

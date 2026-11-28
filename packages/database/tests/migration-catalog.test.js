@@ -13,6 +13,8 @@ import {
   QUARANTINED_MIGRATION_FILENAMES,
   validateMigrationCatalog,
   validateMigrationsDirectory,
+  computeMigrationLockKey,
+  validateMigrationTrackInputs,
 } from '../dist/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -167,6 +169,66 @@ describe('DFarm Migration Catalog Integrity, 031 Quarantine & 040 Ownership Suit
           diskFilenames: ['031_remove_dairy_admin_7507495615.sql', '031_dairy_database_mappings.sql'],
         }),
       /non-colliding version '031_quarantine'/i
+    );
+  });
+
+  it('11. Advisory lock keys are deterministic signed 64-bit integers and independent across control-plane and tenants', () => {
+    const cpKey1 = computeMigrationLockKey('dfarm_migration_lock:control_plane');
+    const cpKey2 = computeMigrationLockKey('dfarm_migration_lock:control_plane');
+    const tAKey = computeMigrationLockKey('dfarm_migration_lock:tenant_00000000-0000-0000-0000-000000000001');
+    const tBKey = computeMigrationLockKey('dfarm_migration_lock:tenant_00000000-0000-0000-0000-000000000002');
+
+    assert.equal(cpKey1, cpKey2);
+    assert.match(cpKey1, /^-?\d+$/);
+    assert.notEqual(cpKey1, tAKey);
+    assert.notEqual(cpKey1, tBKey);
+    assert.notEqual(tAKey, tBKey);
+  });
+
+  it('12. Negative: validateMigrationTrackInputs rejects cross-track injection, substituted filenames, and arbitrary track names', () => {
+    assert.throws(
+      () =>
+        validateMigrationTrackInputs(
+          TENANT_OPERATIONAL_MIGRATIONS,
+          'control_plane',
+          migrationsDir
+        ),
+      /Migration track rejection/i
+    );
+
+    assert.throws(
+      () =>
+        validateMigrationTrackInputs(
+          CONTROL_PLANE_MIGRATIONS,
+          'tenant_00000000-0000-0000-0000-000000000001',
+          migrationsDir
+        ),
+      /Migration track rejection/i
+    );
+
+    assert.throws(
+      () =>
+        validateMigrationTrackInputs(
+          CONTROL_PLANE_MIGRATIONS,
+          'arbitrary_track_name',
+          migrationsDir
+        ),
+      /Refusing arbitrary migration track/i
+    );
+
+    const substitutedTrack = CONTROL_PLANE_MIGRATIONS.map((entry) =>
+      entry.version === '031'
+        ? { ...entry, filename: '031_substituted_file.sql' }
+        : entry
+    );
+    assert.throws(
+      () =>
+        validateMigrationTrackInputs(
+          substitutedTrack,
+          'control_plane',
+          migrationsDir
+        ),
+      /does not match canonical MIGRATION_MANIFEST/i
     );
   });
 });

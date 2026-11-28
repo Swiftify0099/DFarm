@@ -3,12 +3,13 @@
 **Repository:** `Swiftify0099/DFarm`  
 **Branch:** `fix/cloudflare-pages-production-deploy`  
 **Task:** `RESTART-05` (`DF-020`, Priority `P0`)  
-**Local Git HEAD (Pre-edit Baseline):** `6d905703968da2f8760bdbbc0dcc82ed3b0dcc8e`  
-**Remote `origin/fix/cloudflare-pages-production-deploy` HEAD:** `6d905703968da2f8760bdbbc0dcc82ed3b0dcc8e`  
-**Overall `DF-020` Status:** **PARTIAL — LOCAL FIX COMPLETE, POSTGRESQL 17 CI PENDING**
+**Pushed RESTART-05 Baseline Commit:** `b2f063a399eebf7493dc3ff123203539154d8e71`  
+**Prior Remote Baseline (`origin/fix/cloudflare-pages-production-deploy`):** `6d905703968da2f8760bdbbc0dcc82ed3b0dcc8e`  
+**Latest Remote `origin/fix/cloudflare-pages-production-deploy` HEAD:** `b2f063a399eebf7493dc3ff123203539154d8e71`  
+**Overall `DF-020` Status:** **PARTIAL — LOCAL `RESTART-05.1` SAFETY FIX COMPLETE, POSTGRESQL 17 CI PENDING**
 
 > [!NOTE]
-> Local Docker/PostgreSQL 17 is not running on this Windows workstation, and per safety policy no commit, push, or live database migration was executed. All TypeScript builds, canonical catalog checks, CLI guard checks, and offline/mock/`pg-mem` suites were executed and passed locally. Real PostgreSQL 17 runtime verification (`services/backend/tests/restart05-real-postgres-migrations.test.js` via `.github/workflows/dfarm-restart05-postgres17.yml`) awaits operator commit/push.
+> Commit `b2f063a399eebf7493dc3ff123203539154d8e71` ran `.github/workflows/dfarm-restart05-postgres17.yml` Run `46063207947` (Job `140722192765`), which failed Step 9 (`Execute RESTART-05 PostgreSQL 17 Migration Reconciliation Gate`). Follow-up remediation in `RESTART-05.1` (see [`DFARM_RESTART_05_1_MIGRATION_RUNNER_SAFETY_REPORT.md`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/DFARM_RESTART_05_1_MIGRATION_RUNNER_SAFETY_REPORT.md)) resolved fail-open transaction/lock handling, removed runtime `auth.uid()` replacement, reconciled `scripts/migrate.js` with the shared `@dfarm/database` engine, and fixed the static-import ordering bug in `restart05-real-postgres-migrations.test.js`. Real PostgreSQL 17 CI execution on the uncommitted `RESTART-05.1` edits awaits operator commit/push.
 
 ---
 
@@ -103,9 +104,10 @@
 
 ## 6. Pending PostgreSQL 17 CI Verification & Security/History Review
 
-1. **PostgreSQL 17 CI Gate Ready (`.github/workflows/dfarm-restart05-postgres17.yml`):**
-   - Spins up `postgres:17-alpine`, runs `npm ci`, `npm run build:backend`, `npm run db:validate`, `node scripts/ci-pg17-bootstrap.js`, and `node scripts/ci-run-restart05-pg17.js` (`REQUIRE_REAL_POSTGRES=1`, `TEST_REAL_POSTGRES=1`, `DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1`).
-   - CI passes only if both `restart05-migration-reconciliation.test.js` and `restart05-real-postgres-migrations.test.js` execute all tests with `fail === 0`, `skipped === 0`, and zero `pg-mem` fallback logs.
+1. **PostgreSQL 17 CI Gate Status (`.github/workflows/dfarm-restart05-postgres17.yml`):**
+   - **Previous Run on `b2f063a399eebf7493dc3ff123203539154d8e71`:** Run [`46063207947`](https://github.com/Swiftify0099/DFarm/actions/runs/46063207947) (Job `140722192765`) **failed** in Step 9 (`Execute RESTART-05 PostgreSQL 17 Migration Reconciliation Gate`). Code inspection confirmed `services/backend/tests/restart05-real-postgres-migrations.test.js` statically imported `MigrationRunner.js` before configuring `CENTRAL_DATABASE_URL`, causing `config/env.js` to cache port `54322` instead of the disposable test database URL.
+   - **`RESTART-05.1` Updated Gate (`PENDING` on uncommitted local changes):** Spins up `postgres:17-alpine`, runs `npm ci`, `npm run build:backend`, `npm run db:validate`, `node scripts/ci-pg17-bootstrap.js` (using isolated `scripts/pg17-test-auth-bootstrap.js`), and `node scripts/ci-run-restart05-pg17.js` (`REQUIRE_REAL_POSTGRES=1`, `TEST_REAL_POSTGRES=1`, `DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1`).
+   - CI passes only if `restart05-migration-reconciliation.test.js`, `restart051-migration-safety.test.js`, and `restart05-real-postgres-migrations.test.js` execute all tests with `fail === 0`, `skipped === 0`, and zero `pg-mem` fallback logs.
 2. **Security & Non-Regression Assessment:**
    - No secrets, passwords, tokens, or connection URIs were printed or added; `scripts/migrate.js` masks connection URIs to `protocol//host[:port]/db`.
    - Zero historical `.sql` files in `supabase/migrations/` were edited, renamed, or deleted (preserving `041`, `042`, `046`, `047`, and `031_remove_dairy_admin_7507495615.sql`).

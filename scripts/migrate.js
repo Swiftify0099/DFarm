@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import dns from 'node:dns';
-import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
 import {
@@ -12,6 +11,7 @@ import {
   QUARANTINED_MIGRATION_VERSIONS,
   resolveMigrationsDir,
   validateMigrationsDirectory,
+  executeMigrationTrackCore,
 } from '@dfarm/database';
 
 // Force IPv4 first to avoid IPv6 timeout on Windows / ISP networks
@@ -137,8 +137,96 @@ function getSslConfig(connectionString) {
   return false;
 }
 
-// Auto load .env if present (invoked only after CLI track authorization succeeds)
-function loadEnv() {
+function isPlaceholderValue(val) {
+  const trimmed = String(val || '').trim();
+  if (!trimmed) return true;
+  const lower = trimmed.toLowerCase();
+  if (
+    lower.includes('your_password_here') ||
+    lower.includes('your-password') ||
+    lower.includes('your-project-ref') ||
+    lower.includes('your-ref')
+  ) {
+    return true;
+  }
+  if (process.env.NODE_ENV !== 'test' && lower.includes('placeholder_')) {
+    return true;
+  }
+  return false;
+}
+
+function parseValidatedPostgresUrl(raw, varName) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed || isPlaceholderValue(trimmed)) {
+    throw new Error(`${varName} contains an empty or placeholder connection string.`);
+  }
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(`${varName} is not a valid PostgreSQL connection URL.`);
+  }
+  if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
+    throw new Error(`${varName} must use postgres:// or postgresql:// protocol (got '${parsed.protocol}').`);
+  }
+  const dbName = parsed.pathname.replace(/^\//, '');
+  if (!dbName) {
+    throw new Error(`${varName} must explicitly specify a target database name in its path.`);
+  }
+  return { url: trimmed, parsed, dbName };
+}
+
+function extractTargetIdentity(parsed) {
+  const host = parsed.hostname.toLowerCase();
+  const port = parsed.port || '5432';
+  const dbName = parsed.pathname.replace(/^\//, '');
+  const username = decodeURIComponent(parsed.username || '');
+
+  let supabaseRef = null;
+  const dbHostMatch = /^db\.([a-z0-9-]+)\.supabase\.co$/i.exec(host);
+  if (dbHostMatch) {
+    supabaseRef = dbHostMatch[1].toLowerCase();
+  } else if (host.endsWith('.pooler.supabase.com')) {
+    const userMatch = /^[^.]+\.([a-z0-9-]+)$/i.exec(username);
+    if (userMatch) {
+      supabaseRef = userMatch[1].toLowerCase();
+    }
+  }
+
+  return { host, port, dbName, supabaseRef };
+}
+
+function areSameTarget(a, b) {
+  const idA = extractTargetIdentity(a.parsed);
+  const idB = extractTargetIdentity(b.parsed);
+  return idA.host === idB.host && idA.port === idB.port && idA.dbName === idB.dbName;
+}
+
+function areCompatibleCentralTargets(a, b) {
+  if (areSameTarget(a, b)) return true;
+  const idA = extractTargetIdentity(a.parsed);
+  const idB = extractTargetIdentity(b.parsed);
+  // Allow pairing Supabase session DIRECT_URL (db.<ref>.supabase.co:5432) and pooler CENTRAL/DATABASE_URL (postgres.<ref>@...pooler.supabase.com) for the same project & DB
+  return Boolean(
+    idA.supabaseRef &&
+    idB.supabaseRef &&
+    idA.supabaseRef === idB.supabaseRef &&
+    idA.dbName === idB.dbName
+  );
+}
+
+// Auto load .env if present (invoked only after CLI track authorization succeeds).
+// Explicit process environment variables ALWAYS take precedence over .env entries,
+// and if the track's explicit primary target URL is already set in process.env,
+// database URLs from .env are never injected.
+function loadEnv(track) {
+  const explicitTargetAlreadySet =
+    (track === 'tenant' && Boolean(process.env.TENANT_DATABASE_URL)) ||
+    (track === 'control-plane' && Boolean(process.env.CENTRAL_DATABASE_URL));
+  if (explicitTargetAlreadySet) {
+    return;
+  }
+
   const envCandidates = [
     path.resolve(process.cwd(), '.env'),
     path.resolve(process.cwd(), 'services/backend/.env'),
@@ -157,9 +245,7 @@ function loadEnv() {
             if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
               v = v.slice(1, -1);
             }
-            if (!v.includes('YOUR_PASSWORD_HERE')) {
-              process.env[k] = v;
-            } else if (!process.env[k]) {
+            if (!process.env[k] && !isPlaceholderValue(v)) {
               process.env[k] = v;
             }
           }
@@ -169,58 +255,152 @@ function loadEnv() {
   }
 }
 
-function getConnectionCandidates(track) {
+/**
+ * Resolves a single unambiguous PostgreSQL target URL for the requested track.
+ * - Tenant track: requires TENANT_DATABASE_URL explicitly; never falls back to central URLs.
+ * - Control-plane track: requires CENTRAL_DATABASE_URL or unambiguous DIRECT_URL / DATABASE_URL
+ *   (compatible Supabase direct/pooler pairs are allowed, while conflicting databases/hosts fail closed).
+ * - Never falls back to any hardcoded localhost default.
+ */
+export function getConnectionCandidates(track, env = process.env) {
   if (track === 'tenant') {
-    const tenantUrl = process.env.TENANT_DATABASE_URL && !process.env.TENANT_DATABASE_URL.includes('YOUR_PASSWORD_HERE')
-      ? process.env.TENANT_DATABASE_URL
-      : null;
-    if (!tenantUrl) {
+    const rawTenant = env.TENANT_DATABASE_URL;
+    if (!rawTenant || isPlaceholderValue(rawTenant)) {
       throw new Error(
-        'TENANT_DATABASE_URL must be explicitly set for CLI --track=tenant execution (refusing to fall back to control-plane DIRECT_URL/DATABASE_URL).'
+        'TENANT_DATABASE_URL must be explicitly set for CLI --track=tenant execution (refusing to fall back to central CENTRAL_DATABASE_URL/DIRECT_URL/DATABASE_URL or any default).'
       );
     }
-    return [tenantUrl];
+    const tenantTarget = parseValidatedPostgresUrl(rawTenant, 'TENANT_DATABASE_URL');
+
+    for (const centralKey of ['CENTRAL_DATABASE_URL', 'DIRECT_URL', 'DATABASE_URL']) {
+      const rawCentral = env[centralKey];
+      if (rawCentral && !isPlaceholderValue(rawCentral)) {
+        const centralTarget = parseValidatedPostgresUrl(rawCentral, centralKey);
+        if (areSameTarget(tenantTarget, centralTarget)) {
+          throw new Error(
+            `Refusing --track=tenant execution: TENANT_DATABASE_URL points to the same database target as ${centralKey}. Tenant migrations must target an isolated tenant database.`
+          );
+        }
+      }
+    }
+
+    return [tenantTarget.url];
   }
 
-  return [
-    process.env.CENTRAL_DATABASE_URL && !process.env.CENTRAL_DATABASE_URL.includes('YOUR_PASSWORD_HERE') ? process.env.CENTRAL_DATABASE_URL : null,
-    process.env.DIRECT_URL && !process.env.DIRECT_URL.includes('YOUR_PASSWORD_HERE') ? process.env.DIRECT_URL : null,
-    process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('YOUR_PASSWORD_HERE') ? process.env.DATABASE_URL : null,
-    'postgresql://postgres:postgres@127.0.0.1:54322/postgres',
-  ].filter(Boolean);
+  if (track !== 'control-plane') {
+    throw new Error(`Unsupported migration track '${track}' for target resolution.`);
+  }
+
+  const configured = [];
+  for (const key of ['CENTRAL_DATABASE_URL', 'DIRECT_URL', 'DATABASE_URL']) {
+    const raw = env[key];
+    if (raw !== undefined && String(raw).trim() !== '') {
+      configured.push({ key, ...parseValidatedPostgresUrl(raw, key) });
+    }
+  }
+
+  if (configured.length === 0) {
+    throw new Error(
+      'Refusing --track=control-plane execution: explicit CENTRAL_DATABASE_URL (or unambiguous central DIRECT_URL/DATABASE_URL) must be configured; no hardcoded default database fallback is allowed.'
+    );
+  }
+
+  // Fail closed if configured control-plane variables point to incompatible hosts or databases
+  for (let i = 1; i < configured.length; i++) {
+    if (!areCompatibleCentralTargets(configured[0], configured[i])) {
+      throw new Error(
+        `Ambiguous control-plane database target: ${configured[0].key} (${configured[0].parsed.hostname}/${configured[0].dbName}) disagrees with ${configured[i].key} (${configured[i].parsed.hostname}/${configured[i].dbName}). Configure a single unambiguous target.`
+      );
+    }
+  }
+
+  const selected = configured[0];
+  if (selected.dbName.toLowerCase().startsWith('dfarm_tenant_')) {
+    throw new Error(
+      `Refusing --track=control-plane execution against tenant-named database '${selected.dbName}'.`
+    );
+  }
+
+  if (env.TENANT_DATABASE_URL && !isPlaceholderValue(env.TENANT_DATABASE_URL)) {
+    const tenantTarget = parseValidatedPostgresUrl(env.TENANT_DATABASE_URL, 'TENANT_DATABASE_URL');
+    if (areSameTarget(selected, tenantTarget)) {
+      throw new Error(
+        `Ambiguous database target: control-plane ${selected.key} points to the same database as TENANT_DATABASE_URL.`
+      );
+    }
+  }
+
+  return [selected.url];
 }
 
 async function createConnectedClient(connectionCandidates) {
-  for (const uri of connectionCandidates) {
-    const ssl = getSslConfig(uri);
-    const parsed = new URL(uri);
-    const maskedTarget = `${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}${parsed.pathname}`;
-    console.log('------------------------------------------------------------');
-    console.log('DFARM DATABASE MIGRATION ENGINE');
-    console.log('Target Host/DB:', maskedTarget);
-    console.log('SSL Mode Enabled:', Boolean(ssl));
-    console.log('------------------------------------------------------------');
-
-    const testClient = new Client({
-      connectionString: uri,
-      ssl,
-      connectionTimeoutMillis: 30000,
-    });
-
-    try {
-      await testClient.connect();
-      console.log('Connected to PostgreSQL successfully.\n');
-      return testClient;
-    } catch (err) {
-      console.warn(`Connection attempt to ${maskedTarget} failed: ${err.message}`);
-      await testClient.end().catch(() => {});
-    }
+  if (!Array.isArray(connectionCandidates) || connectionCandidates.length !== 1) {
+    throw new Error('Expected exactly one unambiguous PostgreSQL connection target.');
   }
-  throw new Error('All connection attempts timed out. Please check your network or run via Supabase SQL Editor.');
+  const uri = connectionCandidates[0];
+  const ssl = getSslConfig(uri);
+  const parsed = new URL(uri);
+  const maskedTarget = `${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ''}${parsed.pathname}`;
+  console.log('------------------------------------------------------------');
+  console.log('DFARM DATABASE MIGRATION ENGINE');
+  console.log('Target Host/DB:', maskedTarget);
+  console.log('SSL Mode Enabled:', Boolean(ssl));
+  console.log('------------------------------------------------------------');
+
+  const client = new Client({
+    connectionString: uri,
+    ssl,
+    connectionTimeoutMillis: 30000,
+  });
+
+  await client.connect();
+  console.log('Connected to PostgreSQL successfully.\n');
+  return client;
+}
+
+/**
+ * Executes a validated CLI migration plan against a connected pg.Client (or test double)
+ * using the exact shared @dfarm/database fail-closed execution engine.
+ * Never creates or modifies auth.uid().
+ */
+export async function executeCliMigrationPlan(client, plan, executionOptions = {}) {
+  if (!plan || plan.mode !== 'execute') {
+    throw new Error('executeCliMigrationPlan requires an executable CLI migration plan.');
+  }
+  const isControlPlane = plan.track === 'control-plane';
+  const canonicalTrack = isControlPlane ? CONTROL_PLANE_MIGRATIONS : TENANT_OPERATIONAL_MIGRATIONS;
+  const trackName = isControlPlane
+    ? 'control_plane'
+    : `tenant_${String(plan.dairyId || '').trim().toLowerCase()}`;
+
+  const cliLogger = executionOptions.logger || {
+    info: (meta, message) => {
+      if (meta?.filename) {
+        console.log(`[MIGRATE] ${message} (${meta.filename})`);
+      } else if (meta?.version) {
+        console.log(`[MIGRATE] v${meta.version} ${message} (${meta.durationMs ?? 0}ms)`);
+      }
+    },
+    warn: (meta, message) => {
+      console.warn(`[WARN] ${message}`, meta?.filename ? `(${meta.filename})` : '');
+    },
+    error: (meta, message) => {
+      console.error(`[CRITICAL] ${message}`, meta?.filename ? `(${meta.filename})` : '', meta?.error || '');
+    },
+  };
+
+  return executeMigrationTrackCore(client, canonicalTrack, trackName, {
+    ...executionOptions,
+    migrationsDir: plan.migrationsDir,
+    logger: cliLogger,
+  });
 }
 
 async function run() {
   let client = null;
+  let primaryError = null;
+  let closeError = null;
+
   try {
     // 1. Validate track & canonical manifest BEFORE loading .env or opening any DB connection
     const plan = resolveCliMigrationPlan(process.argv.slice(2));
@@ -229,150 +409,41 @@ async function run() {
       return;
     }
 
-    loadEnv();
+    loadEnv(plan.track);
     const candidates = getConnectionCandidates(plan.track);
     client = await createConnectedClient(candidates);
 
-    // 2. Safely ensure auth helper & canonical migration tracking tables
-    try {
-      await client.query(`
-        CREATE SCHEMA IF NOT EXISTS auth;
-        CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$ BEGIN RETURN NULL; END; $$ LANGUAGE plpgsql STABLE;
-      `);
-    } catch {
-      // In Supabase Cloud, auth schema and auth.uid() are natively managed by supabase_admin
-    }
-
-    try {
-      await client.query(`
-        CREATE SCHEMA IF NOT EXISTS supabase_migrations;
-        CREATE TABLE IF NOT EXISTS supabase_migrations.schema_migrations (
-          version VARCHAR(50) PRIMARY KEY,
-          name VARCHAR(255) NOT NULL,
-          statements TEXT[],
-          inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-      `);
-    } catch {
-      // Restricted Supabase permissions on supabase_migrations schema
-    }
-
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        version VARCHAR(50) PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        checksum VARCHAR(64) NOT NULL,
-        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        execution_time_ms INTEGER NOT NULL
-      );
-    `);
-
-    try {
-      await client.query(
-        `INSERT INTO schema_migrations (version, name, checksum, applied_at, execution_time_ms)
-         SELECT version, name, 'HISTORICAL_SUPABASE_RECORD', inserted_at, 0
-         FROM supabase_migrations.schema_migrations
-         WHERE name <> ALL($1::text[])
-           AND version <> ALL($2::text[])
-         ON CONFLICT (version) DO NOTHING;`,
-        [
-          Array.from(QUARANTINED_MIGRATION_FILENAMES),
-          Array.from(QUARANTINED_MIGRATION_VERSIONS),
-        ]
-      );
-    } catch {
-      // Ignore if supabase_migrations is absent or restricted
-    }
-
     console.log(`Executing ${plan.entries.length} canonical ${plan.track} migrations.\n`);
-
-    const appliedRes = await client.query(`SELECT version, name, checksum FROM schema_migrations;`);
-    const appliedMap = new Map();
-    for (const row of appliedRes.rows) {
-      appliedMap.set(row.version, { name: row.name, checksum: row.checksum });
-    }
-
-    let appliedCount = 0;
-    let skippedCount = 0;
-
-    for (const entry of plan.entries) {
-      if (
-        entry.target === MigrationTarget.MANUAL_REVIEW_REQUIRED ||
-        QUARANTINED_MIGRATION_FILENAMES.has(entry.filename)
-      ) {
-        continue;
-      }
-
-      const filePath = path.join(plan.migrationsDir, entry.filename);
-      const sql = fs.readFileSync(filePath, 'utf8');
-      const checksum = crypto.createHash('sha256').update(sql, 'utf8').digest('hex');
-
-      if (appliedMap.has(entry.version)) {
-        const existing = appliedMap.get(entry.version);
-        if (
-          existing?.name &&
-          (QUARANTINED_MIGRATION_FILENAMES.has(existing.name) ||
-            (existing.name.endsWith('.sql') && existing.name !== entry.filename))
-        ) {
-          throw new Error(
-            `Migration version conflict for v${entry.version}: database recorded '${existing.name}', manifest expects '${entry.filename}'.`
-          );
-        }
-        if (existing?.checksum && existing.checksum !== 'HISTORICAL_SUPABASE_RECORD' && existing.checksum !== checksum) {
-          console.warn(
-            `[WARN] Checksum mismatch on v${entry.version} (${entry.filename}); preserving existing database record.`
-          );
-        }
-        skippedCount++;
-        continue;
-      }
-
-      process.stdout.write(`Executing migration ${entry.filename}... `);
-      const start = Date.now();
-      try {
-        await client.query('BEGIN;');
-        await client.query(sql);
-        const durationMs = Date.now() - start;
-        await client.query(
-          `INSERT INTO schema_migrations (version, name, checksum, applied_at, execution_time_ms)
-           VALUES ($1, $2, $3, NOW(), $4)
-           ON CONFLICT (version) DO NOTHING;`,
-          [entry.version, entry.filename, checksum, durationMs]
-        );
-        try {
-          await client.query('SAVEPOINT sp_supabase_hist;');
-          await client.query(
-            `INSERT INTO supabase_migrations.schema_migrations (version, name, inserted_at)
-             VALUES ($1, $2, NOW())
-             ON CONFLICT (version) DO NOTHING;`,
-            [entry.version, entry.filename]
-          );
-          await client.query('RELEASE SAVEPOINT sp_supabase_hist;');
-        } catch {
-          await client.query('ROLLBACK TO SAVEPOINT sp_supabase_hist;').catch(() => {});
-          await client.query('RELEASE SAVEPOINT sp_supabase_hist;').catch(() => {});
-        }
-        await client.query('COMMIT;');
-        console.log(`DONE (${durationMs}ms)`);
-        appliedCount++;
-      } catch (migrationErr) {
-        await client.query('ROLLBACK;').catch(() => {});
-        console.log('FAILED');
-        console.error(`\n[CRITICAL] Migration ${entry.filename} failed:`, migrationErr.message);
-        throw migrationErr;
-      }
-    }
+    const results = await executeCliMigrationPlan(client, plan);
+    const appliedCount = results.filter((r) => r.status === 'APPLIED').length;
+    const skippedCount = results.filter((r) => r.status === 'SKIPPED_ALREADY_APPLIED').length;
 
     console.log('\n------------------------------------------------------------');
     console.log(`Migration Run Completed (${plan.track}): ${appliedCount} applied, ${skippedCount} already up to date.`);
     console.log('------------------------------------------------------------\n');
   } catch (err) {
-    console.error('\nDatabase migration failed:', err.message);
-    process.exit(1);
+    primaryError = err instanceof Error ? err : new Error(String(err));
   } finally {
     if (client) {
-      await client.end().catch(() => {});
+      try {
+        await client.end();
+      } catch (endErr) {
+        closeError = endErr instanceof Error ? endErr : new Error(String(endErr));
+      }
     }
+  }
+
+  if (primaryError && closeError) {
+    console.error('\nDatabase migration failed:', primaryError.message, '; client close failed:', closeError.message);
+    process.exit(1);
+  }
+  if (primaryError) {
+    console.error('\nDatabase migration failed:', primaryError.message);
+    process.exit(1);
+  }
+  if (closeError) {
+    console.error('\nDatabase connection cleanup failed:', closeError.message);
+    process.exit(1);
   }
 }
 
