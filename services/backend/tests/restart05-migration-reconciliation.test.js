@@ -7,13 +7,17 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 // Enforce strict isolated offline defaults BEFORE dynamically importing backend modules
-// so local .env files are never consulted during offline execution.
+// so local .env files are never consulted and no real Supabase or PG endpoint is used.
 process.env.NODE_ENV = 'test';
+process.env.REQUIRE_REAL_POSTGRES = '1';
+delete process.env.TEST_POSTGRES_URL;
 process.env.DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
 process.env.CENTRAL_DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
 process.env.DATABASE_PROVISIONER_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
 process.env.DIRECT_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
 process.env.SUPABASE_URL = 'http://127.0.0.1:59998';
+process.env.SUPABASE_ANON_KEY = 'placeholder_supabase_anon_key_for_test';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'placeholder_supabase_service_role_key_for_test';
 process.env.TENANT_POOL_CONNECTION_TIMEOUT_MS = '500';
 
 const dbPackage = await import('../../../packages/database/dist/index.js');
@@ -392,13 +396,24 @@ describe('RESTART-05 Migration Manifest Parity, 031/040 Ownership & Runner Safet
   });
 
   it('10. scripts/migrate.js enforces canonical track ownership and fails closed without explicit --track', () => {
+    const cleanChildEnv = {
+      PATH: process.env.PATH || '',
+      ...(process.env.SYSTEMROOT ? { SYSTEMROOT: process.env.SYSTEMROOT } : {}),
+      NODE_ENV: 'test',
+    };
+
     // CLI fail-closed tests via subprocess (never connects to any DB!)
-    const noArgs = spawnSync(process.execPath, ['scripts/migrate.js'], { cwd: repoRoot, encoding: 'utf8' });
+    const noArgs = spawnSync(process.execPath, ['scripts/migrate.js'], {
+      cwd: repoRoot,
+      env: cleanChildEnv,
+      encoding: 'utf8',
+    });
     assert.notEqual(noArgs.status, 0);
     assert.match(noArgs.stderr + noArgs.stdout, /explicit --track=control-plane or --track=tenant/i);
 
     const tenantNoId = spawnSync(process.execPath, ['scripts/migrate.js', '--track=tenant'], {
       cwd: repoRoot,
+      env: cleanChildEnv,
       encoding: 'utf8',
     });
     assert.notEqual(tenantNoId.status, 0);
@@ -406,6 +421,7 @@ describe('RESTART-05 Migration Manifest Parity, 031/040 Ownership & Runner Safet
 
     const invalidTrack = spawnSync(process.execPath, ['scripts/migrate.js', '--track=bogus'], {
       cwd: repoRoot,
+      env: cleanChildEnv,
       encoding: 'utf8',
     });
     assert.notEqual(invalidTrack.status, 0);
@@ -413,6 +429,7 @@ describe('RESTART-05 Migration Manifest Parity, 031/040 Ownership & Runner Safet
 
     const validateOnly = spawnSync(process.execPath, ['scripts/migrate.js', '--validate-only'], {
       cwd: repoRoot,
+      env: cleanChildEnv,
       encoding: 'utf8',
     });
     assert.equal(validateOnly.status, 0, `validate-only failed: ${validateOnly.stderr}`);

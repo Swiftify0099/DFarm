@@ -2,14 +2,13 @@
 
 **Repository:** `Swiftify0099/DFarm`  
 **Branch:** `fix/cloudflare-pages-production-deploy`  
-**Task:** `RESTART-05` (`DF-020`, Priority `P0`)  
-**Pushed RESTART-05 Baseline Commit:** `b2f063a399eebf7493dc3ff123203539154d8e71`  
-**Prior Remote Baseline (`origin/fix/cloudflare-pages-production-deploy`):** `6d905703968da2f8760bdbbc0dcc82ed3b0dcc8e`  
-**Latest Remote `origin/fix/cloudflare-pages-production-deploy` HEAD:** `b2f063a399eebf7493dc3ff123203539154d8e71`  
-**Overall `DF-020` Status:** **PARTIAL — LOCAL `RESTART-05.1` SAFETY FIX COMPLETE, POSTGRESQL 17 CI PENDING**
+**Task:** `RESTART-05` -> `RESTART-05.1` -> `RESTART-05.1.1` (`DF-020`, Priority `P0`)  
+**Previous Public HEAD (`RESTART-05`):** `b2f063a399eebf7493dc3ff123203539154d8e71`  
+**Current Public HEAD (`origin/fix/cloudflare-pages-production-deploy` / `RESTART-05.1`):** `4ca6082f3b3330fede921a3b18d19b4ad93a18c5`  
+**Overall `DF-020` Status:** **PARTIAL — LOCAL `RESTART-05.1.1` FIXES VERIFIED, POSTGRESQL 17 CI PENDING**
 
 > [!NOTE]
-> Commit `b2f063a399eebf7493dc3ff123203539154d8e71` ran `.github/workflows/dfarm-restart05-postgres17.yml` Run `46063207947` (Job `140722192765`), which failed Step 9 (`Execute RESTART-05 PostgreSQL 17 Migration Reconciliation Gate`). Follow-up remediation in `RESTART-05.1` (see [`DFARM_RESTART_05_1_MIGRATION_RUNNER_SAFETY_REPORT.md`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/DFARM_RESTART_05_1_MIGRATION_RUNNER_SAFETY_REPORT.md)) resolved fail-open transaction/lock handling, removed runtime `auth.uid()` replacement, reconciled `scripts/migrate.js` with the shared `@dfarm/database` engine, and fixed the static-import ordering bug in `restart05-real-postgres-migrations.test.js`. Real PostgreSQL 17 CI execution on the uncommitted `RESTART-05.1` edits awaits operator commit/push.
+> Commit `b2f063a399eebf7493dc3ff123203539154d8e71` failed Run `46063207947` Step 9. `RESTART-05.1` was committed and pushed at `4ca6082f3b3330fede921a3b18d19b4ad93a18c5`, and Run `46092960805` (Job `140817845187`) on PostgreSQL `17.12` passed steps 1–8 and 7 real PG17 subtests (`1–5, 8–9`) while failing Step 9 (`7 passed, 5 failed, 0 skipped`) on offline suite Supabase env validation, Subtest 6 rollback `AggregateError`, and Subtest 7 async pool `remove` assertion timing. Follow-up `RESTART-05.1.1` fixes (see [`DFARM_RESTART_05_1_MIGRATION_RUNNER_SAFETY_REPORT.md`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/DFARM_RESTART_05_1_MIGRATION_RUNNER_SAFETY_REPORT.md)) resolve all three failure areas locally and harden [`scripts/ci-run-restart05-pg17.js`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/scripts/ci-run-restart05-pg17.js); disposable PostgreSQL `17.12` CI re-execution awaits operator commit/push.
 
 ---
 
@@ -105,9 +104,9 @@
 ## 6. Pending PostgreSQL 17 CI Verification & Security/History Review
 
 1. **PostgreSQL 17 CI Gate Status (`.github/workflows/dfarm-restart05-postgres17.yml`):**
-   - **Previous Run on `b2f063a399eebf7493dc3ff123203539154d8e71`:** Run [`46063207947`](https://github.com/Swiftify0099/DFarm/actions/runs/46063207947) (Job `140722192765`) **failed** in Step 9 (`Execute RESTART-05 PostgreSQL 17 Migration Reconciliation Gate`). Code inspection confirmed `services/backend/tests/restart05-real-postgres-migrations.test.js` statically imported `MigrationRunner.js` before configuring `CENTRAL_DATABASE_URL`, causing `config/env.js` to cache port `54322` instead of the disposable test database URL.
-   - **`RESTART-05.1` Updated Gate (`PENDING` on uncommitted local changes):** Spins up `postgres:17-alpine`, runs `npm ci`, `npm run build:backend`, `npm run db:validate`, `node scripts/ci-pg17-bootstrap.js` (using isolated `scripts/pg17-test-auth-bootstrap.js`), and `node scripts/ci-run-restart05-pg17.js` (`REQUIRE_REAL_POSTGRES=1`, `TEST_REAL_POSTGRES=1`, `DFARM_ALLOW_DISPOSABLE_PG17_MUTATIONS=1`).
-   - CI passes only if `restart05-migration-reconciliation.test.js`, `restart051-migration-safety.test.js`, and `restart05-real-postgres-migrations.test.js` execute all tests with `fail === 0`, `skipped === 0`, and zero `pg-mem` fallback logs.
+   - **Run `46063207947` on `b2f063a399eebf7493dc3ff123203539154d8e71`:** Failed Step 9 due to static import order in `restart05-real-postgres-migrations.test.js` (fixed in `4ca6082`).
+   - **Run `46092960805` (Job `140817845187`) on `4ca6082f3b3330fede921a3b18d19b4ad93a18c5`:** Confirmed PostgreSQL `17.12`. Steps 1–8 passed and PG17 subtests 1–5, 8, and 9 passed; Step 9 failed (`7 passed, 5 failed, 0 skipped`) due to: (A) offline suites setting `SUPABASE_URL` without synthetic `SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY`; (B) Subtest 6 tracking-insert fault wrapper firing on `ensureMigrationTrackingTables()` historical sync before `BEGIN;` instead of per-migration `VALUES (` inserts; (C) Subtest 7 asserting `removedCount === 1` synchronously before `pg-pool`'s `client.end()` callback emitted `'remove'` asynchronously.
+   - **`RESTART-05.1.1` Remediated Gate (`PENDING` on uncommitted local changes):** Fixes all three failures locally (`restart05-migration-reconciliation.test.js` `10/10` PASS, `restart051-migration-safety.test.js` `9/9` PASS, `build:backend` `0`, `db:validate` `25/25`, `db:test` `34` PASS + PG `# SKIP`), hardens `parseTapStats()` in [`scripts/ci-run-restart05-pg17.js`](file:///c:/Users/panka/.gemini/antigravity/worktrees/DFarm/dfarm_customer_app_init/scripts/ci-run-restart05-pg17.js) for missing summaries / suite-level `# SKIP` / suite-and-nested `not ok` failures, and awaits commit/push to run against disposable `postgres:17-alpine` (`fail === 0`, `skipped === 0`, zero `pg-mem` fallback).
 2. **Security & Non-Regression Assessment:**
    - No secrets, passwords, tokens, or connection URIs were printed or added; `scripts/migrate.js` masks connection URIs to `protocol//host[:port]/db`.
    - Zero historical `.sql` files in `supabase/migrations/` were edited, renamed, or deleted (preserving `041`, `042`, `046`, `047`, and `031_remove_dairy_admin_7507495615.sql`).

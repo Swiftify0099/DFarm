@@ -92,6 +92,9 @@ test('RESTART-05 Real PostgreSQL 17.12 Migration Reconciliation, Lock/Tx Safety,
   process.env['CENTRAL_DATABASE_URL'] = ctrlUrl;
   process.env['DATABASE_URL'] = ctrlUrl;
   process.env['DATABASE_PROVISIONER_URL'] = ctrlUrl;
+  process.env['SUPABASE_URL'] = 'http://127.0.0.1:59998';
+  process.env['SUPABASE_ANON_KEY'] = 'placeholder_supabase_anon_key_for_test';
+  process.env['SUPABASE_SERVICE_ROLE_KEY'] = 'placeholder_supabase_service_role_key_for_test';
   process.env['TENANT_POOL_CONNECTION_TIMEOUT_MS'] = '5000';
 
   const {
@@ -345,9 +348,19 @@ test('RESTART-05 Real PostgreSQL 17.12 Migration Reconciliation, Lock/Tx Safety,
       // C. Failed BEGIN on real PG17 client aborts immediately without executing migration SQL
       const realClientForBegin = await poolNeg.connect();
       try {
+        const beginQueries = [];
         const beginFailWrapper = {
+          __migrationCapabilities: {
+            mode: 'postgres',
+            supportsTransactions: true,
+            supportsAdvisoryLocks: true,
+            supportsSavepoints: true,
+            supportsSupabaseMigrationsSync: true,
+          },
           async query(sql, params) {
-            if (String(sql).trim() === 'BEGIN;') {
+            const trimmed = String(sql).trim();
+            beginQueries.push(trimmed);
+            if (trimmed === 'BEGIN;') {
               throw new Error('Injected real-PG BEGIN failure');
             }
             return realClientForBegin.query(sql, params);
@@ -357,6 +370,9 @@ test('RESTART-05 Real PostgreSQL 17.12 Migration Reconciliation, Lock/Tx Safety,
           () => MigrationRunner.runControlPlaneMigrations(beginFailWrapper),
           /Injected real-PG BEGIN failure/i
         );
+        assert.ok(beginQueries.some((q) => q.startsWith('SELECT pg_advisory_lock')));
+        assert.ok(beginQueries.includes('BEGIN;'));
+        assert.ok(beginQueries.some((q) => q.startsWith('SELECT pg_advisory_unlock')));
         const smCheck = await poolNeg.query(`SELECT COUNT(*)::int AS c FROM schema_migrations;`);
         assert.equal(smCheck.rows[0].c, 0, 'No migrations may be applied when BEGIN fails');
         const orgReg = await poolNeg.query(`SELECT to_regclass('public.organizations') AS reg;`);
@@ -390,23 +406,94 @@ test('RESTART-05 Real PostgreSQL 17.12 Migration Reconciliation, Lock/Tx Safety,
       assert.equal((await poolNeg.query(`SELECT version FROM schema_migrations WHERE version = '031';`)).rows.length, 0);
       assert.equal((await poolNeg.query(`SELECT version FROM schema_migrations WHERE version = '030';`)).rows.length, 1);
 
-      // E. Tracking insert failure rolls back valid DDL on real PG17
+      const isPerMigrationTrackingInsert = (sql) => {
+        const normalized = String(sql).replace(/\s+/g, ' ').trim();
+        return (
+          normalized.startsWith('INSERT INTO schema_migrations (version, name, checksum') &&
+          /\bVALUES\s*\(/i.test(normalized)
+        );
+      };
+
+      const createFaultInjectingSessionClient = (realClient, faultOpts) => {
+        const observedQueries = [];
+        const observedPids = new Set();
+        let inTxTableReg = null;
+        let inTxPid = null;
+        let rollbackExecutedOnRealPg = false;
+
+        return {
+          observedQueries,
+          observedPids,
+          getInTxState: () => ({ inTxTableReg, inTxPid, rollbackExecutedOnRealPg }),
+          clientWrapper: {
+            __migrationCapabilities: {
+              mode: 'postgres',
+              supportsTransactions: true,
+              supportsAdvisoryLocks: true,
+              supportsSavepoints: true,
+              supportsSupabaseMigrationsSync: true,
+            },
+            async query(sql, params) {
+              const trimmed = String(sql).trim();
+              observedQueries.push(trimmed);
+
+              if (isPerMigrationTrackingInsert(trimmed)) {
+                const probe = await realClient.query(
+                  `SELECT to_regclass('public.dairy_database_mappings') AS reg, pg_backend_pid() AS pid;`
+                );
+                inTxTableReg = probe.rows[0]?.reg || null;
+                inTxPid = Number(probe.rows[0]?.pid || 0);
+                observedPids.add(inTxPid);
+                throw new Error(faultOpts.trackingErrorMessage);
+              }
+
+              if (trimmed === 'ROLLBACK;') {
+                await realClient.query('ROLLBACK;');
+                const afterRb = await realClient.query(`SELECT pg_backend_pid() AS pid;`);
+                observedPids.add(Number(afterRb.rows[0]?.pid || 0));
+                rollbackExecutedOnRealPg = true;
+                if (faultOpts.rollbackErrorMessage) {
+                  throw new Error(faultOpts.rollbackErrorMessage);
+                }
+                return { rows: [], rowCount: 0 };
+              }
+
+              const res = await realClient.query(sql, params);
+              if (trimmed === 'BEGIN;') {
+                const beginPidRes = await realClient.query(`SELECT pg_backend_pid() AS pid;`);
+                observedPids.add(Number(beginPidRes.rows[0]?.pid || 0));
+              }
+              return res;
+            },
+          },
+        };
+      };
+
+      // E. Tracking insert failure rolls back valid DDL on real PG17 (same PostgreSQL session)
       const valid031Sql = fs.readFileSync(path.join(realMigDir, '031_dairy_database_mappings.sql'), 'utf8');
       fs.writeFileSync(path.join(tmpMigDir, '031_dairy_database_mappings.sql'), valid031Sql, 'utf8');
       const trackClient = await poolNeg.connect();
       try {
-        const failTrackWrapper = {
-          async query(sql, params) {
-            if (String(sql).trim().startsWith('INSERT INTO schema_migrations (version, name, checksum')) {
-              throw new Error('Simulated tracking insert failure on PG17');
-            }
-            return trackClient.query(sql, params);
-          },
-        };
+        const expectedPid = Number((await trackClient.query(`SELECT pg_backend_pid() AS pid;`)).rows[0].pid);
+        const harness = createFaultInjectingSessionClient(trackClient, {
+          trackingErrorMessage: 'Simulated tracking insert failure on PG17',
+        });
+
         await assert.rejects(
-          () => MigrationRunner.runControlPlaneMigrations(failTrackWrapper, { migrationsDir: tmpMigDir }),
+          () => MigrationRunner.runControlPlaneMigrations(harness.clientWrapper, { migrationsDir: tmpMigDir }),
           /Simulated tracking insert failure on PG17/i
         );
+
+        const state = harness.getInTxState();
+        assert.ok(harness.observedQueries.includes('BEGIN;'), 'Migration transaction must begin');
+        assert.ok(
+          harness.observedQueries.some((q) => q.includes('CREATE TABLE IF NOT EXISTS dairy_database_mappings')),
+          'Migration 031 SQL must execute before tracking insert failure'
+        );
+        assert.match(String(state.inTxTableReg || ''), /dairy_database_mappings/, 'Migration 031 DDL must be visible inside uncommitted transaction');
+        assert.equal(state.inTxPid, expectedPid, 'Tracking insert must execute on the same PostgreSQL session as BEGIN');
+        assert.equal(state.rollbackExecutedOnRealPg, true, 'Tracking insert failure must trigger ROLLBACK;');
+        assert.deepEqual(Array.from(harness.observedPids), [expectedPid], 'BEGIN, DDL/tracking insert, and ROLLBACK must share one PG session');
         assert.equal((await poolNeg.query(`SELECT to_regclass('public.dairy_database_mappings') AS reg;`)).rows[0].reg, null);
         assert.equal((await poolNeg.query(`SELECT version FROM schema_migrations WHERE version = '031';`)).rows.length, 0);
       } finally {
@@ -415,30 +502,38 @@ test('RESTART-05 Real PostgreSQL 17.12 Migration Reconciliation, Lock/Tx Safety,
 
       // F. Rollback failure also preserved via AggregateError on real PG17
       const rbClient = await poolNeg.connect();
+      let rbDiscardClient = false;
       try {
-        const failRbWrapper = {
-          async query(sql, params) {
-            if (String(sql).trim().startsWith('INSERT INTO schema_migrations (version, name, checksum')) {
-              throw new Error('Primary tracking insert failure');
-            }
-            if (String(sql).trim() === 'ROLLBACK;') {
-              // Still roll back cleanly on real PG after throwing simulated error, OR let client close clean
-              await rbClient.query('ROLLBACK;');
-              throw new Error('Simulated ROLLBACK transport error');
-            }
-            return rbClient.query(sql, params);
-          },
-        };
+        const expectedPid = Number((await rbClient.query(`SELECT pg_backend_pid() AS pid;`)).rows[0].pid);
+        const harness = createFaultInjectingSessionClient(rbClient, {
+          trackingErrorMessage: 'Primary tracking insert failure',
+          rollbackErrorMessage: 'Simulated ROLLBACK transport error',
+        });
+
         await assert.rejects(
-          () => MigrationRunner.runControlPlaneMigrations(failRbWrapper, { migrationsDir: tmpMigDir }),
+          () => MigrationRunner.runControlPlaneMigrations(harness.clientWrapper, { migrationsDir: tmpMigDir }),
           (err) =>
             err instanceof AggregateError &&
             err.errors.length === 2 &&
             /Primary tracking insert failure/.test(err.errors[0].message) &&
             /Simulated ROLLBACK transport error/.test(err.errors[1].message)
         );
+
+        const state = harness.getInTxState();
+        assert.ok(harness.observedQueries.includes('BEGIN;'), 'Migration transaction must begin');
+        assert.ok(
+          harness.observedQueries.some((q) => q.includes('CREATE TABLE IF NOT EXISTS dairy_database_mappings')),
+          'Migration 031 SQL must execute before tracking insert failure'
+        );
+        assert.match(String(state.inTxTableReg || ''), /dairy_database_mappings/, 'Migration 031 DDL must have run on the session before tracking failure');
+        assert.equal(state.inTxPid, expectedPid, 'Tracking insert must run on the exact same PostgreSQL session');
+        assert.equal(state.rollbackExecutedOnRealPg, true, 'Tracking insert failure must trigger ROLLBACK;');
+        assert.deepEqual(Array.from(harness.observedPids), [expectedPid], 'BEGIN, tracking insert, and ROLLBACK must execute on the same PG session');
+        assert.equal((await poolNeg.query(`SELECT to_regclass('public.dairy_database_mappings') AS reg;`)).rows[0].reg, null);
+        assert.equal((await poolNeg.query(`SELECT version FROM schema_migrations WHERE version = '031';`)).rows.length, 0);
+        rbDiscardClient = true;
       } finally {
-        rbClient.release();
+        rbClient.release(rbDiscardClient ? new Error('Simulated ROLLBACK transport error cleanup') : undefined);
       }
     });
 
@@ -481,18 +576,49 @@ test('RESTART-05 Real PostgreSQL 17.12 Migration Reconciliation, Lock/Tx Safety,
 
       // 7e. Unlock failure discards pooled client instead of returning potentially session-locked connection to pool
       const unlockPool = attachPoolErrorGuard(new Pool({ connectionString: ctrlUrl, max: 2 }), 'unlockTestPool');
-      let removedCount = 0;
-      unlockPool.on('remove', () => {
-        removedCount += 1;
+      const removedClients = [];
+      const releasedEvents = [];
+      let checkedOutRealClient = null;
+      let failedBackendPid = null;
+      let resolveRemoved;
+      const removedPromise = new Promise((resolve) => {
+        resolveRemoved = resolve;
       });
+      const onRemove = (client) => {
+        removedClients.push(client);
+        resolveRemoved(client);
+      };
+      const onRelease = (err, client) => {
+        releasedEvents.push({ err, client });
+      };
+      unlockPool.on('remove', onRemove);
+      unlockPool.on('release', onRelease);
+
       const origConnect = unlockPool.connect.bind(unlockPool);
       const unlockFailPoolWrapper = {
+        __migrationCapabilities: {
+          mode: 'postgres',
+          supportsTransactions: true,
+          supportsAdvisoryLocks: true,
+          supportsSavepoints: true,
+          supportsSupabaseMigrationsSync: true,
+        },
         get totalCount() {
           return unlockPool.totalCount;
         },
         async connect() {
           const realClient = await origConnect();
+          checkedOutRealClient = realClient;
+          const pidRes = await realClient.query(`SELECT pg_backend_pid() AS pid;`);
+          failedBackendPid = Number(pidRes.rows[0].pid);
           return {
+            __migrationCapabilities: {
+              mode: 'postgres',
+              supportsTransactions: true,
+              supportsAdvisoryLocks: true,
+              supportsSavepoints: true,
+              supportsSupabaseMigrationsSync: true,
+            },
             async query(sql, params) {
               if (String(sql).trim().startsWith('SELECT pg_advisory_unlock')) {
                 throw new Error('Injected real-PG unlock failure');
@@ -509,14 +635,79 @@ test('RESTART-05 Real PostgreSQL 17.12 Migration Reconciliation, Lock/Tx Safety,
         },
       };
 
+      let removeTimer;
       try {
         await assert.rejects(
           () => MigrationRunner.runControlPlaneMigrations(unlockFailPoolWrapper),
           /Injected real-PG unlock failure/i
         );
-        assert.equal(removedCount, 1, 'Failed unlock must destroy/remove pooled client instead of returning it idle');
-        assert.equal(unlockPool.totalCount, 0);
+
+        // pg-pool removes the client from _clients synchronously on release(err), then ends the TCP
+        // socket asynchronously and emits 'remove' inside client.end()'s callback.
+        assert.equal(unlockPool.totalCount, 0, 'Failed unlock must immediately remove client from pool totalCount');
+        assert.equal(unlockPool.idleCount, 0, 'Failed unlock must never return the client to the idle pool');
+        assert.equal(unlockPool.waitingCount, 0);
+        assert.equal(releasedEvents.length, 1);
+        assert.ok(releasedEvents[0].err instanceof Error);
+        assert.match(releasedEvents[0].err.message, /Injected real-PG unlock failure/i);
+        assert.equal(releasedEvents[0].client, checkedOutRealClient);
+
+        if (removedClients.length === 0) {
+          await Promise.race([
+            removedPromise,
+            new Promise((resolve) => {
+              removeTimer = setTimeout(resolve, 5000);
+            }),
+          ]);
+        }
+
+        assert.equal(removedClients.length, 1, 'Failed unlock must destroy/remove pooled client instead of returning it idle');
+        assert.equal(removedClients[0], checkedOutRealClient);
+
+        // Wait briefly if PostgreSQL backend process is still tearing down after socket close
+        const procDeadline = Date.now() + 3000;
+        while (Date.now() < procDeadline) {
+          const actRes = await adminPool.query(
+            `SELECT COUNT(*)::int AS cnt FROM pg_stat_activity WHERE pid = $1;`,
+            [failedBackendPid]
+          );
+          if (Number(actRes.rows[0]?.cnt || 0) === 0) break;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+
+        // Subsequent connection must receive a fresh, healthy PostgreSQL session with no stale advisory lock held
+        const healthyClient = await unlockPool.connect();
+        try {
+          const healthRes = await healthyClient.query(`SELECT pg_backend_pid() AS pid, 1 AS ok;`);
+          assert.equal(healthRes.rows[0].ok, 1);
+          const healthyPid = Number(healthRes.rows[0].pid);
+          assert.notEqual(
+            healthyPid,
+            failedBackendPid,
+            'Subsequent pool connection must use a fresh healthy session, never the discarded session'
+          );
+
+          const lockCheck = await healthyClient.query(
+            `SELECT pg_try_advisory_lock($1::bigint) AS acquired;`,
+            [cpLockKey]
+          );
+          assert.equal(
+            lockCheck.rows[0].acquired,
+            true,
+            'Discarded session termination must release the session advisory lock cleanly'
+          );
+          await healthyClient.query(`SELECT pg_advisory_unlock($1::bigint);`, [cpLockKey]);
+        } finally {
+          healthyClient.release();
+        }
+
+        assert.equal(unlockPool.totalCount, 1);
+        assert.equal(unlockPool.idleCount, 1);
+        assert.equal(unlockPool.waitingCount, 0);
       } finally {
+        if (removeTimer) clearTimeout(removeTimer);
+        unlockPool.off('remove', onRemove);
+        unlockPool.off('release', onRelease);
         await closePoolCleanly(unlockPool, 'unlockTestPool');
       }
     });

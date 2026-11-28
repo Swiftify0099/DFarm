@@ -20,19 +20,47 @@ const REQUIRED_SUITES = [
 ];
 
 function parseTapStats(output) {
-  const testsMatch = output.match(/^# tests\s+(\d+)/m);
-  const passMatch = output.match(/^# pass\s+(\d+)/m);
-  const failMatch = output.match(/^# fail\s+(\d+)/m);
-  const skippedMatch = output.match(/^# skipped\s+(\d+)/m);
+  const lastMatch = (regex) => {
+    const matches = [...output.matchAll(regex)];
+    return matches.length > 0 ? matches[matches.length - 1] : null;
+  };
 
+  const testsMatch = lastMatch(/^# tests\s+(\d+)/gm);
+  const passMatch = lastMatch(/^# pass\s+(\d+)/gm);
+  const failMatch = lastMatch(/^# fail\s+(\d+)/gm);
+  const skippedMatch = lastMatch(/^# skipped\s+(\d+)/gm);
+  const cancelledMatch = lastMatch(/^# cancelled\s+(\d+)/gm);
+
+  const hasTapSummary = Boolean(testsMatch && passMatch && failMatch && skippedMatch);
   const tests = testsMatch ? Number(testsMatch[1]) : 0;
   const pass = passMatch ? Number(passMatch[1]) : 0;
-  const fail = failMatch ? Number(failMatch[1]) : 0;
-  const skipped = skippedMatch ? Number(skippedMatch[1]) : 0;
+  const parsedFail = failMatch ? Number(failMatch[1]) : 0;
+  const parsedSkipped = skippedMatch ? Number(skippedMatch[1]) : 0;
+  const cancelled = cancelledMatch ? Number(cancelledMatch[1]) : 0;
+
+  const topLevelNotOk = (output.match(/^not ok\s+\d+\b/gm) || []).length;
+  const nestedNotOk = (output.match(/^\s+not ok\s+\d+\b/gm) || []).length;
+  const tapSkipDirectives = (output.match(/^\s*ok\s+\d+\s+-\s+.*#\s*SKIP\b/gim) || []).length;
+
+  // Fail closed if a suite-level hook or nested TAP failure is not reflected in # fail,
+  // or if Node 20 omits a suite-level # SKIP from the # skipped summary line.
+  const fail = parsedFail > 0 ? parsedFail : topLevelNotOk + nestedNotOk;
+  const skipped = Math.max(parsedSkipped, tapSkipDirectives);
+  const hasSuiteOrNestedNotOk = topLevelNotOk > 0 || nestedNotOk > 0;
+
   const usedPgMemFallback =
     /TEST_ISOLATED_MEM_DB|Using in-memory database fallback|Marked as SKIP \/ NOT RUN/i.test(output);
 
-  return { tests, pass, fail, skipped, usedPgMemFallback };
+  return {
+    hasTapSummary,
+    tests,
+    pass,
+    fail,
+    skipped,
+    cancelled,
+    hasSuiteOrNestedNotOk,
+    usedPgMemFallback,
+  };
 }
 
 function runSuite(suitePath) {
@@ -80,9 +108,13 @@ async function main() {
     const stats = parseTapStats(run.stdout);
     const passed =
       run.exitCode === 0 &&
+      stats.hasTapSummary &&
       stats.tests > 0 &&
+      stats.pass === stats.tests &&
       stats.fail === 0 &&
       stats.skipped === 0 &&
+      stats.cancelled === 0 &&
+      !stats.hasSuiteOrNestedNotOk &&
       !stats.usedPgMemFallback;
 
     results.push({
@@ -119,7 +151,7 @@ async function main() {
     fs.appendFileSync(process.env['GITHUB_STEP_SUMMARY'], `${markdown}\n`, 'utf8');
   }
 
-  if (!results.every((r) => r.passed)) {
+  if (results.length !== REQUIRED_SUITES.length || !results.every((r) => r.passed)) {
     console.error('RESTART-05 PG17 GATE FAILED.');
     process.exit(1);
   }

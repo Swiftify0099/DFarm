@@ -9,11 +9,14 @@ import { fileURLToPath } from 'node:url';
 
 // Ensure strictly isolated offline test environment BEFORE importing backend/database modules
 process.env.NODE_ENV = 'test';
+delete process.env.TEST_POSTGRES_URL;
 process.env.DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
 process.env.CENTRAL_DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
 process.env.DATABASE_PROVISIONER_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
 process.env.DIRECT_URL = 'postgresql://postgres:postgres@127.0.0.1:59999/offline_test';
 process.env.SUPABASE_URL = 'http://127.0.0.1:59998';
+process.env.SUPABASE_ANON_KEY = 'placeholder_supabase_anon_key_for_test';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'placeholder_supabase_service_role_key_for_test';
 process.env.TENANT_POOL_CONNECTION_TIMEOUT_MS = '500';
 
 const {
@@ -625,24 +628,31 @@ describe('RESTART-05.1 MigrationRunner Fail-Closed Safety, Auth Integrity, Track
       ['postgresql://postgres:secret@db.myref.supabase.co:5432/postgres']
     );
 
-    // 8d. Subprocess CLI with --track=control-plane and empty env fails closed BEFORE loading ambiguous defaults
+    // 8d. Subprocess CLI with --track=control-plane and isolated env fails closed BEFORE reading .env or connecting
+    const cleanChildEnv = {
+      PATH: process.env.PATH || '',
+      ...(process.env.SYSTEMROOT ? { SYSTEMROOT: process.env.SYSTEMROOT } : {}),
+      NODE_ENV: 'test',
+    };
     const noTargetSubproc = spawnSync(process.execPath, ['scripts/migrate.js', '--track=control-plane'], {
       cwd: repoRoot,
       env: {
-        PATH: process.env.PATH || '',
-        NODE_ENV: 'test',
+        ...cleanChildEnv,
+        CENTRAL_DATABASE_URL: 'postgresql://postgres:your_password_here@127.0.0.1:59999/offline_test',
       },
       encoding: 'utf8',
     });
+    assert.notEqual(noTargetSubproc.status, 0);
+    assert.match(noTargetSubproc.stderr + noTargetSubproc.stdout, /placeholder connection string/i);
+
     // Regardless of whether .env exists on developer machine, un-scoped invocation fails before reading .env
     const unScopedSubproc = spawnSync(process.execPath, ['scripts/migrate.js'], {
       cwd: repoRoot,
-      env: { PATH: process.env.PATH || '', NODE_ENV: 'test' },
+      env: cleanChildEnv,
       encoding: 'utf8',
     });
     assert.notEqual(unScopedSubproc.status, 0);
     assert.match(unScopedSubproc.stderr + unScopedSubproc.stdout, /Refusing un-scoped migration execution/i);
-    assert.ok(typeof noTargetSubproc.status === 'number');
   });
 
   it('9. TenantDatabaseManager passes physical tenantPool (not wrapPgPool) to MigrationRunner.runTenantMigrations', () => {
